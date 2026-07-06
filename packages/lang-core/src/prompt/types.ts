@@ -37,5 +37,4 @@ export interface PromptConfig {
   devices?: DeviceDefinition[];
   rooms?: RoomDefinition[];
   customInstruction?: string;
-  toolName?: string;
 }

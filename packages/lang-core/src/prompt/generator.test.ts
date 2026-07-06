@@ -67,12 +67,6 @@ describe("generateHomeAgentPrompt", () => {
       expect(prompt).toContain("You are a HomeDSL compiler for a smart home system.");
     });
 
-    it("should contain the tool section with interpret_home_dsl", () => {
-      expect(prompt).toContain("interpret_home_dsl(program)");
-      expect(prompt).toContain("# TOOL");
-      expect(prompt).toContain("You must always call:");
-    });
-
     it("should contain the Home DSL overview", () => {
       expect(prompt).toContain("# HOME DSL OVERVIEW");
       expect(prompt).toContain("HomeDSL is a minimal language to control smart home devices.");
@@ -147,11 +141,6 @@ describe("generateHomeAgentPrompt", () => {
       expect(prompt).toContain("# EXAMPLES");
     });
 
-    it("should contain the tool call format at the end", () => {
-      expect(prompt).toContain("# TOOL CALL FORMAT");
-      expect(prompt).toContain("After generating DSL, immediately call:");
-    });
-
     it("should contain example DSL patterns", () => {
       expect(prompt).toContain("tv[salon].power = on");
       expect(prompt).toContain("tv.power = on");
@@ -222,26 +211,6 @@ describe("generateHomeAgentPrompt", () => {
     });
   });
 
-  // --- Custom tool name ---
-
-  describe("with custom tool name", () => {
-    const prompt = generateHomeAgentPrompt({ toolName: "my_executor" });
-
-    it("should use the custom tool name in the header", () => {
-      expect(prompt).toContain("and send it to the tool `my_executor`.");
-    });
-
-    it("should use the custom tool name in the tool section", () => {
-      expect(prompt).toContain("my_executor(program)");
-      expect(prompt).not.toContain("interpret_home_dsl(program)");
-    });
-
-    it("should use the custom tool name in the tool call format", () => {
-      const toolCallSection = prompt.substring(prompt.indexOf("# TOOL CALL FORMAT"));
-      expect(toolCallSection).toContain("my_executor(program)");
-    });
-  });
-
   // --- Custom instruction ---
 
   describe("with custom instruction", () => {
@@ -253,10 +222,10 @@ describe("generateHomeAgentPrompt", () => {
       expect(prompt).toContain(instruction);
     });
 
-    it("should place custom instructions after the tool call format", () => {
-      const toolCallIndex = prompt.indexOf("# TOOL CALL FORMAT");
+    it("should place custom instructions after the main content", () => {
+      const examplesIndex = prompt.indexOf("# EXAMPLES");
       const customIndex = prompt.indexOf("# CUSTOM INSTRUCTIONS");
-      expect(customIndex).toBeGreaterThan(toolCallIndex);
+      expect(customIndex).toBeGreaterThan(examplesIndex);
     });
   });
 
@@ -426,7 +395,6 @@ describe("section ordering", () => {
   it("should have sections in the expected order", () => {
     sectionOrder([
       "# HomeAgent — HomeDSL Compiler",
-      "# TOOL",
       "# HOME DSL OVERVIEW",
       "# SUPPORTED DEVICES",
       "# ROOMS (logical grouping only)",
@@ -437,7 +405,6 @@ describe("section ordering", () => {
       "# AMBIGUITY HANDLING",
       "# IMPORTANT PRINCIPLE",
       "# EXAMPLES",
-      "# TOOL CALL FORMAT",
     ]);
   });
 });

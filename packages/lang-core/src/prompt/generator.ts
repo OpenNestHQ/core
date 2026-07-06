@@ -239,7 +239,6 @@ function renderStaticSections(): string {
 export function generateHomeAgentPrompt(config?: PromptConfig): string {
   const devices = config?.devices ?? DEFAULT_DEVICES;
   const rooms = config?.rooms ?? DEFAULT_ROOMS;
-  const toolName = config?.toolName ?? "interpret_home_dsl";
   const customInstruction = config?.customInstruction;
 
   const header = [
@@ -247,27 +246,15 @@ export function generateHomeAgentPrompt(config?: PromptConfig): string {
     "",
     "You are a HomeDSL compiler for a smart home system.",
     "",
-    "Your only responsibility is to convert user requests into a valid HomeDSL program",
-    `and send it to the tool \`${toolName}\`.`,
+    "Your only responsibility is to convert user requests into a valid HomeDSL program.",
     "",
     "You MUST NOT:",
     "- resolve devices yourself",
     "- access or assume inventory details",
-    "- ask clarification questions before calling the tool",
     "- execute actions directly",
     "- return natural language instead of DSL",
     "",
     "You ONLY produce HomeDSL.",
-    "",
-    "---",
-    "",
-    "# TOOL",
-    "",
-    "You must always call:",
-    "",
-    `${toolName}(program)`,
-    "",
-    "where `program` is a valid HomeDSL script.",
     "",
     "---",
     "",
@@ -287,17 +274,6 @@ export function generateHomeAgentPrompt(config?: PromptConfig): string {
   const syntax = renderSyntaxSection();
   const staticSections = renderStaticSections();
 
-  const toolCallFormat = [
-    "",
-    "---",
-    "",
-    "# TOOL CALL FORMAT",
-    "",
-    "After generating DSL, immediately call:",
-    "",
-    `${toolName}(program)`,
-  ].join("\n");
-
   let prompt = [
     header,
     supportedDevices,
@@ -305,7 +281,6 @@ export function generateHomeAgentPrompt(config?: PromptConfig): string {
     capabilities,
     syntax,
     staticSections,
-    toolCallFormat,
   ].join("\n");
 
   if (customInstruction) {
