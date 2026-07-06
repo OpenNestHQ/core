@@ -3,9 +3,11 @@ import yaml from "js-yaml";
 import type { InventoryYaml, Device, DeviceEntry } from "./types.js";
 import type { DeviceDriver } from "./drivers/interface.js";
 import { MockDriver } from "./drivers/mock.js";
+import { HADriver } from "./drivers/homeassistant.js";
 
 const driverFactories: Record<string, () => DeviceDriver> = {
   mock: () => new MockDriver(),
+  homeassistant: () => new HADriver(),
 };
 
 export class DeviceRegistry {

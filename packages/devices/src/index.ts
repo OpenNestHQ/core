@@ -9,4 +9,5 @@ export type {
 export type { DeviceDriver } from "./drivers/interface.js";
 
 export { MockDriver } from "./drivers/mock.js";
+export { HADriver } from "./drivers/homeassistant.js";
 export { DeviceRegistry } from "./registry.js";

@@ -10,7 +10,7 @@ export interface DeviceEntry {
   name: string;
   driver: string;
   properties: Record<string, DevicePropertyConfig>;
-  actions: string[];
+  actions: string[] | Record<string, unknown>;
 }
 
 export interface DriverGlobalConfig {
