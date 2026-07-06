@@ -1,0 +1,103 @@
+drivers:
+  mock:
+    latency: 0
+
+rooms:
+  - salon
+  - chambre
+  - cuisine
+  - bureau
+  - salle_de_bain
+  - entrée
+
+devices:
+  - id: tv_salon
+    type: tv
+    room: salon
+    name: Salon TV
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+      source:
+        type: string
+    actions:
+      - play
+      - pause
+
+  - id: tv_chambre
+    type: tv
+    room: chambre
+    name: Chambre TV
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+      source:
+        type: string
+    actions:
+      - play
+      - pause
+
+  - id: light_salon_1
+    type: light
+    room: salon
+    name: Salon Light 1
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      brightness:
+        type: number
+    actions: []
+
+  - id: light_salon_2
+    type: light
+    room: salon
+    name: Salon Light 2
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      brightness:
+        type: number
+    actions: []
+
+  - id: thermostat_salon
+    type: thermostat
+    room: salon
+    name: Salon Thermostat
+    driver: mock
+    properties:
+      temperature:
+        type: number
+    actions: []
+
+  - id: vacuum_salon
+    type: vacuum
+    room: salon
+    name: Salon Vacuum
+    driver: mock
+    properties: {}
+    actions:
+      - start
+      - stop
+
+  - id: speaker_salon
+    type: speaker
+    room: salon
+    name: Salon Speaker
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+    actions:
+      - play
+      - pause
+      - next

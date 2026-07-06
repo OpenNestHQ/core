@@ -1,7 +1,7 @@
 {
-  "name": "@opennest/vm",
+  "name": "@opennest/devices",
   "version": "1.0.0",
-  "description": "OpenNest VM (interpreter) — device resolution, ambiguity handling, state management, and execution engine for HomeDSL",
+  "description": "Device registry, driver interface, and mock implementation for OpenNest Devices",
   "license": "ISC",
   "author": "",
   "type": "module",
@@ -11,10 +11,11 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@opennest/lang-core": "file:../lang-core",
-    "@opennest/devices": "file:../devices"
+    "js-yaml": "^4.1.0"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^26.1.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   }

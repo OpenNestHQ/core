@@ -1,15 +1,24 @@
-import type { Value, PowerValue, NumberValue, StringValue } from "@opennest/lang-core";
+import type { Value } from "@opennest/lang-core";
 import type { Device, StateChange } from "./types.js";
 
-export function executeAssignment(
+export async function executeAssignment(
   device: Device,
   property: string,
   value: Value,
-): StateChange {
-  const oldValue = device.state[property];
+): Promise<StateChange> {
+  const oldValue = await device.driver.getProperty(
+    device.id,
+    property,
+    device.driverConfig,
+  );
   const newValue = extractValue(value);
 
-  device.state[property] = newValue;
+  await device.driver.setProperty(
+    device.id,
+    property,
+    newValue,
+    device.driverConfig,
+  );
 
   return {
     deviceId: device.id,
@@ -19,27 +28,32 @@ export function executeAssignment(
   };
 }
 
-export function executeIncrement(
+export async function executeIncrement(
   device: Device,
   property: string,
   value: Value,
-): StateChange {
-  const currentValue = device.state[property];
+): Promise<StateChange> {
+  const currentValue = await device.driver.getProperty(
+    device.id,
+    property,
+    device.driverConfig,
+  );
   const increment = extractNumericValue(value);
 
+  let newValue: unknown;
   if (typeof currentValue === "number") {
-    const newValue = currentValue + increment;
-    device.state[property] = newValue;
-    return {
-      deviceId: device.id,
-      property,
-      oldValue: currentValue,
-      newValue,
-    };
+    newValue = currentValue + increment;
+  } else {
+    newValue = increment;
   }
 
-  const newValue = increment;
-  device.state[property] = newValue;
+  await device.driver.setProperty(
+    device.id,
+    property,
+    newValue,
+    device.driverConfig,
+  );
+
   return {
     deviceId: device.id,
     property,
@@ -48,11 +62,16 @@ export function executeIncrement(
   };
 }
 
-export function executeQuery(
+export async function executeQuery(
   device: Device,
   property: string,
-): StateChange {
-  const currentValue = device.state[property];
+): Promise<StateChange> {
+  const currentValue = await device.driver.getProperty(
+    device.id,
+    property,
+    device.driverConfig,
+  );
+
   return {
     deviceId: device.id,
     property,
@@ -61,10 +80,16 @@ export function executeQuery(
   };
 }
 
-export function executeAction(
+export async function executeAction(
   device: Device,
   method: string,
-): StateChange {
+): Promise<StateChange> {
+  await device.driver.executeAction(
+    device.id,
+    method,
+    device.driverConfig,
+  );
+
   return {
     deviceId: device.id,
     property: `action:${method}`,

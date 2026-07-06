@@ -1,19 +1,16 @@
 import type {
   Statement,
-  Assignment,
-  Query,
-  Increment,
-  Action,
-  VariableAssignment,
   DeviceRef,
 } from "@opennest/lang-core";
+import type { DeviceDriver } from "@opennest/devices";
 
 export interface Device {
   id: string;
   type: string;
   room: string;
   name: string;
-  state: Record<string, unknown>;
+  driver: DeviceDriver;
+  driverConfig: Record<string, unknown>;
 }
 
 export interface StateChange {

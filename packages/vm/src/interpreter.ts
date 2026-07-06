@@ -9,6 +9,7 @@ import type {
   DeviceRef,
 } from "@opennest/lang-core";
 import type { Device, Session, VMResult, VMError } from "./types.js";
+import type { AmbiguityInfo } from "./types.js";
 import { createSession } from "./state.js";
 import { resolveDevices } from "./resolver.js";
 import { buildAmbiguityInfo } from "./ambiguity.js";
@@ -19,18 +20,18 @@ import {
   executeAction,
 } from "./executor.js";
 
-export function interpretProgram(
+export async function interpretProgram(
   program: Program,
   devices: Device[],
   existingSession?: Session,
-): VMResult {
+): Promise<VMResult> {
   const session = existingSession ?? createSession();
   const errors: VMError[] = [];
   let awaiting = false;
-  let ambiguityInfo = null;
+  let ambiguityInfo: AmbiguityInfo | null = null;
 
   for (const statement of program.statements) {
-    const result = interpretStatement(statement, devices, session);
+    const result = await interpretStatement(statement, devices, session);
 
     if (result.kind === "waiting") {
       awaiting = true;
@@ -74,14 +75,14 @@ export function interpretProgram(
 
 type InterpretResult =
   | { kind: "success" }
-  | { kind: "waiting"; ambiguity: ReturnType<typeof buildAmbiguityInfo> }
+  | { kind: "waiting"; ambiguity: AmbiguityInfo }
   | { kind: "error"; errors: VMError[] };
 
-function interpretStatement(
+async function interpretStatement(
   statement: Statement,
   devices: Device[],
   session: Session,
-): InterpretResult {
+): Promise<InterpretResult> {
   switch (statement.kind) {
     case "assignment":
       return interpretAssignment(statement, devices, session);
@@ -96,11 +97,11 @@ function interpretStatement(
   }
 }
 
-function interpretAssignment(
+async function interpretAssignment(
   stmt: Assignment,
   devices: Device[],
   session: Session,
-): InterpretResult {
+): Promise<InterpretResult> {
   const resolutionResult = resolveDevices(stmt.path, devices, session);
 
   if (resolutionResult.ambiguous) {
@@ -123,8 +124,10 @@ function interpretAssignment(
   }
 
   const property = lastPropertyName(stmt.path);
-  const changes = resolutionResult.devices.map((device) =>
-    executeAssignment(device, property, stmt.value),
+  const changes = await Promise.all(
+    resolutionResult.devices.map((device) =>
+      executeAssignment(device, property, stmt.value),
+    ),
   );
 
   session.history.push({
@@ -140,11 +143,11 @@ function interpretAssignment(
   return { kind: "success" };
 }
 
-function interpretQuery(
+async function interpretQuery(
   stmt: Query,
   devices: Device[],
   session: Session,
-): InterpretResult {
+): Promise<InterpretResult> {
   const resolutionResult = resolveDevices(stmt.path, devices, session);
 
   if (resolutionResult.ambiguous) {
@@ -167,8 +170,10 @@ function interpretQuery(
   }
 
   const property = lastPropertyName(stmt.path);
-  const changes = resolutionResult.devices.map((device) =>
-    executeQuery(device, property),
+  const changes = await Promise.all(
+    resolutionResult.devices.map((device) =>
+      executeQuery(device, property),
+    ),
   );
 
   session.history.push({
@@ -184,11 +189,11 @@ function interpretQuery(
   return { kind: "success" };
 }
 
-function interpretIncrement(
+async function interpretIncrement(
   stmt: Increment,
   devices: Device[],
   session: Session,
-): InterpretResult {
+): Promise<InterpretResult> {
   const resolutionResult = resolveDevices(stmt.path, devices, session);
 
   if (resolutionResult.ambiguous) {
@@ -211,8 +216,10 @@ function interpretIncrement(
   }
 
   const property = lastPropertyName(stmt.path);
-  const changes = resolutionResult.devices.map((device) =>
-    executeIncrement(device, property, stmt.value),
+  const changes = await Promise.all(
+    resolutionResult.devices.map((device) =>
+      executeIncrement(device, property, stmt.value),
+    ),
   );
 
   session.history.push({
@@ -228,11 +235,11 @@ function interpretIncrement(
   return { kind: "success" };
 }
 
-function interpretAction(
+async function interpretAction(
   stmt: Action,
   devices: Device[],
   session: Session,
-): InterpretResult {
+): Promise<InterpretResult> {
   const resolutionResult = resolveDevices(stmt.path, devices, session);
 
   if (resolutionResult.ambiguous) {
@@ -255,8 +262,10 @@ function interpretAction(
   }
 
   const method = lastPropertyName(stmt.path);
-  const changes = resolutionResult.devices.map((device) =>
-    executeAction(device, method),
+  const changes = await Promise.all(
+    resolutionResult.devices.map((device) =>
+      executeAction(device, method),
+    ),
   );
 
   session.history.push({

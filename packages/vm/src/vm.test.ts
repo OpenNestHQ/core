@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseHomeDSL } from "@opennest/lang-core";
+import { MockDriver } from "@opennest/devices";
+import type { DeviceDriver } from "@opennest/devices";
 import {
   interpret_home_dsl,
   createSession,
@@ -14,56 +16,64 @@ import type {
   Device,
   VMContext,
   Session,
-  Assignment,
-  Query,
-  Increment,
-  Action,
-  VariableAssignment,
   Segment,
   PowerValue,
 } from "./index.js";
 
-function makeDevice(
+function makeDriver(): MockDriver {
+  return new MockDriver();
+}
+
+async function makeDevice(
   id: string,
   type: string,
   room: string,
   name: string,
+  driver: MockDriver,
   initialState: Record<string, unknown> = {},
-): Device {
-  return { id, type, room, name, state: { ...initialState } };
+): Promise<Device> {
+  await driver.init({});
+  driver.seed(id, initialState);
+  return {
+    id,
+    type,
+    room,
+    name,
+    driver,
+    driverConfig: {},
+  };
 }
 
-function devices(): Device[] {
+interface DeviceSpec {
+  id: string;
+  type: string;
+  room: string;
+  name: string;
+  initialState: Record<string, unknown>;
+}
+
+async function devices(specs?: DeviceSpec[]): Promise<Device[]> {
+  const driver = makeDriver();
+  const list = specs ?? fixtureSpecs();
+  return Promise.all(
+    list.map((s) => makeDevice(s.id, s.type, s.room, s.name, driver, s.initialState)),
+  );
+}
+
+function fixtureSpecs(): DeviceSpec[] {
   return [
-    makeDevice("tv_salon", "tv", "salon", "Salon TV", {
-      power: false,
-      volume: 15,
-    }),
-    makeDevice("tv_chambre", "tv", "chambre", "Chambre TV", {
-      power: false,
-      volume: 10,
-    }),
-    makeDevice("light_salon_1", "light", "salon", "Salon Light 1", {
-      power: false,
-      brightness: 80,
-    }),
-    makeDevice("light_salon_2", "light", "salon", "Salon Light 2", {
-      power: true,
-      brightness: 60,
-    }),
-    makeDevice("thermostat_salon", "thermostat", "salon", "Salon Thermostat", {
-      temperature: 21,
-    }),
-    makeDevice("vacuum_salon", "vacuum", "salon", "Salon Vacuum", {}),
-    makeDevice("speaker_salon", "speaker", "salon", "Salon Speaker", {
-      power: false,
-      volume: 30,
-    }),
+    { id: "tv_salon", type: "tv", room: "salon", name: "Salon TV", initialState: { power: false, volume: 15 } },
+    { id: "tv_chambre", type: "tv", room: "chambre", name: "Chambre TV", initialState: { power: false, volume: 10 } },
+    { id: "light_salon_1", type: "light", room: "salon", name: "Salon Light 1", initialState: { power: false, brightness: 80 } },
+    { id: "light_salon_2", type: "light", room: "salon", name: "Salon Light 2", initialState: { power: true, brightness: 60 } },
+    { id: "thermostat_salon", type: "thermostat", room: "salon", name: "Salon Thermostat", initialState: { temperature: 21 } },
+    { id: "vacuum_salon", type: "vacuum", room: "salon", name: "Salon Vacuum", initialState: {} },
+    { id: "speaker_salon", type: "speaker", room: "salon", name: "Salon Speaker", initialState: { power: false, volume: 30 } },
   ];
 }
 
-function ctx(session?: Session): VMContext {
-  return { devices: devices(), session };
+async function ctx(session?: Session): Promise<VMContext> {
+  return { devices: await devices(), session };
 }
 
 function parse(code: string) {
@@ -94,11 +104,16 @@ function num(n: number) {
   return { kind: "number" as const, value: n };
 }
 
+async function getProperty(d: Device, prop: string): Promise<unknown> {
+  return d.driver.getProperty(d.id, prop, d.driverConfig);
+}
+
 describe("interpret_home_dsl", () => {
   describe("basic assignments", () => {
-    it("should assign a property on an unambiguous device", () => {
+    it("should assign a property on an unambiguous device", async () => {
       const program = parse("tv[salon].power = on");
-      const result = interpret_home_dsl(program, ctx());
+      const context = await ctx();
+      const result = await interpret_home_dsl(program, context);
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(1);
@@ -107,27 +122,30 @@ describe("interpret_home_dsl", () => {
       expect(exec.resolvedDevices[0]!.id).toBe("tv_salon");
       expect(exec.changes[0]!.property).toBe("power");
       expect(exec.changes[0]!.newValue).toBe(true);
+
+      const value = await getProperty(exec.resolvedDevices[0]!, "power");
+      expect(value).toBe(true);
     });
 
-    it("should assign a numeric value", () => {
+    it("should assign a numeric value", async () => {
       const program = parse("tv[salon].volume = 42");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed[0]!.changes[0]!.newValue).toBe(42);
     });
 
-    it("should assign a string value", () => {
+    it("should assign a string value", async () => {
       const program = parse(`tv[salon].source = "hdmi1"`);
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed[0]!.changes[0]!.newValue).toBe("hdmi1");
     });
 
-    it("should assign to a wildcard room selector (all rooms)", () => {
+    it("should assign to a wildcard room selector (all rooms)", async () => {
       const program = parse("tv[*].power = on");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed[0]!.resolvedDevices).toHaveLength(2);
@@ -138,17 +156,17 @@ describe("interpret_home_dsl", () => {
   });
 
   describe("queries", () => {
-    it("should query a device property", () => {
+    it("should query a device property", async () => {
       const program = parse("thermostat[salon].temperature?");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed[0]!.changes[0]!.newValue).toBe(21);
     });
 
-    it("should query tv power", () => {
+    it("should query tv power", async () => {
       const program = parse("tv[salon].power?");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed[0]!.changes[0]!.newValue).toBe(false);
@@ -156,9 +174,9 @@ describe("interpret_home_dsl", () => {
   });
 
   describe("increments", () => {
-    it("should increment a numeric property", () => {
+    it("should increment a numeric property", async () => {
       const program = parse("tv[salon].volume += 5");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed[0]!.changes[0]!.oldValue).toBe(15);
@@ -167,9 +185,9 @@ describe("interpret_home_dsl", () => {
   });
 
   describe("actions", () => {
-    it("should execute an action on a device", () => {
+    it("should execute an action on a device", async () => {
       const program = parse("vacuum[salon].start()");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       const change = result.executed[0]!.changes[0]!;
@@ -179,9 +197,9 @@ describe("interpret_home_dsl", () => {
   });
 
   describe("variable assignments", () => {
-    it("should store a variable reference", () => {
+    it("should store a variable reference", async () => {
       const program = parse("salon_tv = tv[salon]");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.session.variables["salon_tv"]).toEqual({
@@ -191,9 +209,9 @@ describe("interpret_home_dsl", () => {
       });
     });
 
-    it("should use a variable to reference a device", () => {
+    it("should use a variable to reference a device", async () => {
       const program = parse(`salon_tv = tv[salon]\nsalon_tv.power = on`);
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(2);
@@ -202,9 +220,9 @@ describe("interpret_home_dsl", () => {
       expect(assignmentResult.changes[0]!.newValue).toBe(true);
     });
 
-    it("should store a collection variable", () => {
+    it("should store a collection variable", async () => {
       const program = parse("lights = @all(light[salon])");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.session.variables["lights"]).toEqual({
@@ -216,9 +234,9 @@ describe("interpret_home_dsl", () => {
   });
 
   describe("context reference (it)", () => {
-    it("should use 'it' to reference the last resolved device", () => {
+    it("should use 'it' to reference the last resolved device", async () => {
       const program = parse(`tv[salon].volume = 20\nit.power = on`);
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(2);
@@ -229,21 +247,22 @@ describe("interpret_home_dsl", () => {
       expect(secondExecution.changes[0]!.newValue).toBe(true);
     });
 
-    it("should error when 'it' is used before any resolution", () => {
+    it("should error when 'it' is used before any resolution", async () => {
       const program = parse("it.power = on");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("error");
     });
 
-    it("should carry 'it' across sessions", () => {
+    it("should carry 'it' across sessions", async () => {
       const program1 = parse("tv[salon].volume = 30");
-      const result1 = interpret_home_dsl(program1, ctx());
+      const context1 = await ctx();
+      const result1 = await interpret_home_dsl(program1, context1);
 
       expect(result1.session.it?.id).toBe("tv_salon");
 
       const program2 = parse("it.power = on");
-      const result2 = interpret_home_dsl(program2, ctx(result1.session));
+      const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
       expect(result2.executed[0]!.resolvedDevices[0]!.id).toBe("tv_salon");
@@ -251,9 +270,9 @@ describe("interpret_home_dsl", () => {
   });
 
   describe("ambiguity handling", () => {
-    it("should return waiting state when device type is ambiguous (no room)", () => {
+    it("should return waiting state when device type is ambiguous (no room)", async () => {
       const program = parse("tv.power = on");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("waiting");
       expect(result.awaiting).not.toBeNull();
@@ -265,52 +284,52 @@ describe("interpret_home_dsl", () => {
       expect(choiceLabels).toContain("Chambre TV");
     });
 
-    it("should not be ambiguous when room is specified", () => {
+    it("should not be ambiguous when room is specified", async () => {
       const program = parse("tv[salon].power = on");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
     });
 
-    it("should not be ambiguous for a single device type across rooms", () => {
+    it("should not be ambiguous for a single device type across rooms", async () => {
       const program = parse("thermostat.power = on");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).not.toBe("waiting");
     });
 
-    it("should return waiting state with DSL choices", () => {
+    it("should return waiting state with DSL choices", async () => {
       const program = parse("tv.power = on");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.awaiting!.choices[0]!.dsl).toContain("tv[");
     });
   });
 
   describe("multi-line programs", () => {
-    it("should execute multiple statements in order", () => {
+    it("should execute multiple statements in order", async () => {
       const program = parse(
         `tv[salon].power = on\ntv[salon].volume = 25\nlight[salon].brightness = 50`,
       );
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(3);
     });
 
-    it("should stop at the first ambiguous statement", () => {
+    it("should stop at the first ambiguous statement", async () => {
       const program = parse(`tv[salon].power = on\ntv.power = on\nlight[salon].power = on`);
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("waiting");
       expect(result.executed).toHaveLength(1);
     });
 
-    it("should execute all statements with explicit room selectors", () => {
+    it("should execute all statements with explicit room selectors", async () => {
       const program = parse(
         `tv[salon].power = on\nspeaker[salon].volume = 20`,
       );
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(2);
@@ -318,21 +337,22 @@ describe("interpret_home_dsl", () => {
   });
 
   describe("session persistence", () => {
-    it("should track execution history", () => {
+    it("should track execution history", async () => {
       const program = parse(
         `tv[salon].power = on\nlight[salon].brightness = 40`,
       );
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.session.history).toHaveLength(2);
     });
 
-    it("should persist variables across calls", () => {
+    it("should persist variables across calls", async () => {
       const program1 = parse("salon_tv = tv[salon]");
-      const result1 = interpret_home_dsl(program1, ctx());
+      const context1 = await ctx();
+      const result1 = await interpret_home_dsl(program1, context1);
 
       const program2 = parse("salon_tv.volume = 50");
-      const result2 = interpret_home_dsl(program2, ctx(result1.session));
+      const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
       expect(result2.session.variables["salon_tv"]).toBeDefined();
@@ -340,53 +360,75 @@ describe("interpret_home_dsl", () => {
       expect(lastExec.resolvedDevices[0]!.id).toBe("tv_salon");
     });
 
-    it("should accumulate history across calls", () => {
+    it("should accumulate history across calls", async () => {
       const program1 = parse("tv[salon].power = on");
-      const result1 = interpret_home_dsl(program1, ctx());
+      const context1 = await ctx();
+      const result1 = await interpret_home_dsl(program1, context1);
 
       const program2 = parse("light[salon].power = off");
-      const result2 = interpret_home_dsl(program2, ctx(result1.session));
+      const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
 
       expect(result2.session.history).toHaveLength(2);
     });
   });
 
   describe("error cases", () => {
-    it("should error when no devices match the type", () => {
+    it("should error when no devices match the type", async () => {
       const program = parse("camera[salon].snapshot()");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("error");
       expect(result.errors[0]!.message).toContain("No devices found");
     });
 
-    it("should error when no devices match the room", () => {
+    it("should error when no devices match the room", async () => {
       const program = parse("tv[cuisine].power = on");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("error");
     });
   });
 
   describe("executor module", () => {
-    it("should mutate device state on assignment", () => {
-      const device = makeDevice("test", "light", "test", "Test", { power: false });
-      const change = executeAssignment(device, "power", on());
+    it("should mutate device state on assignment", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("test_light", { power: false });
+      const device: Device = {
+        id: "test_light", type: "light", room: "test", name: "Test",
+        driver, driverConfig: {},
+      };
+
+      const change = await executeAssignment(device, "power", on());
 
       expect(change.newValue).toBe(true);
-      expect(device.state.power).toBe(true);
+      const storedValue = await driver.getProperty("test_light", "power", {});
+      expect(storedValue).toBe(true);
     });
 
-    it("should read device state on query", () => {
-      const device = makeDevice("test", "light", "test", "Test", { brightness: 50 });
-      const change = executeQuery(device, "brightness");
+    it("should read device state on query", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("test_light", { brightness: 50 });
+      const device: Device = {
+        id: "test_light", type: "light", room: "test", name: "Test",
+        driver, driverConfig: {},
+      };
+
+      const change = await executeQuery(device, "brightness");
 
       expect(change.newValue).toBe(50);
     });
 
-    it("should record action execution", () => {
-      const device = makeDevice("test", "vacuum", "test", "Test", {});
-      const change = executeAction(device, "start");
+    it("should record action execution", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      const device: Device = {
+        id: "test_vacuum", type: "vacuum", room: "test", name: "Test",
+        driver, driverConfig: {},
+      };
+
+      const change = await executeAction(device, "start");
 
       expect(change.property).toBe("action:start");
       expect(change.newValue).toBe("called");
@@ -394,10 +436,11 @@ describe("interpret_home_dsl", () => {
   });
 
   describe("resolver module", () => {
-    it("should match device by type and room", () => {
+    it("should match device by type and room", async () => {
+      const devs = await devices();
       const result = resolveDevices(
         [seg("tv", "salon")],
-        devices(),
+        devs,
         createSession(),
       );
 
@@ -406,10 +449,11 @@ describe("interpret_home_dsl", () => {
       expect(result.ambiguous).toBe(false);
     });
 
-    it("should match all devices of a type with wildcard", () => {
+    it("should match all devices of a type with wildcard", async () => {
+      const devs = await devices();
       const result = resolveDevices(
         [seg("light", "*")],
-        devices(),
+        devs,
         createSession(),
       );
 
@@ -417,10 +461,11 @@ describe("interpret_home_dsl", () => {
       expect(result.ambiguous).toBe(false);
     });
 
-    it("should detect ambiguity when no room selector on multi-instance type", () => {
+    it("should detect ambiguity when no room selector on multi-instance type", async () => {
+      const devs = await devices();
       const result = resolveDevices(
         [seg("tv")],
-        devices(),
+        devs,
         createSession(),
       );
 
@@ -430,10 +475,11 @@ describe("interpret_home_dsl", () => {
       expect(result.choices[1]!.dsl).toBe("tv[chambre]");
     });
 
-    it("should not be ambiguous for a type with a single instance", () => {
+    it("should not be ambiguous for a type with a single instance", async () => {
+      const devs = await devices();
       const result = resolveDevices(
         [seg("thermostat")],
-        devices(),
+        devs,
         createSession(),
       );
 
@@ -441,7 +487,8 @@ describe("interpret_home_dsl", () => {
       expect(result.devices).toHaveLength(1);
     });
 
-    it("should resolve variables", () => {
+    it("should resolve variables", async () => {
+      const devs = await devices();
       const session = createSession();
       session.variables["salon_tv"] = {
         kind: "device_ref",
@@ -451,7 +498,7 @@ describe("interpret_home_dsl", () => {
 
       const result = resolveDevices(
         [seg("salon_tv"), seg("power")],
-        devices(),
+        devs,
         session,
       );
 
@@ -459,13 +506,14 @@ describe("interpret_home_dsl", () => {
       expect(result.devices[0]!.id).toBe("tv_salon");
     });
 
-    it("should resolve 'it' context reference", () => {
+    it("should resolve 'it' context reference", async () => {
+      const devs = await devices();
       const session = createSession();
-      session.it = devices().find((d) => d.id === "tv_salon")!;
+      session.it = devs.find((d) => d.id === "tv_salon")!;
 
       const result = resolveDevices(
         [seg("it"), seg("power")],
-        devices(),
+        devs,
         session,
       );
 
@@ -473,10 +521,11 @@ describe("interpret_home_dsl", () => {
       expect(result.devices[0]!.id).toBe("tv_salon");
     });
 
-    it("should return empty when 'it' is not set", () => {
+    it("should return empty when 'it' is not set", async () => {
+      const devs = await devices();
       const result = resolveDevices(
         [seg("it"), seg("power")],
-        devices(),
+        devs,
         createSession(),
       );
 
@@ -485,7 +534,8 @@ describe("interpret_home_dsl", () => {
   });
 
   describe("collection expansion", () => {
-    it("should expand @all for a collection", () => {
+    it("should expand @all for a collection", async () => {
+      const devs = await devices();
       const result = expandCollection(
         {
           kind: "collection",
@@ -495,14 +545,15 @@ describe("interpret_home_dsl", () => {
             roomSelector: { kind: "room", name: "salon" },
           },
         },
-        devices(),
+        devs,
         createSession(),
       );
 
       expect(result.devices).toHaveLength(2);
     });
 
-    it("should expand @first for a collection", () => {
+    it("should expand @first for a collection", async () => {
+      const devs = await devices();
       const result = expandCollection(
         {
           kind: "collection",
@@ -512,7 +563,7 @@ describe("interpret_home_dsl", () => {
             roomSelector: { kind: "room", name: "salon" },
           },
         },
-        devices(),
+        devs,
         createSession(),
       );
 
@@ -533,70 +584,77 @@ describe("interpret_home_dsl", () => {
   });
 
   describe("README example flows", () => {
-    it("should turn on all lights in the living room", () => {
+    it("should turn on all lights in the living room", async () => {
       const program = parse(`lights = @all(light[salon])\nlights.power = on`);
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(2);
 
       const assignExec = result.executed[1]!;
       expect(assignExec.resolvedDevices).toHaveLength(2);
-      assignExec.resolvedDevices.forEach((d) => {
-        expect(d.state.power).toBe(true);
-      });
+
+      for (const d of assignExec.resolvedDevices) {
+        const pwr = await getProperty(d, "power");
+        expect(pwr).toBe(true);
+      }
     });
 
-    it("should assign tv power and volume in sequence", () => {
+    it("should assign tv power and volume in sequence", async () => {
       const program = parse(`tv[salon].power = on\nit.volume = 20`);
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(2);
 
       const tv = result.executed[0]!.resolvedDevices[0]!;
-      expect(tv.state.power).toBe(true);
-      expect(tv.state.volume).toBe(20);
+      const pwr = await getProperty(tv, "power");
+      const vol = await getProperty(tv, "volume");
+      expect(pwr).toBe(true);
+      expect(vol).toBe(20);
     });
 
-    it("should handle 'turn off all lights'", () => {
+    it("should handle 'turn off all lights'", async () => {
       const program = parse(`light[*].power = off`);
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(1);
       expect(result.executed[0]!.resolvedDevices).toHaveLength(2);
 
-      result.executed[0]!.resolvedDevices.forEach((d) => {
-        expect(d.state.power).toBe(false);
-      });
+      for (const d of result.executed[0]!.resolvedDevices) {
+        const pwr = await getProperty(d, "power");
+        expect(pwr).toBe(false);
+      }
     });
   });
 
   describe("edge cases", () => {
-    it("should handle an empty program", () => {
+    it("should handle an empty program", async () => {
       const program = parse("");
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(0);
     });
 
-    it("should handle multiple assignments to the same device", () => {
+    it("should handle multiple assignments to the same device", async () => {
       const program = parse(
         `tv[salon].power = on\ntv[salon].volume = 50\ntv[salon].power = off`,
       );
-      const result = interpret_home_dsl(program, ctx());
+      const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(3);
 
       const tv = result.executed[0]!.resolvedDevices[0]!;
-      expect(tv.state.power).toBe(false);
-      expect(tv.state.volume).toBe(50);
+      const pwr = await getProperty(tv, "power");
+      const vol = await getProperty(tv, "volume");
+      expect(pwr).toBe(false);
+      expect(vol).toBe(50);
     });
 
-    it("should preserve initial session state when passed", () => {
+    it("should preserve initial session state when passed", async () => {
       const session = createSession();
       session.variables["foo"] = {
         kind: "device_ref",
@@ -605,7 +663,7 @@ describe("interpret_home_dsl", () => {
       };
 
       const program = parse("light[salon].power = on");
-      const result = interpret_home_dsl(program, ctx(session));
+      const result = await interpret_home_dsl(program, await ctx(session));
 
       expect(result.session.variables["foo"]).toBeDefined();
       expect(result.session.variables["foo"]!.deviceType).toBe("tv");

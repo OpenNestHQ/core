@@ -2,10 +2,10 @@ import type { Program } from "@opennest/lang-core";
 import type { VMResult, VMContext } from "./types.js";
 import { interpretProgram } from "./interpreter.js";
 
-export function interpret_home_dsl(
+export async function interpret_home_dsl(
   program: Program,
   context: VMContext,
-): VMResult {
+): Promise<VMResult> {
   return interpretProgram(program, context.devices, context.session);
 }
 
