@@ -1,0 +1,20 @@
+{
+  "name": "@opennest/vm",
+  "version": "1.0.0",
+  "description": "OpenNest VM (interpreter) — device resolution, ambiguity handling, state management, and execution engine for HomeDSL",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@opennest/lang-core": "file:../lang-core"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}
