@@ -24,6 +24,7 @@ export interface ExecutedStatement {
   statement: Statement;
   resolvedDevices: Device[];
   changes: StateChange[];
+  filter?: ResolutionFilter;
 }
 
 export interface Session {
@@ -62,10 +63,29 @@ export interface VMContext {
   session?: Session;
 }
 
+export interface ResolutionIntent {
+  kind: "property" | "action";
+  name: string;
+}
+
+export interface ExcludedDevice {
+  deviceId: string;
+  deviceName: string;
+  reason: "property_not_supported" | "action_not_supported";
+  details: string;
+}
+
+export interface ResolutionFilter {
+  candidates: number;
+  matched: number;
+  excluded: ExcludedDevice[];
+}
+
 export interface ResolutionResult {
   devices: Device[];
   ambiguous: boolean;
   choices: AmbiguityChoice[];
+  filter?: ResolutionFilter;
 }
 
 export interface ResolvedStatement {

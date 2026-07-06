@@ -18,6 +18,8 @@ import type {
   Session,
   Segment,
   PowerValue,
+  ResolutionFilter,
+  ExcludedDevice,
 } from "./index.js";
 
 function makeDriver(): MockDriver {
@@ -667,6 +669,177 @@ describe("interpret_home_dsl", () => {
 
       expect(result.session.variables["foo"]).toBeDefined();
       expect(result.session.variables["foo"]!.deviceType).toBe("tv");
+    });
+  });
+
+  describe("intent filtering", () => {
+    async function filteredDevices(): Promise<Device[]> {
+      const driver = makeDriver();
+      await driver.init({});
+
+      const tv_mute: Device = {
+        id: "tv_mute",
+        type: "tv",
+        room: "salon",
+        name: "Mute TV",
+        driver,
+        driverConfig: {
+          properties: { power: { type: "boolean" }, volume: { type: "number" }, mute: { type: "boolean" } },
+          actions: ["play", "pause"],
+        },
+      };
+
+      const tv_basic: Device = {
+        id: "tv_basic",
+        type: "tv",
+        room: "chambre",
+        name: "Basic TV",
+        driver,
+        driverConfig: {
+          properties: { power: { type: "boolean" }, volume: { type: "number" } },
+          actions: ["play", "pause"],
+        },
+      };
+
+      return [tv_mute, tv_basic];
+    }
+
+    async function filteredCtx(session?: Session): Promise<VMContext> {
+      return { devices: await filteredDevices(), session };
+    }
+
+    it("should resolve to the only device supporting the property (no ambiguity)", async () => {
+      const program = parse("tv.mute = on");
+      const result = await interpret_home_dsl(program, await filteredCtx());
+
+      expect(result.status).toBe("success");
+      expect(result.executed).toHaveLength(1);
+      expect(result.executed[0]!.resolvedDevices).toHaveLength(1);
+      expect(result.executed[0]!.resolvedDevices[0]!.id).toBe("tv_mute");
+    });
+
+    it("should still be ambiguous when all devices support the property", async () => {
+      const program = parse("tv.power = on");
+      const result = await interpret_home_dsl(program, await filteredCtx());
+
+      expect(result.status).toBe("waiting");
+      expect(result.awaiting!.choices).toHaveLength(2);
+    });
+
+    it("should resolve to the only device supporting the action (no ambiguity)", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+
+      const speaker_next: Device = {
+        id: "speaker_next",
+        type: "speaker",
+        room: "salon",
+        name: "Salon Speaker",
+        driver,
+        driverConfig: {
+          properties: {},
+          actions: ["play", "pause", "next"],
+        },
+      };
+
+      const speaker_basic: Device = {
+        id: "speaker_basic",
+        type: "speaker",
+        room: "chambre",
+        name: "Chambre Speaker",
+        driver,
+        driverConfig: {
+          properties: {},
+          actions: ["play", "pause"],
+        },
+      };
+
+      const ctx: VMContext = { devices: [speaker_next, speaker_basic] };
+      const program = parse("speaker.next()");
+      const result = await interpret_home_dsl(program, ctx);
+
+      expect(result.status).toBe("success");
+      expect(result.executed[0]!.resolvedDevices).toHaveLength(1);
+      expect(result.executed[0]!.resolvedDevices[0]!.id).toBe("speaker_next");
+    });
+
+    it("should include filter feedback in executed statement", async () => {
+      const program = parse("tv.mute = on");
+      const result = await interpret_home_dsl(program, await filteredCtx());
+
+      expect(result.status).toBe("success");
+      const stmt = result.executed[0]!;
+      expect(stmt.filter).toBeDefined();
+      expect(stmt.filter!.candidates).toBe(2);
+      expect(stmt.filter!.matched).toBe(1);
+      expect(stmt.filter!.excluded).toHaveLength(1);
+
+      const excluded: ExcludedDevice = stmt.filter!.excluded[0]!;
+      expect(excluded.deviceId).toBe("tv_basic");
+      expect(excluded.deviceName).toBe("Basic TV");
+      expect(excluded.reason).toBe("property_not_supported");
+      expect(excluded.details).toContain("does not support property 'mute'");
+    });
+
+    it("should include filter feedback when all candidates match", async () => {
+      const program = parse("tv.power = on");
+      const result = await interpret_home_dsl(program, await filteredCtx());
+
+      expect(result.status).toBe("waiting");
+    });
+
+    it("should include filter feedback on error when no device supports the intent", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+
+      const light: Device = {
+        id: "light_1",
+        type: "light",
+        room: "salon",
+        name: "Salon Light",
+        driver,
+        driverConfig: {
+          properties: { power: { type: "boolean" }, brightness: { type: "number" } },
+          actions: [],
+        },
+      };
+
+      const ctx: VMContext = { devices: [light] };
+      const program = parse("light.volume = 50");
+      const result = await interpret_home_dsl(program, ctx);
+
+      expect(result.status).toBe("error");
+      expect(result.errors[0]!.message).toContain("No devices found");
+    });
+
+    it("should pass devices through when no capabilities are declared in driverConfig", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+
+      const tv1: Device = {
+        id: "tv_1", type: "tv", room: "salon", name: "Salon TV",
+        driver, driverConfig: {},
+      };
+      const tv2: Device = {
+        id: "tv_2", type: "tv", room: "chambre", name: "Chambre TV",
+        driver, driverConfig: {},
+      };
+
+      const ctx: VMContext = { devices: [tv1, tv2] };
+      const program = parse("tv.power = on");
+      const result = await interpret_home_dsl(program, ctx);
+
+      expect(result.status).toBe("waiting");
+      expect(result.awaiting!.choices).toHaveLength(2);
+    });
+
+    it("should not set filter on executed statement when no intent is used", async () => {
+      const program = parse("salon_tv = tv[salon]");
+      const result = await interpret_home_dsl(program, await filteredCtx());
+
+      expect(result.status).toBe("success");
+      const stmt = result.executed[0]!;
+      expect(stmt.filter).toBeUndefined();
     });
   });
 });

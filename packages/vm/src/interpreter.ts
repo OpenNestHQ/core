@@ -9,7 +9,7 @@ import type {
   DeviceRef,
 } from "@opennest/lang-core";
 import type { Device, Session, VMResult, VMError } from "./types.js";
-import type { AmbiguityInfo } from "./types.js";
+import type { AmbiguityInfo, ResolutionIntent } from "./types.js";
 import { createSession } from "./state.js";
 import { resolveDevices } from "./resolver.js";
 import { buildAmbiguityInfo } from "./ambiguity.js";
@@ -102,7 +102,9 @@ async function interpretAssignment(
   devices: Device[],
   session: Session,
 ): Promise<InterpretResult> {
-  const resolutionResult = resolveDevices(stmt.path, devices, session);
+  const property = lastPropertyName(stmt.path);
+  const intent: ResolutionIntent = { kind: "property", name: property };
+  const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
 
   if (resolutionResult.ambiguous) {
     return {
@@ -123,7 +125,6 @@ async function interpretAssignment(
     };
   }
 
-  const property = lastPropertyName(stmt.path);
   const changes = await Promise.all(
     resolutionResult.devices.map((device) =>
       executeAssignment(device, property, stmt.value),
@@ -134,6 +135,7 @@ async function interpretAssignment(
     statement: stmt,
     resolvedDevices: resolutionResult.devices,
     changes,
+    ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
   });
 
   if (resolutionResult.devices[0]) {
@@ -148,7 +150,9 @@ async function interpretQuery(
   devices: Device[],
   session: Session,
 ): Promise<InterpretResult> {
-  const resolutionResult = resolveDevices(stmt.path, devices, session);
+  const property = lastPropertyName(stmt.path);
+  const intent: ResolutionIntent = { kind: "property", name: property };
+  const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
 
   if (resolutionResult.ambiguous) {
     return {
@@ -169,7 +173,6 @@ async function interpretQuery(
     };
   }
 
-  const property = lastPropertyName(stmt.path);
   const changes = await Promise.all(
     resolutionResult.devices.map((device) =>
       executeQuery(device, property),
@@ -180,6 +183,7 @@ async function interpretQuery(
     statement: stmt,
     resolvedDevices: resolutionResult.devices,
     changes,
+    ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
   });
 
   if (resolutionResult.devices[0]) {
@@ -194,7 +198,9 @@ async function interpretIncrement(
   devices: Device[],
   session: Session,
 ): Promise<InterpretResult> {
-  const resolutionResult = resolveDevices(stmt.path, devices, session);
+  const property = lastPropertyName(stmt.path);
+  const intent: ResolutionIntent = { kind: "property", name: property };
+  const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
 
   if (resolutionResult.ambiguous) {
     return {
@@ -215,7 +221,6 @@ async function interpretIncrement(
     };
   }
 
-  const property = lastPropertyName(stmt.path);
   const changes = await Promise.all(
     resolutionResult.devices.map((device) =>
       executeIncrement(device, property, stmt.value),
@@ -226,6 +231,7 @@ async function interpretIncrement(
     statement: stmt,
     resolvedDevices: resolutionResult.devices,
     changes,
+    ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
   });
 
   if (resolutionResult.devices[0]) {
@@ -240,7 +246,9 @@ async function interpretAction(
   devices: Device[],
   session: Session,
 ): Promise<InterpretResult> {
-  const resolutionResult = resolveDevices(stmt.path, devices, session);
+  const method = lastPropertyName(stmt.path);
+  const intent: ResolutionIntent = { kind: "action", name: method };
+  const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
 
   if (resolutionResult.ambiguous) {
     return {
@@ -261,7 +269,6 @@ async function interpretAction(
     };
   }
 
-  const method = lastPropertyName(stmt.path);
   const changes = await Promise.all(
     resolutionResult.devices.map((device) =>
       executeAction(device, method),
@@ -272,6 +279,7 @@ async function interpretAction(
     statement: stmt,
     resolvedDevices: resolutionResult.devices,
     changes,
+    ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
   });
 
   if (resolutionResult.devices[0]) {

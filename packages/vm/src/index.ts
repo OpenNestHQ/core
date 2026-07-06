@@ -31,6 +31,9 @@ export type {
   VMStatus,
   VMResult,
   VMContext,
+  ResolutionIntent,
+  ResolutionFilter,
+  ExcludedDevice,
   ResolutionResult,
   ResolvedStatement,
 } from "./types.js";
