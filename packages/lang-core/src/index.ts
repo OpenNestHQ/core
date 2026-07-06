@@ -13,3 +13,31 @@ export type {
   CapabilityValueType,
   CapabilityParameter,
 } from "./prompt/index.js";
+
+export { parseHomeDSL, ParseError } from "./parser/index.js";
+export type {
+  ParseErrorInfo,
+  ParseResult,
+} from "./parser/index.js";
+export type {
+  RoomSelector,
+  RoomByName,
+  RoomWildcard,
+  Segment,
+  Value,
+  NumberValue,
+  PowerValue,
+  StringValue,
+  IdentifierValue,
+  Expr,
+  DeviceRef,
+  CollectionModifier,
+  CollectionRef,
+  Statement,
+  Assignment,
+  Query,
+  Increment,
+  Action,
+  VariableAssignment,
+  Program,
+} from "./ast/index.js";
