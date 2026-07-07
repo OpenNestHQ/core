@@ -45,6 +45,8 @@ export async function interpretProgram(
       errors.push(...result.errors);
     }
 
+    session.resolvedIds = {};
+
     session.cursor = i + 1;
   }
 
@@ -303,6 +305,7 @@ function interpretVariableAssignment(
 ): InterpretResult {
   if (stmt.value.kind === "device_ref") {
     session.variables[stmt.name] = stmt.value;
+    delete session.variableResolvedIds[stmt.name];
     session.history.push({
       statement: stmt,
       resolvedDevices: [],
@@ -319,6 +322,7 @@ function interpretVariableAssignment(
     };
     session.variables[stmt.name] = deviceRef;
     session.variableModifiers[stmt.name] = stmt.value.modifier;
+    delete session.variableResolvedIds[stmt.name];
     session.history.push({
       statement: stmt,
       resolvedDevices: [],

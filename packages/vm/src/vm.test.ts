@@ -390,7 +390,7 @@ describe("interpret_home_dsl", () => {
       expect(thirdExec.resolvedDevices[0]!.type).toBe("speaker");
     });
 
-    it("should persist resolvedIds across calls", async () => {
+    it("should be ambiguous on direct references even after previous resolution", async () => {
       const context = await ctx();
       const program1 = parse("tv.power = on");
       const result1 = await interpret_home_dsl(program1, context);
@@ -402,10 +402,7 @@ describe("interpret_home_dsl", () => {
       const program2 = parse("tv.power = off");
       const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
 
-      expect(result3.status).toBe("success");
-      const lastExec = result3.executed[result3.executed.length - 1]!;
-      expect(lastExec.resolvedDevices[0]!.id).toBe("tv_salon");
-      expect(lastExec.changes[0]!.newValue).toBe(false);
+      expect(result3.status).toBe("waiting");
     });
 
     it("should be ambiguous again if resolved id doesn't match the room", async () => {
@@ -420,6 +417,90 @@ describe("interpret_home_dsl", () => {
 
       expect(result2.status).toBe("success");
       expect(result2.executed[0]!.resolvedDevices[0]!.id).toBe("tv_chambre");
+    });
+  });
+
+  describe("variable resolution persistence", () => {
+    async function multiTvSalonCtx(): Promise<VMContext> {
+      const driver = makeDriver();
+      await driver.init({});
+
+      const tv1: Device = {
+        id: "tv_lg_salon", type: "tv", room: "salon", name: "LG OLED",
+        driver, driverConfig: {},
+      };
+      const tv2: Device = {
+        id: "tv_samsung_salon", type: "tv", room: "salon", name: "Samsung QLED",
+        driver, driverConfig: {},
+      };
+      driver.seed("tv_lg_salon", { power: false, volume: 15 });
+      driver.seed("tv_samsung_salon", { power: false, volume: 10 });
+
+      return { devices: [tv1, tv2] };
+    }
+
+    it("should auto-resolve variable after previous resolution", async () => {
+      const context = await multiTvSalonCtx();
+      const program = parse(`my_tv = tv[salon]\nmy_tv.power = on`);
+      const result1 = await interpret_home_dsl(program, context);
+
+      expect(result1.status).toBe("waiting");
+
+      applyResolution(result1.session, "tv", "tv_samsung_salon", "my_tv");
+
+      const result2 = await interpret_home_dsl(program, { devices: context.devices, session: result1.session });
+      expect(result2.status).toBe("success");
+      expect(result2.executed[result2.executed.length - 1]!.resolvedDevices[0]!.id).toBe("tv_samsung_salon");
+    });
+
+    it("should auto-resolve variable across programs after resolution", async () => {
+      const context = await multiTvSalonCtx();
+
+      const program1 = parse(`my_tv = tv[salon]\nmy_tv.power = on`);
+      const result1 = await interpret_home_dsl(program1, context);
+      expect(result1.status).toBe("waiting");
+
+      applyResolution(result1.session, "tv", "tv_samsung_salon", "my_tv");
+      const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
+      expect(result2.status).toBe("success");
+
+      const program2 = parse("my_tv.volume = 50");
+      const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
+
+      expect(result3.status).toBe("success");
+      const lastExec = result3.executed[result3.executed.length - 1]!;
+      expect(lastExec.resolvedDevices[0]!.id).toBe("tv_samsung_salon");
+      expect(lastExec.changes[0]!.newValue).toBe(50);
+    });
+
+    it("should invalidate variable resolution on re-assignment", async () => {
+      const context = await multiTvSalonCtx();
+
+      const program1 = parse(`my_tv = tv[salon]\nmy_tv.power = on`);
+      const result1 = await interpret_home_dsl(program1, context);
+      applyResolution(result1.session, "tv", "tv_samsung_salon", "my_tv");
+      const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
+      expect(result2.status).toBe("success");
+
+      const program2 = parse(`my_tv = tv\nmy_tv.power = off`);
+      const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
+
+      expect(result3.status).toBe("waiting");
+    });
+
+    it("should not auto-resolve direct references unlike variables", async () => {
+      const context = await ctx();
+
+      const program1 = parse("tv.power = on");
+      const result1 = await interpret_home_dsl(program1, context);
+      applyResolution(result1.session, "tv", "tv_salon");
+      const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
+      expect(result2.status).toBe("success");
+
+      const program2 = parse("tv.volume = 50");
+      const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
+
+      expect(result3.status).toBe("waiting");
     });
   });
 

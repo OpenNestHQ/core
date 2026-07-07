@@ -33,6 +33,7 @@ export interface Session {
   history: ExecutedStatement[];
   cursor: number;
   resolvedIds: Record<string, string>;
+  variableResolvedIds: Record<string, string>;
   variableModifiers: Record<string, "@all" | "@first">;
 }
 

@@ -43,6 +43,21 @@ function resolveVariableRef(
   session: Session,
   intent?: ResolutionIntent,
 ): ResolutionResult {
+  const resolvedId = session.variableResolvedIds[varName];
+  if (resolvedId) {
+    const device = resolveDeviceById(resolvedId, devices);
+    if (device) {
+      if (intent) {
+        const filter = buildFilter([device], intent);
+        if (filter.matched > 0) {
+          return { devices: [device], ambiguous: false, filter };
+        }
+        return { devices: [], ambiguous: false, filter };
+      }
+      return { devices: [device], ambiguous: false };
+    }
+  }
+
   const ref = session.variables[varName];
   if (!ref) {
     return { devices: [], ambiguous: false };
