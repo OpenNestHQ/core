@@ -139,6 +139,14 @@ export function formatSession(session: Session): string {
     lines.push(`  ${B}Resolved:${N} ${D}(none)${N}`);
   }
 
+  const resolvedVars = Object.entries(session.variableResolvedIds);
+  if (resolvedVars.length > 0) {
+    const parts = resolvedVars.map(([k, v]) => `${k} \u2192 ${v}`);
+    lines.push(`  ${B}Variable Resolved:${N} ${parts.join(", ")}`);
+  } else {
+    lines.push(`  ${B}Variable Resolved:${N} ${D}(none)${N}`);
+  }
+
   const mods = Object.entries(session.variableModifiers);
   if (mods.length > 0) {
     const parts = mods.map(([k, v]) => `${k} \u2192 ${v}`);

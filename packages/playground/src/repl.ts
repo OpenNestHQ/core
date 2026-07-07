@@ -3,7 +3,7 @@ import { parseHomeDSL } from "@opennest/lang-core";
 import type { Program } from "@opennest/lang-core";
 import {
   interpret_home_dsl,
-  applyResolution,
+  resolveAmbiguity as applyAmbiguityResolution,
   createSession,
 } from "@opennest/vm";
 import type { Session, Device, AmbiguityInfo } from "@opennest/vm";
@@ -111,7 +111,8 @@ function resolveAmbiguity(
   }
 
   const chosen = devices[idx - 1]!;
-  applyResolution(state.session, chosen.type, chosen.id);
+
+  applyAmbiguityResolution(state.session, chosen.type, chosen.id, state.lastProgram!);
   return true;
 }
 
