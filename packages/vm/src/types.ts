@@ -33,14 +33,25 @@ export interface Session {
   history: ExecutedStatement[];
 }
 
-export interface AmbiguityChoice {
+export interface AmbiguityTreeDevice {
+  key: string;
   dsl: string;
-  label: string;
+}
+
+export interface AmbiguityTreeRoom {
+  key: string;
+  dsl: string;
+  children: AmbiguityTreeDevice[];
+}
+
+export interface AmbiguityTreeNode {
+  type: string;
+  children: AmbiguityTreeRoom[];
 }
 
 export interface AmbiguityInfo {
   kind: "target";
-  choices: AmbiguityChoice[];
+  tree: AmbiguityTreeNode;
 }
 
 export interface VMError {
@@ -84,7 +95,6 @@ export interface ResolutionFilter {
 export interface ResolutionResult {
   devices: Device[];
   ambiguous: boolean;
-  choices: AmbiguityChoice[];
   filter?: ResolutionFilter;
 }
 

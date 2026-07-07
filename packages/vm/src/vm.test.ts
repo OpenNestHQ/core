@@ -11,6 +11,7 @@ import {
   executeQuery,
   executeAction,
   buildAmbiguityInfo,
+  buildAmbiguityTree,
 } from "./index.js";
 import type {
   Device,
@@ -279,11 +280,23 @@ describe("interpret_home_dsl", () => {
       expect(result.status).toBe("waiting");
       expect(result.awaiting).not.toBeNull();
       expect(result.awaiting!.kind).toBe("target");
-      expect(result.awaiting!.choices).toHaveLength(2);
 
-      const choiceLabels = result.awaiting!.choices.map((c) => c.label);
-      expect(choiceLabels).toContain("Salon TV");
-      expect(choiceLabels).toContain("Chambre TV");
+      const tree = result.awaiting!.tree;
+      expect(tree.type).toBe("tv");
+      expect(tree.children).toHaveLength(2);
+
+      const salonRoom = tree.children.find((r) => r.key === "salon")!;
+      expect(salonRoom).toBeDefined();
+      expect(salonRoom.dsl).toBe("tv[salon]");
+      expect(salonRoom.children).toHaveLength(1);
+      expect(salonRoom.children[0]!.key).toBe("Salon TV");
+      expect(salonRoom.children[0]!.dsl).toBe("device(tv_salon)");
+
+      const chambreRoom = tree.children.find((r) => r.key === "chambre")!;
+      expect(chambreRoom).toBeDefined();
+      expect(chambreRoom.dsl).toBe("tv[chambre]");
+      expect(chambreRoom.children[0]!.key).toBe("Chambre TV");
+      expect(chambreRoom.children[0]!.dsl).toBe("device(tv_chambre)");
     });
 
     it("should not be ambiguous when room is specified", async () => {
@@ -300,11 +313,14 @@ describe("interpret_home_dsl", () => {
       expect(result.status).not.toBe("waiting");
     });
 
-    it("should return waiting state with DSL choices", async () => {
+    it("should return tree with correct DSL for rooms", async () => {
       const program = parse("tv.power = on");
       const result = await interpret_home_dsl(program, await ctx());
 
-      expect(result.awaiting!.choices[0]!.dsl).toContain("tv[");
+      const tree = result.awaiting!.tree;
+      for (const room of tree.children) {
+        expect(room.dsl).toContain("tv[");
+      }
     });
   });
 
@@ -472,9 +488,7 @@ describe("interpret_home_dsl", () => {
       );
 
       expect(result.ambiguous).toBe(true);
-      expect(result.choices).toHaveLength(2);
-      expect(result.choices[0]!.dsl).toBe("tv[salon]");
-      expect(result.choices[1]!.dsl).toBe("tv[chambre]");
+      expect(result.devices).toHaveLength(2);
     });
 
     it("should not be ambiguous for a type with a single instance", async () => {
@@ -574,14 +588,35 @@ describe("interpret_home_dsl", () => {
   });
 
   describe("ambiguity module", () => {
-    it("should build ambiguity info", () => {
-      const info = buildAmbiguityInfo([
-        { dsl: "tv[salon]", label: "Salon TV" },
-        { dsl: "tv[chambre]", label: "Chambre TV" },
-      ]);
+    it("should build ambiguity info with tree", async () => {
+      const devs = await devices();
+      const tvDevices = devs.filter((d) => d.type === "tv");
+      const info = buildAmbiguityInfo(tvDevices);
 
       expect(info.kind).toBe("target");
-      expect(info.choices).toHaveLength(2);
+      expect(info.tree.type).toBe("tv");
+      expect(info.tree.children).toHaveLength(2);
+    });
+
+    it("should build ambiguity tree grouping devices by room", async () => {
+      const devs = await devices();
+      const tvDevices = devs.filter((d) => d.type === "tv");
+      const tree = buildAmbiguityTree(tvDevices);
+
+      expect(tree.type).toBe("tv");
+
+      const salon = tree.children.find((r) => r.key === "salon")!;
+      expect(salon).toBeDefined();
+      expect(salon.dsl).toBe("tv[salon]");
+      expect(salon.children).toHaveLength(1);
+      expect(salon.children[0]!.key).toBe("Salon TV");
+      expect(salon.children[0]!.dsl).toBe("device(tv_salon)");
+
+      const chambre = tree.children.find((r) => r.key === "chambre")!;
+      expect(chambre).toBeDefined();
+      expect(chambre.dsl).toBe("tv[chambre]");
+      expect(chambre.children[0]!.key).toBe("Chambre TV");
+      expect(chambre.children[0]!.dsl).toBe("device(tv_chambre)");
     });
   });
 
@@ -723,7 +758,7 @@ describe("interpret_home_dsl", () => {
       const result = await interpret_home_dsl(program, await filteredCtx());
 
       expect(result.status).toBe("waiting");
-      expect(result.awaiting!.choices).toHaveLength(2);
+      expect(result.awaiting!.tree.children).toHaveLength(2);
     });
 
     it("should resolve to the only device supporting the action (no ambiguity)", async () => {
@@ -830,7 +865,7 @@ describe("interpret_home_dsl", () => {
       const result = await interpret_home_dsl(program, ctx);
 
       expect(result.status).toBe("waiting");
-      expect(result.awaiting!.choices).toHaveLength(2);
+      expect(result.awaiting!.tree.children).toHaveLength(2);
     });
 
     it("should not set filter on executed statement when no intent is used", async () => {

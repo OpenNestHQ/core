@@ -6,7 +6,6 @@ import type {
   ResolutionIntent,
   ResolutionFilter,
   ExcludedDevice,
-  AmbiguityChoice,
 } from "./types.js";
 
 export function resolveDevices(
@@ -46,7 +45,7 @@ function resolveVariableRef(
 ): ResolutionResult {
   const ref = session.variables[varName];
   if (!ref) {
-    return { devices: [], ambiguous: false, choices: [] };
+    return { devices: [], ambiguous: false };
   }
   return resolveByTypeAndRoom(ref.deviceType, ref.roomSelector, devices, intent);
 }
@@ -59,13 +58,13 @@ function resolveContextRef(
     if (intent) {
       const filter = buildFilter([session.it], intent);
       if (filter.matched === 0) {
-        return { devices: [], ambiguous: false, choices: [], filter };
+        return { devices: [], ambiguous: false, filter };
       }
-      return { devices: [session.it], ambiguous: false, choices: [], filter };
+      return { devices: [session.it], ambiguous: false, filter };
     }
-    return { devices: [session.it], ambiguous: false, choices: [] };
+    return { devices: [session.it], ambiguous: false };
   }
-  return { devices: [], ambiguous: false, choices: [] };
+  return { devices: [], ambiguous: false };
 }
 
 function resolveByTypeAndRoom(
@@ -95,23 +94,18 @@ function resolveByTypeAndRoom(
   }
 
   if (matches.length === 0) {
-    return { devices: [], ambiguous: false, choices: [], ...(filter ? { filter } : {}) };
+    return { devices: [], ambiguous: false, ...(filter ? { filter } : {}) };
   }
 
   if (matches.length === 1) {
-    return { devices: matches, ambiguous: false, choices: [], ...(filter ? { filter } : {}) };
+    return { devices: matches, ambiguous: false, ...(filter ? { filter } : {}) };
   }
 
   if (roomSelector) {
-    return { devices: matches, ambiguous: false, choices: [], ...(filter ? { filter } : {}) };
+    return { devices: matches, ambiguous: false, ...(filter ? { filter } : {}) };
   }
 
-  const choices: AmbiguityChoice[] = matches.map((d) => ({
-    dsl: `${d.type}[${d.room}]`,
-    label: d.name,
-  }));
-
-  return { devices: matches, ambiguous: true, choices, ...(filter ? { filter } : {}) };
+  return { devices: matches, ambiguous: true, ...(filter ? { filter } : {}) };
 }
 
 export function resolveDeviceById(

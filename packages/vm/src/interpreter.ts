@@ -109,7 +109,7 @@ async function interpretAssignment(
   if (resolutionResult.ambiguous) {
     return {
       kind: "waiting",
-      ambiguity: buildAmbiguityInfo(resolutionResult.choices),
+      ambiguity: buildAmbiguityInfo(resolutionResult.devices),
     };
   }
 
@@ -157,7 +157,7 @@ async function interpretQuery(
   if (resolutionResult.ambiguous) {
     return {
       kind: "waiting",
-      ambiguity: buildAmbiguityInfo(resolutionResult.choices),
+      ambiguity: buildAmbiguityInfo(resolutionResult.devices),
     };
   }
 
@@ -205,7 +205,7 @@ async function interpretIncrement(
   if (resolutionResult.ambiguous) {
     return {
       kind: "waiting",
-      ambiguity: buildAmbiguityInfo(resolutionResult.choices),
+      ambiguity: buildAmbiguityInfo(resolutionResult.devices),
     };
   }
 
@@ -253,7 +253,7 @@ async function interpretAction(
   if (resolutionResult.ambiguous) {
     return {
       kind: "waiting",
-      ambiguity: buildAmbiguityInfo(resolutionResult.choices),
+      ambiguity: buildAmbiguityInfo(resolutionResult.devices),
     };
   }
 

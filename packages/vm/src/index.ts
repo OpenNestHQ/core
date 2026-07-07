@@ -13,7 +13,7 @@ export { interpretProgram } from "./interpreter.js";
 export { createSession } from "./state.js";
 export { resolveDevices, resolveDeviceById } from "./resolver.js";
 export { expandCollection, selectFirst, selectAll } from "./collections.js";
-export { buildAmbiguityInfo, createAmbiguityChoice } from "./ambiguity.js";
+export { buildAmbiguityInfo, buildAmbiguityTree } from "./ambiguity.js";
 export {
   executeAssignment,
   executeIncrement,
@@ -25,7 +25,9 @@ export type {
   StateChange,
   ExecutedStatement,
   Session,
-  AmbiguityChoice,
+  AmbiguityTreeDevice,
+  AmbiguityTreeRoom,
+  AmbiguityTreeNode,
   AmbiguityInfo,
   VMError,
   VMStatus,
