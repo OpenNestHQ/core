@@ -1,0 +1,22 @@
+{
+  "name": "@opennest/playground",
+  "version": "1.0.0",
+  "description": "Interactive TUI playground to showcase the OpenNest VM with HomeDSL",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "npm run build && node dist/index.js",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@opennest/devices": "file:../devices",
+    "@opennest/lang-core": "file:../lang-core",
+    "@opennest/vm": "file:../vm"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "typescript": "^6.0.3"
+  }
+}

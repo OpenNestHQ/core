@@ -1,0 +1,187 @@
+import type { VMResult, ExecutedStatement, StateChange, AmbiguityInfo, AmbiguityTreeDevice, VMError, Device, Session } from "@opennest/vm";
+
+const G = "\x1b[32m";
+const Y = "\x1b[33m";
+const R = "\x1b[31m";
+const C = "\x1b[36m";
+const B = "\x1b[1m";
+const D = "\x1b[2m";
+const N = "\x1b[0m";
+
+function fmt(val: unknown): string {
+  if (val === null || val === undefined) return `${D}—${N}`;
+  if (typeof val === "boolean") return val ? `${G}on${N}` : `${R}off${N}`;
+  if (typeof val === "number") return `${Y}${val}${N}`;
+  return `${C}"${String(val)}"${N}`;
+}
+
+function deviceName(deviceId: string, resolved: Device[]): string {
+  const d = resolved.find((r) => r.id === deviceId);
+  return d ? d.name : deviceId;
+}
+
+function changeLine(change: StateChange, resolved: Device[]): string {
+  const prop = `${B}${change.property}${N}`;
+  const oldV = fmt(change.oldValue);
+  const newV = fmt(change.newValue);
+  return `    ${change.deviceId}.${prop} = ${newV} ${D}(was ${oldV})${N}`;
+}
+
+function filterLine(filter: NonNullable<ExecutedStatement["filter"]>): string {
+  const parts = [`${D}filter:${N} ${filter.matched}/${filter.candidates} matched`];
+  for (const exc of filter.excluded) {
+    parts.push(`${D}\u2717${N} ${exc.deviceName} ${D}(${exc.reason}: ${exc.details})${N}`);
+  }
+  return `    ${parts.join(" | ")}`;
+}
+
+export function formatSuccess(result: VMResult, since: number = 0): string {
+  const lines: string[] = [];
+  const entries = result.executed.slice(since);
+  if (entries.length === 0) return "";
+
+  const count = entries.length;
+  lines.push(`\n${G}${B}\u2713${N} ${G}Executed ${count} statement${count !== 1 ? "s" : ""}${N}`);
+
+  for (const exec of entries) {
+    if (exec.changes.length > 0) {
+      for (const change of exec.changes) {
+        lines.push(changeLine(change, exec.resolvedDevices));
+      }
+    } else {
+      const names = exec.resolvedDevices.map((d) => d.name).join(", ");
+      lines.push(`    ${D}${names} (no state changes)${N}`);
+    }
+    if (exec.filter) {
+      lines.push(filterLine(exec.filter));
+    }
+  }
+  return lines.join("\n");
+}
+
+function flattenDevices(info: AmbiguityInfo): { index: number; device: AmbiguityTreeDevice; room: string }[] {
+  const result: { index: number; device: AmbiguityTreeDevice; room: string }[] = [];
+  let idx = 0;
+  for (const room of info.tree.children) {
+    for (const dev of room.children) {
+      result.push({ index: ++idx, device: dev, room: room.key });
+    }
+  }
+  return result;
+}
+
+export function formatWaiting(info: AmbiguityInfo): string {
+  const lines: string[] = [];
+  const type = info.tree.type;
+  const flat = flattenDevices(info);
+  lines.push(`\n${Y}${B}\u26a0${N} ${Y}Ambiguity for "${type}":${N}`);
+
+  for (const item of flat) {
+    const pad = String(item.index).padStart(2);
+    lines.push(`  ${G}[${pad}]${N} ${C}${item.room.padEnd(10)}${N} \u2192 ${B}${item.device.id}${N} ${D}(${item.device.key})${N}`);
+  }
+  return lines.join("\n");
+}
+
+export function formatErrors(errors: VMError[]): string {
+  const lines: string[] = [];
+  lines.push(`\n${R}${B}\u2717${N} ${R}Error${errors.length > 1 ? "s" : ""}:${N}`);
+  for (const err of errors) {
+    lines.push(`  ${R}\u2022${N} ${err.message}`);
+  }
+  return lines.join("\n");
+}
+
+export function formatParseErrors(messages: string[]): string {
+  const lines: string[] = [];
+  lines.push(`\n${R}${B}\u2717${N} ${R}Parse error${messages.length > 1 ? "s" : ""}:${N}`);
+  for (const msg of messages) {
+    lines.push(`  ${R}\u2022${N} ${msg}`);
+  }
+  return lines.join("\n");
+}
+
+export function formatDevices(devices: Device[]): string {
+  const byType = new Map<string, Device[]>();
+  for (const d of devices) {
+    const list = byType.get(d.type) ?? [];
+    list.push(d);
+    byType.set(d.type, list);
+  }
+
+  const lines: string[] = [];
+  lines.push(`\n${B}Devices (${devices.length}):${N}`);
+
+  for (const [type, devs] of [...byType.entries()].sort()) {
+    const parts = devs.map((d) => `${C}${d.room}${N} \u2192 ${d.id} ${D}(${d.name})${N}`);
+    lines.push(`  ${B}${type}${N} ${D}(${devs.length})${N}: ${parts.join(" | ")}`);
+  }
+  return lines.join("\n");
+}
+
+export function formatSession(session: Session): string {
+  const lines: string[] = [];
+  lines.push(`\n${B}Session:${N}`);
+
+  const vars = Object.keys(session.variables);
+  lines.push(`  ${B}Variables:${N} ${vars.length > 0 ? vars.join(", ") : `${D}(none)${N}`}`);
+
+  const itDesc = session.it
+    ? `${session.it.name} (${session.it.id})`
+    : `${D}null${N}`;
+  lines.push(`  ${B}It:${N} ${itDesc}`);
+
+  const resolved = Object.entries(session.resolvedIds);
+  if (resolved.length > 0) {
+    const parts = resolved.map(([k, v]) => `${k} \u2192 ${v}`);
+    lines.push(`  ${B}Resolved:${N} ${parts.join(", ")}`);
+  } else {
+    lines.push(`  ${B}Resolved:${N} ${D}(none)${N}`);
+  }
+
+  const mods = Object.entries(session.variableModifiers);
+  if (mods.length > 0) {
+    const parts = mods.map(([k, v]) => `${k} \u2192 ${v}`);
+    lines.push(`  ${B}Modifiers:${N} ${parts.join(", ")}`);
+  }
+
+  lines.push(`  ${B}Cursor:${N} ${session.cursor}`);
+
+  lines.push(`  ${B}History:${N} ${session.history.length} entr${session.history.length !== 1 ? "ies" : "y"}`);
+  return lines.join("\n");
+}
+
+export function banner(devices: Device[]): string {
+  const types = [...new Set(devices.map((d) => d.type))].sort();
+  const typeList = types.length <= 4
+    ? types.join(", ")
+    : types.slice(0, 3).join(", ") + "...";
+  const line = `  ${devices.length} devices loaded (${typeList})`;
+  return `${C}${B}
+\u2554${"\u2550".repeat(48)}\u2557
+\u2551${"              OpenNest Playground".padEnd(48)}\u2551
+\u2551${"  Type HomeDSL commands. :help for help.".padEnd(48)}\u2551
+\u2551${line.padEnd(48)}\u2551
+\u255a${"\u2550".repeat(48)}\u255d
+${N}`;
+}
+
+export function help(): string {
+  return `${B}
+Commands:${N}
+  ${G}HomeDSL${N} input        Execute HomeDSL statements (e.g. tv.power = on)
+  ${C}:{${N}                Start multi-line input (blank line to execute)
+  ${C}:}${N}                Execute accumulated multi-line input
+  ${C}:h${N}, ${C}:help${N}        Show this help
+  ${C}:d${N}, ${C}:devices${N}     List all registered devices
+  ${C}:s${N}, ${C}:session${N}     Show session state (variables, history, etc.)
+  ${C}:r${N}, ${C}:reset${N}      Reset the session
+  ${C}:q${N}, ${C}:quit${N}       Exit the playground
+
+${B}Tips:${N}
+  - Multiple statements as one program: use ${C}:{${N}\u2026${C}:}${N} or paste
+  - Use ${G}@all${N} and ${G}@first${N} modifiers: ${D}all_lights = @all(light[${N}*${D}])${N}
+  - Use ${G}it${N} to reference the last resolved device
+  - When ambiguous, a numbered list will appear \u2014 type the number to choose
+`;
+}
