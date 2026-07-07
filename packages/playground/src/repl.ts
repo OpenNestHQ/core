@@ -129,13 +129,117 @@ async function executeSource(state: State, src: string): Promise<AmbiguityInfo |
   return executeProgram(state);
 }
 
+const COMMANDS = [
+  ":h", ":help",
+  ":d", ":devices",
+  ":s", ":session",
+  ":r", ":reset",
+  ":q", ":quit",
+  ":{", ":}",
+  ":cancel",
+];
+
 export async function startRepl(devices: Device[]): Promise<void> {
   const state = createState(devices);
+
+  function deviceTypes(): string[] {
+    return [...new Set(state.devices.map((d) => d.type))];
+  }
+
+  function rooms(): string[] {
+    return [...new Set(state.devices.map((d) => d.room))];
+  }
+
+  function completeFromList(line: string, partial: string, prefix: string, candidates: string[], suffix: string = ""): [string[], string] {
+    const hits = candidates.filter((c) => c.startsWith(partial));
+    const completions = hits.map((c) => prefix + c + suffix);
+    return [completions.length ? completions : candidates.map((c) => prefix + c + suffix), line];
+  }
+
+  function isDeviceTypeContext(line: string, lastToken: string): boolean {
+    if (lastToken === "" || lastToken === "=" || isModifierPrefix(lastToken)) return false;
+
+    const cleanLine = line.trimStart();
+    if (cleanLine.startsWith(lastToken)) return true;
+
+    const normalized = line.replace(/\s+/g, " ").trim();
+    const eqIdx = normalized.lastIndexOf("=");
+    if (eqIdx === -1) return false;
+
+    const afterEq = normalized.slice(eqIdx + 1).trim();
+    return afterEq.startsWith(lastToken);
+  }
+
+  function extractModifierInner(token: string): { modifier: string; inner: string } | null {
+    const match = token.match(/^(@(?:all|first)\()(.*)/);
+    if (!match) return null;
+    return { modifier: match[1]!, inner: match[2]! };
+  }
+
+  function isModifierPrefix(token: string): boolean {
+    return /^@(?:all|first)\(/.test(token);
+  }
+
+  function completer(line: string): [string[], string] {
+    if (line.startsWith(":")) {
+      const hits = COMMANDS.filter((c) => c.startsWith(line));
+      return [hits.length ? hits : COMMANDS, line];
+    }
+
+    const tokens = line.split(/\s+/);
+    const lastToken = tokens[tokens.length - 1] ?? "";
+
+    if (lastToken.includes(".")) return [[], lastToken];
+
+    if (lastToken.includes("$")) {
+      const dollarIdx = lastToken.lastIndexOf("$");
+      const partial = lastToken.slice(dollarIdx + 1);
+      const prefix = lastToken.slice(0, dollarIdx + 1);
+
+      const varNames = Object.keys(state.session.variables);
+      if (!varNames.includes("it")) varNames.push("it");
+
+      const hits = varNames.filter((name) => name.startsWith(partial));
+      const completions = hits.map((name) => prefix + name);
+      return [completions.length ? completions : varNames.map((n) => prefix + n), lastToken];
+    }
+
+    if (lastToken.includes("[") && !lastToken.includes("]")) {
+      const bracketIdx = lastToken.lastIndexOf("[");
+      const partial = lastToken.slice(bracketIdx + 1);
+      const prefix = lastToken.slice(0, bracketIdx + 1);
+
+      const candidates = [...rooms(), "*"];
+      return completeFromList(lastToken, partial, prefix, candidates, "]");
+    }
+
+    const modifier = extractModifierInner(lastToken);
+    if (modifier) {
+      if (modifier.inner.includes("[") && !modifier.inner.includes("]")) {
+        const bracketIdx = modifier.inner.lastIndexOf("[");
+        const partial = modifier.inner.slice(bracketIdx + 1);
+        const prefix = modifier.modifier + modifier.inner.slice(0, bracketIdx + 1);
+        const candidates = [...rooms(), "*"];
+        return completeFromList(lastToken, partial, prefix, candidates, "]");
+      }
+      const candidates = deviceTypes();
+      return completeFromList(lastToken, modifier.inner, modifier.modifier, candidates);
+    }
+
+    if (isDeviceTypeContext(line, lastToken)) {
+      const candidates = deviceTypes();
+      const hits = candidates.filter((t) => t.startsWith(lastToken));
+      return [hits.length ? hits : candidates, lastToken];
+    }
+
+    return [[], line];
+  }
 
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
     terminal: true,
+    completer,
   });
 
   let pendingAmbiguity: AmbiguityInfo | null = null;
