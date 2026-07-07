@@ -31,10 +31,14 @@ export interface Session {
   variables: Record<string, DeviceRef>;
   it: Device | null;
   history: ExecutedStatement[];
+  cursor: number;
+  resolvedIds: Record<string, string>;
+  variableModifiers: Record<string, "@all" | "@first">;
 }
 
 export interface AmbiguityTreeDevice {
   key: string;
+  id: string;
   dsl: string;
 }
 

@@ -16,7 +16,7 @@ export function resolveDevices(
 ): ResolutionResult {
   const firstSegment = segments[0];
   if (!firstSegment) {
-    return { devices: [], ambiguous: false, choices: [] };
+    return { devices: [], ambiguous: false };
   }
 
   const isContextRef = firstSegment.identifier === "it";
@@ -33,7 +33,7 @@ export function resolveDevices(
   const deviceType = firstSegment.identifier;
   const roomSelector = firstSegment.roomSelector;
 
-  return resolveByTypeAndRoom(deviceType, roomSelector, devices, intent);
+  return resolveByTypeAndRoom(deviceType, roomSelector, devices, intent, session, false);
 }
 
 function resolveVariableRef(
@@ -47,7 +47,8 @@ function resolveVariableRef(
   if (!ref) {
     return { devices: [], ambiguous: false };
   }
-  return resolveByTypeAndRoom(ref.deviceType, ref.roomSelector, devices, intent);
+  const forceAll = session.variableModifiers[varName] === "@all";
+  return resolveByTypeAndRoom(ref.deviceType, ref.roomSelector, devices, intent, session, forceAll);
 }
 
 function resolveContextRef(
@@ -72,6 +73,8 @@ function resolveByTypeAndRoom(
   roomSelector: { kind: "room"; name: string } | { kind: "wildcard" } | null,
   devices: Device[],
   intent?: ResolutionIntent,
+  session?: Session,
+  forceAll?: boolean,
 ): ResolutionResult {
   let matches = devices.filter((d) => d.type === deviceType);
 
@@ -101,8 +104,19 @@ function resolveByTypeAndRoom(
     return { devices: matches, ambiguous: false, ...(filter ? { filter } : {}) };
   }
 
-  if (roomSelector) {
+  if (roomSelector?.kind === "wildcard") {
     return { devices: matches, ambiguous: false, ...(filter ? { filter } : {}) };
+  }
+
+  if (forceAll) {
+    return { devices: matches, ambiguous: false, ...(filter ? { filter } : {}) };
+  }
+
+  if (session?.resolvedIds[deviceType]) {
+    const chosen = matches.find((d) => d.id === session.resolvedIds[deviceType]);
+    if (chosen) {
+      return { devices: [chosen], ambiguous: false, ...(filter ? { filter } : {}) };
+    }
   }
 
   return { devices: matches, ambiguous: true, ...(filter ? { filter } : {}) };

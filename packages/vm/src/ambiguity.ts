@@ -20,6 +20,7 @@ export function buildAmbiguityTree(devices: Device[]): AmbiguityTreeNode {
     const room = d.room;
     const child: AmbiguityTreeDevice = {
       key: d.name,
+      id: d.id,
       dsl: `device(${d.id})`,
     };
     const existing = roomMap.get(room);

@@ -30,18 +30,26 @@ export async function interpretProgram(
   let awaiting = false;
   let ambiguityInfo: AmbiguityInfo | null = null;
 
-  for (const statement of program.statements) {
+  for (let i = session.cursor; i < program.statements.length; i++) {
+    const statement = program.statements[i]!;
     const result = await interpretStatement(statement, devices, session);
 
     if (result.kind === "waiting") {
       awaiting = true;
       ambiguityInfo = result.ambiguity;
+      session.cursor = i;
       break;
     }
 
     if (result.kind === "error") {
       errors.push(...result.errors);
     }
+
+    session.cursor = i + 1;
+  }
+
+  if (!awaiting) {
+    session.cursor = 0;
   }
 
   if (awaiting) {
@@ -310,6 +318,7 @@ function interpretVariableAssignment(
       roomSelector: stmt.value.device.roomSelector,
     };
     session.variables[stmt.name] = deviceRef;
+    session.variableModifiers[stmt.name] = stmt.value.modifier;
     session.history.push({
       statement: stmt,
       resolvedDevices: [],

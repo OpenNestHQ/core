@@ -5,6 +5,7 @@ import type { DeviceDriver } from "@opennest/devices";
 import {
   interpret_home_dsl,
   createSession,
+  applyResolution,
   resolveDevices,
   expandCollection,
   executeAssignment,
@@ -322,12 +323,160 @@ describe("interpret_home_dsl", () => {
         expect(room.dsl).toContain("tv[");
       }
     });
+
+    it("should include device id in ambiguity tree", async () => {
+      const program = parse("tv.power = on");
+      const result = await interpret_home_dsl(program, await ctx());
+
+      const tree = result.awaiting!.tree;
+      for (const room of tree.children) {
+        for (const device of room.children) {
+          expect(device.id).toBeDefined();
+          expect(typeof device.id).toBe("string");
+        }
+      }
+    });
+  });
+
+  describe("multi-turn ambiguity resolution", () => {
+    it("should resolve ambiguity and re-interpret the same program", async () => {
+      const program = parse("tv.power = on");
+      const context = await ctx();
+      const result1 = await interpret_home_dsl(program, context);
+
+      expect(result1.status).toBe("waiting");
+      expect(result1.awaiting).not.toBeNull();
+      expect(result1.executed).toHaveLength(0);
+
+      applyResolution(result1.session, "tv", "tv_salon");
+
+      const result2 = await interpret_home_dsl(program, { devices: context.devices, session: result1.session });
+
+      expect(result2.status).toBe("success");
+      expect(result2.executed).toHaveLength(1);
+      expect(result2.executed[0]!.resolvedDevices).toHaveLength(1);
+      expect(result2.executed[0]!.resolvedDevices[0]!.id).toBe("tv_salon");
+      expect(result2.executed[0]!.changes[0]!.property).toBe("power");
+      expect(result2.executed[0]!.changes[0]!.newValue).toBe(true);
+    });
+
+    it("should not re-execute statements before the ambiguity", async () => {
+      const program = parse("tv[salon].volume = 30\ntv.power = on\nspeaker[salon].volume = 20");
+      const context = await ctx();
+
+      const result1 = await interpret_home_dsl(program, context);
+      expect(result1.status).toBe("waiting");
+      expect(result1.executed).toHaveLength(1);
+      expect(result1.executed[0]!.changes[0]!.property).toBe("volume");
+      expect(result1.executed[0]!.changes[0]!.newValue).toBe(30);
+
+      applyResolution(result1.session, "tv", "tv_chambre");
+
+      const result2 = await interpret_home_dsl(program, { devices: context.devices, session: result1.session });
+
+      expect(result2.status).toBe("success");
+      expect(result2.executed).toHaveLength(3);
+
+      const firstExec = result2.executed[0]!;
+      expect(firstExec.changes[0]!.property).toBe("volume");
+      expect(firstExec.changes[0]!.newValue).toBe(30);
+
+      const secondExec = result2.executed[1]!;
+      expect(secondExec.resolvedDevices[0]!.id).toBe("tv_chambre");
+      expect(secondExec.changes[0]!.property).toBe("power");
+      expect(secondExec.changes[0]!.newValue).toBe(true);
+
+      const thirdExec = result2.executed[2]!;
+      expect(thirdExec.resolvedDevices[0]!.type).toBe("speaker");
+    });
+
+    it("should persist resolvedIds across calls", async () => {
+      const context = await ctx();
+      const program1 = parse("tv.power = on");
+      const result1 = await interpret_home_dsl(program1, context);
+
+      applyResolution(result1.session, "tv", "tv_salon");
+      const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
+      expect(result2.status).toBe("success");
+
+      const program2 = parse("tv.power = off");
+      const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
+
+      expect(result3.status).toBe("success");
+      const lastExec = result3.executed[result3.executed.length - 1]!;
+      expect(lastExec.resolvedDevices[0]!.id).toBe("tv_salon");
+      expect(lastExec.changes[0]!.newValue).toBe(false);
+    });
+
+    it("should be ambiguous again if resolved id doesn't match the room", async () => {
+      const context = await ctx();
+      const program1 = parse("tv.power = on");
+      const result1 = await interpret_home_dsl(program1, context);
+
+      applyResolution(result1.session, "tv", "tv_salon");
+
+      const program2 = parse("tv[chambre].power = on");
+      const result2 = await interpret_home_dsl(program2, { devices: context.devices, session: result1.session });
+
+      expect(result2.status).toBe("success");
+      expect(result2.executed[0]!.resolvedDevices[0]!.id).toBe("tv_chambre");
+    });
+  });
+
+  describe("ambiguity with room selector and multiple devices", () => {
+    async function multiDeviceCtx(): Promise<VMContext> {
+      const driver = makeDriver();
+      await driver.init({});
+
+      const tv1: Device = {
+        id: "tv_lg_salon", type: "tv", room: "salon", name: "LG OLED",
+        driver, driverConfig: {},
+      };
+      const tv2: Device = {
+        id: "tv_samsung_salon", type: "tv", room: "salon", name: "Samsung QLED",
+        driver, driverConfig: {},
+      };
+      driver.seed("tv_lg_salon", { power: false, volume: 15 });
+      driver.seed("tv_samsung_salon", { power: false, volume: 10 });
+
+      return { devices: [tv1, tv2] };
+    }
+
+    it("should be ambiguous when room selector has multiple devices", async () => {
+      const ctx = await multiDeviceCtx();
+      const program = parse("tv[salon].power = on");
+      const result = await interpret_home_dsl(program, ctx);
+
+      expect(result.status).toBe("waiting");
+      expect(result.awaiting).not.toBeNull();
+
+      const tree = result.awaiting!.tree;
+      expect(tree.children).toHaveLength(1);
+      expect(tree.children[0]!.key).toBe("salon");
+      expect(tree.children[0]!.children).toHaveLength(2);
+    });
+
+    it("should resolve multi-device room ambiguity with applyResolution", async () => {
+      const ctx = await multiDeviceCtx();
+      const program = parse("tv[salon].power = on");
+      const result1 = await interpret_home_dsl(program, ctx);
+
+      expect(result1.status).toBe("waiting");
+
+      applyResolution(result1.session, "tv", "tv_samsung_salon");
+
+      const result2 = await interpret_home_dsl(program, { devices: ctx.devices, session: result1.session });
+
+      expect(result2.status).toBe("success");
+      expect(result2.executed[0]!.resolvedDevices).toHaveLength(1);
+      expect(result2.executed[0]!.resolvedDevices[0]!.id).toBe("tv_samsung_salon");
+    });
   });
 
   describe("multi-line programs", () => {
     it("should execute multiple statements in order", async () => {
       const program = parse(
-        `tv[salon].power = on\ntv[salon].volume = 25\nlight[salon].brightness = 50`,
+        `tv[salon].power = on\ntv[salon].volume = 25\nspeaker[salon].volume = 30`,
       );
       const result = await interpret_home_dsl(program, await ctx());
 
@@ -357,7 +506,7 @@ describe("interpret_home_dsl", () => {
   describe("session persistence", () => {
     it("should track execution history", async () => {
       const program = parse(
-        `tv[salon].power = on\nlight[salon].brightness = 40`,
+        `tv[salon].power = on\nspeaker[salon].volume = 20`,
       );
       const result = await interpret_home_dsl(program, await ctx());
 
@@ -383,7 +532,7 @@ describe("interpret_home_dsl", () => {
       const context1 = await ctx();
       const result1 = await interpret_home_dsl(program1, context1);
 
-      const program2 = parse("light[salon].power = off");
+      const program2 = parse("speaker[salon].volume = 10");
       const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
 
       expect(result2.session.history).toHaveLength(2);

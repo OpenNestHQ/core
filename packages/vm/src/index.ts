@@ -10,7 +10,7 @@ export async function interpret_home_dsl(
 }
 
 export { interpretProgram } from "./interpreter.js";
-export { createSession } from "./state.js";
+export { createSession, applyResolution } from "./state.js";
 export { resolveDevices, resolveDeviceById } from "./resolver.js";
 export { expandCollection, selectFirst, selectAll } from "./collections.js";
 export { buildAmbiguityInfo, buildAmbiguityTree } from "./ambiguity.js";

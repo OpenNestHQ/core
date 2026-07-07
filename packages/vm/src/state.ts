@@ -5,5 +5,17 @@ export function createSession(): Session {
     variables: {},
     it: null,
     history: [],
+    cursor: 0,
+    resolvedIds: {},
+    variableModifiers: {},
   };
+}
+
+export function applyResolution(
+  session: Session,
+  deviceType: string,
+  deviceId: string,
+): Session {
+  session.resolvedIds[deviceType] = deviceId;
+  return session;
 }
