@@ -16,6 +16,10 @@ export function expandCollection(
 
   const result = resolveDevices(pseudoSegments, devices, session);
 
+  if (collection.modifier === "@first" && result.devices.length > 0) {
+    return { ...result, devices: [result.devices[0]!], ambiguous: false };
+  }
+
   return result;
 }
 

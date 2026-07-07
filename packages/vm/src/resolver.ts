@@ -62,8 +62,10 @@ function resolveVariableRef(
   if (!ref) {
     return { devices: [], ambiguous: false };
   }
-  const forceAll = session.variableModifiers[varName] === "@all";
-  return resolveByTypeAndRoom(ref.deviceType, ref.roomSelector, devices, intent, session, forceAll);
+  const modifier = session.variableModifiers[varName];
+  const forceAll = modifier === "@all";
+  const forceFirst = modifier === "@first";
+  return resolveByTypeAndRoom(ref.deviceType, ref.roomSelector, devices, intent, session, forceAll, forceFirst);
 }
 
 function resolveContextRef(
@@ -90,6 +92,7 @@ function resolveByTypeAndRoom(
   intent?: ResolutionIntent,
   session?: Session,
   forceAll?: boolean,
+  forceFirst?: boolean,
 ): ResolutionResult {
   let matches = devices.filter((d) => d.type === deviceType);
 
@@ -121,6 +124,10 @@ function resolveByTypeAndRoom(
 
   if (roomSelector?.kind === "wildcard") {
     return { devices: matches, ambiguous: false, ...(filter ? { filter } : {}) };
+  }
+
+  if (forceFirst) {
+    return { devices: [matches[0]!], ambiguous: false, ...(filter ? { filter } : {}) };
   }
 
   if (forceAll) {

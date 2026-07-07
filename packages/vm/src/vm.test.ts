@@ -813,7 +813,8 @@ describe("interpret_home_dsl", () => {
         createSession(),
       );
 
-      expect(result.devices).toHaveLength(2);
+      expect(result.devices).toHaveLength(1);
+      expect(result.ambiguous).toBe(false);
     });
   });
 
@@ -865,6 +866,40 @@ describe("interpret_home_dsl", () => {
         const pwr = await getProperty(d, "power");
         expect(pwr).toBe(true);
       }
+    });
+
+    it("should turn on only the first light with @first", async () => {
+      const program = parse(`first_light = @first(light[salon])\nfirst_light.power = on`);
+      const result = await interpret_home_dsl(program, await ctx());
+
+      expect(result.status).toBe("success");
+      expect(result.executed).toHaveLength(2);
+
+      const assignExec = result.executed[1]!;
+      expect(assignExec.resolvedDevices).toHaveLength(1);
+      const device = assignExec.resolvedDevices[0]!;
+      expect(device.type).toBe("light");
+      expect(device.room).toBe("salon");
+
+      const pwr = await getProperty(device, "power");
+      expect(pwr).toBe(true);
+    });
+
+    it("should resolve @first across multiple programs", async () => {
+      const program1 = parse("my_light = @first(light[salon])");
+      const context1 = await ctx();
+      const result1 = await interpret_home_dsl(program1, context1);
+
+      expect(result1.status).toBe("success");
+      expect(result1.session.variableModifiers["my_light"]).toBe("@first");
+
+      const program2 = parse("my_light.power = off");
+      const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
+
+      expect(result2.status).toBe("success");
+      const exec = result2.executed[result2.executed.length - 1]!;
+      expect(exec.resolvedDevices).toHaveLength(1);
+      expect(exec.resolvedDevices[0]!.type).toBe("light");
     });
 
     it("should assign tv power and volume in sequence", async () => {
