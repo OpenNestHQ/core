@@ -91,19 +91,21 @@ camera.snapshot()
 
 **Variables:**
 ```text
-living_tv = tv[salon]
-living_tv.power = on
+$living_tv = tv[salon]
+$living_tv.power = on
 ```
+
+Variables are prefixed with `$` to distinguish them from device types. The `$` is syntactic only — the name is stored without it internally.
 
 **Context reference:**
 ```text
-it.volume = 20
+$it.volume = 20
 ```
 
 **Collections:**
 ```text
-lights = @all(light[salon])
-lights.power = on
+$lights = @all(light[salon])
+$lights.power = on
 ```
 
 **Wildcard room selector:**
@@ -175,8 +177,8 @@ When a statement targets a property or action, the resolver excludes devices tha
 
 **HomeAgent output:**
 ```text
-lights = @all(light[salon])
-lights.power = on
+$lights = @all(light[salon])
+$lights.power = on
 ```
 
 **VM execution:**

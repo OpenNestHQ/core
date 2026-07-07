@@ -144,7 +144,7 @@ describe("generateHomeAgentPrompt", () => {
     it("should contain example DSL patterns", () => {
       expect(prompt).toContain("tv[salon].power = on");
       expect(prompt).toContain("tv.power = on");
-      expect(prompt).toContain("it.power = off");
+      expect(prompt).toContain("$it.power = off");
       expect(prompt).toContain("thermostat.temperature = 21");
       expect(prompt).toContain("light[*].power = off");
       expect(prompt).toContain("speaker.play()");

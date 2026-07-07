@@ -35,12 +35,20 @@ function toErrorInfo(err: ParseError): ParseErrorInfo {
 }
 
 function parseSegment(raw: string, line: number, col: number): Segment {
-  const match = raw.match(/^([a-zA-Z_]\w*)(?:\[([a-zA-Z_]\w*|\*)\])?$/);
+  let identifier = raw;
+  let isVariable = false;
+
+  if (identifier.startsWith("$")) {
+    identifier = identifier.slice(1);
+    isVariable = true;
+  }
+
+  const match = identifier.match(/^([a-zA-Z_]\w*)(?:\[([a-zA-Z_]\w*|\*)\])?$/);
   if (!match) {
     throw new ParseError(`Invalid path segment: "${raw}"`, line, col + raw.indexOf(".") + 1);
   }
 
-  const identifier = match[1]!;
+  const name = match[1]!;
   const roomPart = match[2] ?? null;
 
   let roomSelector: RoomSelector | null = null;
@@ -50,7 +58,15 @@ function parseSegment(raw: string, line: number, col: number): Segment {
     roomSelector = { kind: "room", name: roomPart };
   }
 
-  return { identifier, roomSelector };
+  if (isVariable && roomSelector !== null) {
+    throw new ParseError(`Variable references cannot have a room selector: "${raw}"`, line, col);
+  }
+
+  if (name === "it" && !isVariable) {
+    throw new ParseError(`Bare "it" is not a device type — use $it for the context reference: "${raw}"`, line, col);
+  }
+
+  return { identifier: name, roomSelector, ...(isVariable ? { isVariable: true } : {}) };
 }
 
 function parsePath(raw: string, line: number): Segment[] {
@@ -183,10 +199,24 @@ function parseStatement(raw: string, lineNumber: number): Statement {
       return { kind: "assignment", path, value };
     }
 
+    if (left.startsWith("$")) {
+      const name = left.slice(1).trim();
+      if (name.length === 0) {
+        throw new ParseError(`Invalid variable name: "${left}"`, lineNumber, col);
+      }
+      if (!/^[a-zA-Z_]\w*$/.test(name)) {
+        throw new ParseError(`Invalid variable name: "${left}"`, lineNumber, col);
+      }
+      if (name === "it") {
+        throw new ParseError(`$it is reserved — "it" is the built-in context reference`, lineNumber, col);
+      }
+      const exprCol = raw.length - trimmed.length + 1;
+      const value = parseExpr(right, lineNumber, exprCol + eqIndex + 1);
+      return { kind: "variable_assignment", name, value };
+    }
+
     if (/^[a-zA-Z_]\w*$/.test(left)) {
-      const varCol = raw.length - trimmed.length + 1;
-      const value = parseExpr(right, lineNumber, varCol + eqIndex + 1);
-      return { kind: "variable_assignment", name: left, value };
+      throw new ParseError(`Missing "$" prefix for variable assignment: "${left}" — did you forget "$"?`, lineNumber, col);
     }
 
     throw new ParseError(`Invalid variable name: "${left}"`, lineNumber, col);

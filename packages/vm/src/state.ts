@@ -37,9 +37,9 @@ export function resolveAmbiguity(
 
   if (stmt && stmt.kind !== "variable_assignment") {
     if (stmt.path.length > 0) {
-      const identifier = stmt.path[0]!.identifier;
-      if (identifier in session.variables) {
-        variableName = identifier;
+      const firstSeg = stmt.path[0]!;
+      if (firstSeg.isVariable) {
+        variableName = firstSeg.identifier;
       }
     }
   }

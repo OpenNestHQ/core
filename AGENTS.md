@@ -146,11 +146,23 @@ Excluded devices report `reason: "property_not_supported" | "action_not_supporte
 - `@all(type[room])` — expands to all matches, bypasses ambiguity, executes in batch.
 - `@first(type[room])` — selects the first match.
 - `[*]` wildcard room selector — matches devices in all rooms, bypasses ambiguity.
-- Variables remember their modifier: `lights = @all(light[salon])` binds with `@all` semantics.
+- Variables remember their modifier: `$lights = @all(light[salon])` binds with `@all` semantics.
 
 ### `it` context
 
 The last successfully resolved device is stored in `session.it`. It persists across VM calls within the same session.
+
+### Variables (`$` prefix)
+
+Variables MUST be prefixed with `$` in the DSL (both assignment and usage). The parser strips the `$` and sets `Segment.isVariable = true` on the first segment. The VM resolver uses `isVariable` to dispatch to variable resolution instead of checking `session.variables` at runtime.
+
+```
+$tv = tv[salon]       # assignment — name stored as "tv"
+$tv.power = on        # usage — path[0].isVariable === true
+```
+
+- `$it` is the context reference — auto-managed by the VM, cannot be reassigned (`$it = ...` is rejected).
+- Room selectors on variable references (`$tv[salon].power`) are rejected.
 
 ### Default devices & rooms
 

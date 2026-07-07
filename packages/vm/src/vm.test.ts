@@ -90,10 +90,13 @@ function parse(code: string) {
   return result.program;
 }
 
-function seg(identifier: string, room?: string): Segment {
-  if (room === "*") return { identifier, roomSelector: { kind: "wildcard" as const } };
-  if (room) return { identifier, roomSelector: { kind: "room" as const, name: room } };
-  return { identifier, roomSelector: null };
+function seg(identifier: string, room?: string, isVariable?: boolean): Segment {
+  const base = room === "*"
+    ? { identifier, roomSelector: { kind: "wildcard" as const } }
+    : room
+      ? { identifier, roomSelector: { kind: "room" as const, name: room } }
+      : { identifier, roomSelector: null };
+  return isVariable ? { ...base, isVariable: true } : base;
 }
 
 function on(): PowerValue {
@@ -202,7 +205,7 @@ describe("interpret_home_dsl", () => {
 
   describe("variable assignments", () => {
     it("should store a variable reference", async () => {
-      const program = parse("salon_tv = tv[salon]");
+      const program = parse("$salon_tv = tv[salon]");
       const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
@@ -214,7 +217,7 @@ describe("interpret_home_dsl", () => {
     });
 
     it("should use a variable to reference a device", async () => {
-      const program = parse(`salon_tv = tv[salon]\nsalon_tv.power = on`);
+      const program = parse(`$salon_tv = tv[salon]\n$salon_tv.power = on`);
       const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
@@ -225,7 +228,7 @@ describe("interpret_home_dsl", () => {
     });
 
     it("should store a collection variable", async () => {
-      const program = parse("lights = @all(light[salon])");
+      const program = parse("$lights = @all(light[salon])");
       const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
@@ -239,7 +242,7 @@ describe("interpret_home_dsl", () => {
 
   describe("context reference (it)", () => {
     it("should use 'it' to reference the last resolved device", async () => {
-      const program = parse(`tv[salon].volume = 20\nit.power = on`);
+      const program = parse(`tv[salon].volume = 20\n$it.power = on`);
       const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
@@ -252,7 +255,7 @@ describe("interpret_home_dsl", () => {
     });
 
     it("should error when 'it' is used before any resolution", async () => {
-      const program = parse("it.power = on");
+      const program = parse("$it.power = on");
       const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("error");
@@ -265,7 +268,7 @@ describe("interpret_home_dsl", () => {
 
       expect(result1.session.it?.id).toBe("tv_salon");
 
-      const program2 = parse("it.power = on");
+      const program2 = parse("$it.power = on");
       const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
@@ -441,7 +444,7 @@ describe("interpret_home_dsl", () => {
 
     it("should auto-resolve variable after previous resolution", async () => {
       const context = await multiTvSalonCtx();
-      const program = parse(`my_tv = tv[salon]\nmy_tv.power = on`);
+      const program = parse(`$my_tv = tv[salon]\n$my_tv.power = on`);
       const result1 = await interpret_home_dsl(program, context);
 
       expect(result1.status).toBe("waiting");
@@ -456,7 +459,7 @@ describe("interpret_home_dsl", () => {
     it("should auto-resolve variable across programs after resolution", async () => {
       const context = await multiTvSalonCtx();
 
-      const program1 = parse(`my_tv = tv[salon]\nmy_tv.power = on`);
+      const program1 = parse(`$my_tv = tv[salon]\n$my_tv.power = on`);
       const result1 = await interpret_home_dsl(program1, context);
       expect(result1.status).toBe("waiting");
 
@@ -464,7 +467,7 @@ describe("interpret_home_dsl", () => {
       const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
       expect(result2.status).toBe("success");
 
-      const program2 = parse("my_tv.volume = 50");
+      const program2 = parse("$my_tv.volume = 50");
       const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
 
       expect(result3.status).toBe("success");
@@ -476,13 +479,13 @@ describe("interpret_home_dsl", () => {
     it("should invalidate variable resolution on re-assignment", async () => {
       const context = await multiTvSalonCtx();
 
-      const program1 = parse(`my_tv = tv[salon]\nmy_tv.power = on`);
+      const program1 = parse(`$my_tv = tv[salon]\n$my_tv.power = on`);
       const result1 = await interpret_home_dsl(program1, context);
       applyResolution(result1.session, "tv", "tv_samsung_salon", "my_tv");
       const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
       expect(result2.status).toBe("success");
 
-      const program2 = parse(`my_tv = tv\nmy_tv.power = off`);
+      const program2 = parse(`$my_tv = tv\n$my_tv.power = off`);
       const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
 
       expect(result3.status).toBe("waiting");
@@ -595,17 +598,28 @@ describe("interpret_home_dsl", () => {
     });
 
     it("should persist variables across calls", async () => {
-      const program1 = parse("salon_tv = tv[salon]");
+      const program1 = parse("$salon_tv = tv[salon]");
       const context1 = await ctx();
       const result1 = await interpret_home_dsl(program1, context1);
 
-      const program2 = parse("salon_tv.volume = 50");
+      const program2 = parse("$salon_tv.volume = 50");
       const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
       expect(result2.session.variables["salon_tv"]).toBeDefined();
       const lastExec = result2.executed[result2.executed.length - 1]!;
       expect(lastExec.resolvedDevices[0]!.id).toBe("tv_salon");
+    });
+
+    it("should accumulate history across calls", async () => {
+      const program1 = parse("tv[salon].power = on");
+      const context1 = await ctx();
+      const result1 = await interpret_home_dsl(program1, context1);
+
+      const program2 = parse("speaker[salon].volume = 10");
+      const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
+
+      expect(result2.session.history).toHaveLength(2);
     });
 
     it("should accumulate history across calls", async () => {
@@ -743,7 +757,7 @@ describe("interpret_home_dsl", () => {
       };
 
       const result = resolveDevices(
-        [seg("salon_tv"), seg("power")],
+        [seg("salon_tv", undefined, true), seg("power")],
         devs,
         session,
       );
@@ -752,13 +766,13 @@ describe("interpret_home_dsl", () => {
       expect(result.devices[0]!.id).toBe("tv_salon");
     });
 
-    it("should resolve 'it' context reference", async () => {
+    it("should resolve '$it' context reference", async () => {
       const devs = await devices();
       const session = createSession();
       session.it = devs.find((d) => d.id === "tv_salon")!;
 
       const result = resolveDevices(
-        [seg("it"), seg("power")],
+        [seg("it", undefined, true), seg("power")],
         devs,
         session,
       );
@@ -767,10 +781,10 @@ describe("interpret_home_dsl", () => {
       expect(result.devices[0]!.id).toBe("tv_salon");
     });
 
-    it("should return empty when 'it' is not set", async () => {
+    it("should return empty when '$it' is not set", async () => {
       const devs = await devices();
       const result = resolveDevices(
-        [seg("it"), seg("power")],
+        [seg("it", undefined, true), seg("power")],
         devs,
         createSession(),
       );
@@ -853,7 +867,7 @@ describe("interpret_home_dsl", () => {
 
   describe("README example flows", () => {
     it("should turn on all lights in the living room", async () => {
-      const program = parse(`lights = @all(light[salon])\nlights.power = on`);
+      const program = parse(`$lights = @all(light[salon])\n$lights.power = on`);
       const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
@@ -869,7 +883,7 @@ describe("interpret_home_dsl", () => {
     });
 
     it("should turn on only the first light with @first", async () => {
-      const program = parse(`first_light = @first(light[salon])\nfirst_light.power = on`);
+      const program = parse(`$first_light = @first(light[salon])\n$first_light.power = on`);
       const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
@@ -886,14 +900,14 @@ describe("interpret_home_dsl", () => {
     });
 
     it("should resolve @first across multiple programs", async () => {
-      const program1 = parse("my_light = @first(light[salon])");
+      const program1 = parse("$my_light = @first(light[salon])");
       const context1 = await ctx();
       const result1 = await interpret_home_dsl(program1, context1);
 
       expect(result1.status).toBe("success");
       expect(result1.session.variableModifiers["my_light"]).toBe("@first");
 
-      const program2 = parse("my_light.power = off");
+      const program2 = parse("$my_light.power = off");
       const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
@@ -903,7 +917,7 @@ describe("interpret_home_dsl", () => {
     });
 
     it("should assign tv power and volume in sequence", async () => {
-      const program = parse(`tv[salon].power = on\nit.volume = 20`);
+      const program = parse(`tv[salon].power = on\n$it.volume = 20`);
       const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("success");
@@ -1134,7 +1148,7 @@ describe("interpret_home_dsl", () => {
     });
 
     it("should not set filter on executed statement when no intent is used", async () => {
-      const program = parse("salon_tv = tv[salon]");
+      const program = parse("$salon_tv = tv[salon]");
       const result = await interpret_home_dsl(program, await filteredCtx());
 
       expect(result.status).toBe("success");

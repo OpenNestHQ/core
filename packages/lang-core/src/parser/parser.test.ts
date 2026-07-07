@@ -13,10 +13,17 @@ function makeAssignmentValue(v: number | "on" | "off" | string | { kind: string;
   return { kind: "identifier" as const, value: v };
 }
 
-function seg(identifier: string, room?: string): Segment {
-  if (room === "*") return { identifier, roomSelector: { kind: "wildcard" } };
-  if (room) return { identifier, roomSelector: { kind: "room", name: room } };
-  return { identifier, roomSelector: null };
+function seg(identifier: string, room?: string, isVariable?: boolean): Segment {
+  const base = room === "*"
+    ? { identifier, roomSelector: { kind: "wildcard" as const } }
+    : room
+      ? { identifier, roomSelector: { kind: "room" as const, name: room } }
+      : { identifier, roomSelector: null };
+  return isVariable ? { ...base, isVariable: true } : base;
+}
+
+function vseg(identifier: string): Segment {
+  return { identifier, roomSelector: null, isVariable: true };
 }
 
 function result(statements: unknown[]) {
@@ -77,17 +84,19 @@ describe("parseHomeDSL", () => {
     });
   });
 
-  describe("context reference (it)", () => {
-    it("should parse it.power = off", () => {
-      expect(parseHomeDSL("it.power = off")).toEqual(result([assignment([seg("it"), seg("power")], "off")]));
+  describe("context reference ($it)", () => {
+    it("should parse $it.power = off", () => {
+      expect(parseHomeDSL("$it.power = off")).toEqual(result([assignment([vseg("it"), seg("power")], "off")]));
     });
 
-    it("should parse it.volume = 20", () => {
-      expect(parseHomeDSL("it.volume = 20")).toEqual(result([assignment([seg("it"), seg("volume")], 20)]));
+    it("should parse $it.volume = 20", () => {
+      expect(parseHomeDSL("$it.volume = 20")).toEqual(result([assignment([vseg("it"), seg("volume")], 20)]));
     });
 
-    it("should parse it with room selector and action", () => {
-      expect(parseHomeDSL("it[salon].power = on")).toEqual(result([assignment([seg("it", "salon"), seg("power")], "on")]));
+    it("should reject room selector on $it", () => {
+      const r = parseHomeDSL("$it[salon].power = on");
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0]!.message).toMatch(/room selector/);
     });
   });
 
@@ -114,10 +123,10 @@ describe("parseHomeDSL", () => {
       }]));
     });
 
-    it("should parse it.volume += 5", () => {
-      expect(parseHomeDSL("it.volume += 5")).toEqual(result([{
+    it("should parse $it.volume += 5", () => {
+      expect(parseHomeDSL("$it.volume += 5")).toEqual(result([{
         kind: "increment",
-        path: [seg("it"), seg("volume")],
+        path: [vseg("it"), seg("volume")],
         value: { kind: "number", value: 5 },
       }]));
     });
@@ -164,14 +173,14 @@ describe("parseHomeDSL", () => {
       expect(parseHomeDSL("tv[salon].play()")).toEqual(result([{ kind: "action", path: [seg("tv", "salon"), seg("play")] }]));
     });
 
-    it("should parse it.play()", () => {
-      expect(parseHomeDSL("it.play()")).toEqual(result([{ kind: "action", path: [seg("it"), seg("play")] }]));
+    it("should parse $it.play()", () => {
+      expect(parseHomeDSL("$it.play()")).toEqual(result([{ kind: "action", path: [vseg("it"), seg("play")] }]));
     });
   });
 
   describe("variable assignments", () => {
-    it("should parse living_tv = tv[salon]", () => {
-      expect(parseHomeDSL("living_tv = tv[salon]")).toEqual(result([{
+    it("should parse $living_tv = tv[salon]", () => {
+      expect(parseHomeDSL("$living_tv = tv[salon]")).toEqual(result([{
         kind: "variable_assignment",
         name: "living_tv",
         value: {
@@ -182,8 +191,8 @@ describe("parseHomeDSL", () => {
       }]));
     });
 
-    it("should parse lights = @all(light[salon])", () => {
-      expect(parseHomeDSL("lights = @all(light[salon])")).toEqual(result([{
+    it("should parse $lights = @all(light[salon])", () => {
+      expect(parseHomeDSL("$lights = @all(light[salon])")).toEqual(result([{
         kind: "variable_assignment",
         name: "lights",
         value: {
@@ -197,8 +206,8 @@ describe("parseHomeDSL", () => {
       }]));
     });
 
-    it("should parse tvs = @all(tv[salon])", () => {
-      expect(parseHomeDSL("tvs = @all(tv[salon])")).toEqual(result([{
+    it("should parse $tvs = @all(tv[salon])", () => {
+      expect(parseHomeDSL("$tvs = @all(tv[salon])")).toEqual(result([{
         kind: "variable_assignment",
         name: "tvs",
         value: {
@@ -213,7 +222,7 @@ describe("parseHomeDSL", () => {
     });
 
     it("should parse @first collection", () => {
-      expect(parseHomeDSL("first_light = @first(light[chambre])")).toEqual(result([{
+      expect(parseHomeDSL("$first_light = @first(light[chambre])")).toEqual(result([{
         kind: "variable_assignment",
         name: "first_light",
         value: {
@@ -228,7 +237,7 @@ describe("parseHomeDSL", () => {
     });
 
     it("should parse collection with wildcard", () => {
-      expect(parseHomeDSL("all_lights = @all(light[*])")).toEqual(result([{
+      expect(parseHomeDSL("$all_lights = @all(light[*])")).toEqual(result([{
         kind: "variable_assignment",
         name: "all_lights",
         value: {
@@ -243,7 +252,7 @@ describe("parseHomeDSL", () => {
     });
 
     it("should parse device ref without room", () => {
-      expect(parseHomeDSL("my_tv = tv")).toEqual(result([{
+      expect(parseHomeDSL("$my_tv = tv")).toEqual(result([{
         kind: "variable_assignment",
         name: "my_tv",
         value: {
@@ -255,7 +264,7 @@ describe("parseHomeDSL", () => {
     });
 
     it("should parse variable assigned to power value", () => {
-      expect(parseHomeDSL("state = on")).toEqual(result([{
+      expect(parseHomeDSL("$state = on")).toEqual(result([{
         kind: "variable_assignment",
         name: "state",
         value: { kind: "power", value: "on" },
@@ -263,7 +272,7 @@ describe("parseHomeDSL", () => {
     });
 
     it("should parse variable assigned to number", () => {
-      expect(parseHomeDSL("target_temp = 22")).toEqual(result([{
+      expect(parseHomeDSL("$target_temp = 22")).toEqual(result([{
         kind: "variable_assignment",
         name: "target_temp",
         value: { kind: "number", value: 22 },
@@ -271,7 +280,7 @@ describe("parseHomeDSL", () => {
     });
 
     it("should parse variable assigned to string", () => {
-      expect(parseHomeDSL('label = "living room"')).toEqual(result([{
+      expect(parseHomeDSL('$label = "living room"')).toEqual(result([{
         kind: "variable_assignment",
         name: "label",
         value: { kind: "string", value: "living room" },
@@ -279,9 +288,97 @@ describe("parseHomeDSL", () => {
     });
   });
 
+  describe("variable references in paths", () => {
+    it("should parse $tv.power = on as assignment with isVariable", () => {
+      expect(parseHomeDSL("$tv.power = on")).toEqual(result([assignment([vseg("tv"), seg("power")], "on")]));
+    });
+
+    it("should parse $tv.volume += 10 as increment with isVariable", () => {
+      expect(parseHomeDSL("$tv.volume += 10")).toEqual(result([{
+        kind: "increment",
+        path: [vseg("tv"), seg("volume")],
+        value: { kind: "number", value: 10 },
+      }]));
+    });
+
+    it("should parse $tv.volume? as query with isVariable", () => {
+      expect(parseHomeDSL("$tv.volume?")).toEqual(result([{
+        kind: "query",
+        path: [vseg("tv"), seg("volume")],
+      }]));
+    });
+
+    it("should parse $tv.play() as action with isVariable", () => {
+      expect(parseHomeDSL("$tv.play()")).toEqual(result([{
+        kind: "action",
+        path: [vseg("tv"), seg("play")],
+      }]));
+    });
+
+    it("should parse $salon_tv.power = off", () => {
+      expect(parseHomeDSL("$salon_tv.power = off")).toEqual(result([assignment([vseg("salon_tv"), seg("power")], "off")]));
+    });
+  });
+
+  describe("variable name validation", () => {
+    it("should reject room selector on variable reference", () => {
+      const r = parseHomeDSL("$tv[salon].power = on");
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0]!.message).toMatch(/Variable references cannot have a room selector/);
+    });
+
+    it("should reject room selector on variable in action", () => {
+      const r = parseHomeDSL("$tv[salon].play()");
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0]!.message).toMatch(/Variable references cannot have a room selector/);
+    });
+
+    it("should reject $it as variable name", () => {
+      const r = parseHomeDSL("$it = tv[salon]");
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0]!.message).toMatch(/reserved/);
+    });
+
+    it("should suggest $ when variable name is missing $", () => {
+      const r = parseHomeDSL("tv = tv[salon]");
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0]!.message).toMatch(/\$/);
+    });
+
+    it("should suggest $ for old-style variable name", () => {
+      const r = parseHomeDSL("lights = @all(light[salon])");
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0]!.message).toMatch(/\$/);
+    });
+
+    it("should reject variable name with special chars after $", () => {
+      const r = parseHomeDSL("$123abc = tv[salon]");
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0]!.message).toMatch(/Invalid variable name/);
+    });
+
+    it("should reject empty variable name after $", () => {
+      const r = parseHomeDSL("$ = tv[salon]");
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0]!.message).toMatch(/Invalid variable name/);
+    });
+
+    it("should parse variable with underscore and digits", () => {
+      expect(parseHomeDSL("$tv_42 = tv[salon]")).toEqual(result([{
+        kind: "variable_assignment",
+        name: "tv_42",
+        value: {
+          kind: "device_ref",
+          deviceType: "tv",
+          roomSelector: { kind: "room", name: "salon" },
+        },
+      }]));
+    });
+  });
+
   describe("multi-line programs", () => {
     it("should parse program from README example", () => {
-      const r = parseHomeDSL("lights = @all(light[salon])\nlights.power = on");
+      const r = parseHomeDSL("$lights = @all(light[salon])\n$lights.power = on");
       expect(r.program.kind).toBe("program");
       expect(r.program.statements).toHaveLength(2);
       expect(r.program.statements[0]!.kind).toBe("variable_assignment");
@@ -289,14 +386,14 @@ describe("parseHomeDSL", () => {
     });
 
     it("should parse program from prompt example", () => {
-      const r = parseHomeDSL("tv.power = on\nit.volume = 20");
+      const r = parseHomeDSL("tv.power = on\n$it.volume = 20");
       expect(r.program.statements).toHaveLength(2);
       expect(r.program.statements[0]!.kind).toBe("assignment");
       expect(r.program.statements[1]!.kind).toBe("assignment");
     });
 
     it("should handle empty lines between statements", () => {
-      const r = parseHomeDSL("tv.power = on\n\nit.volume = 20\n\nspeaker.play()");
+      const r = parseHomeDSL("tv.power = on\n\n$it.volume = 20\n\nspeaker.play()");
       expect(r.program.statements).toHaveLength(3);
       expect(r.program.statements[0]!.kind).toBe("assignment");
       expect(r.program.statements[1]!.kind).toBe("assignment");
@@ -351,7 +448,7 @@ describe("parseHomeDSL", () => {
     });
 
     it("should handle spaces in collection expression", () => {
-      const r = parseHomeDSL("x = @all(  light[salon]  )");
+      const r = parseHomeDSL("$x = @all(  light[salon]  )");
       expect(r.program.statements).toHaveLength(1);
       const stmt = r.program.statements[0]!;
       expect(stmt.kind).toBe("variable_assignment");
@@ -437,7 +534,7 @@ describe("parseHomeDSL", () => {
     });
 
     it("should record error on invalid device ref in expression", () => {
-      const r = parseHomeDSL("x = tv[[salon]]");
+      const r = parseHomeDSL("$x = tv[[salon]]");
       expect(r.errors).toHaveLength(1);
     });
 

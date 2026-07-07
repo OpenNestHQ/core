@@ -14,6 +14,7 @@ export interface RoomWildcard {
 export interface Segment {
   identifier: string;
   roomSelector: RoomSelector | null;
+  isVariable?: boolean;
 }
 
 /** Values that can appear in property assignments. */

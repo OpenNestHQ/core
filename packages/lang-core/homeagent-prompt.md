@@ -137,6 +137,19 @@ tv[salon].power = on
 
 light[chambre].brightness = 50
 
+## Variable assignment
+$tv = tv[salon]
+
+$lights = @all(light[salon])
+
+## Variable usage
+$tv.power = on
+
+$lights.power = off
+
+Variables MUST be prefixed with $ (both when defining and using).
+A variable stores a device or collection reference for reuse.
+
 ## Query
 tv.power?
 
@@ -151,10 +164,10 @@ vacuum.start()
 camera.snapshot()
 
 ## Context reference
-it.power = off
-it.volume = 20
+$it.power = off
+$it.volume = 20
 
-Use `it` ONLY when referring to last resolved device or selection.
+Use `$it` ONLY when referring to last resolved device or selection.
 
 # MULTIPLE INSTRUCTIONS
 
@@ -165,7 +178,7 @@ Turn on the TV and set volume to 20
 
 Output:
 tv.power = on
-it.volume = 20
+$it.volume = 20
 
 ---
 
@@ -239,7 +252,7 @@ User:
 Turn it off
 
 →
-it.power = off
+$it.power = off
 
 User:
 Set temperature to 21

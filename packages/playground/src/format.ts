@@ -189,7 +189,7 @@ Commands:${N}
 ${B}Tips:${N}
   - Multiple statements as one program: use ${C}:{${N}\u2026${C}:}${N} or paste
   - Use ${G}@all${N} and ${G}@first${N} modifiers: ${D}all_lights = @all(light[${N}*${D}])${N}
-  - Use ${G}it${N} to reference the last resolved device
+  - Use ${G}$it${N} to reference the last resolved device
   - When ambiguous, a numbered list will appear \u2014 type the number to choose
 `;
 }

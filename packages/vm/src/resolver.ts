@@ -19,13 +19,14 @@ export function resolveDevices(
     return { devices: [], ambiguous: false };
   }
 
-  const isContextRef = firstSegment.identifier === "it";
-  const isVariableRef = firstSegment.identifier in session.variables;
-
-  if (isVariableRef) {
+  if (firstSegment.isVariable) {
+    if (firstSegment.identifier === "it") {
+      return resolveContextRef(session, intent);
+    }
     return resolveVariableRef(firstSegment.identifier, segments, devices, session, intent);
   }
 
+  const isContextRef = firstSegment.identifier === "it";
   if (isContextRef) {
     return resolveContextRef(session, intent);
   }
