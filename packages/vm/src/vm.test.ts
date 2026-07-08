@@ -1402,6 +1402,104 @@ describe("interpret_home_dsl", () => {
       expect(exec.resolvedDevices[0]!.type).toBe("light");
     });
 
+    it("should resolve @oneof with a single matching device", async () => {
+      const program = parse(`$tv = @oneof(tv[salon])\n$tv.power = on`);
+      const result = await interpret_home_dsl(program, await ctx());
+
+      expect(result.status).toBe("success");
+      expect(result.executed).toHaveLength(2);
+
+      const varExec = result.executed[0]!;
+      expect(varExec.resolvedDevices).toHaveLength(1);
+      expect(varExec.resolvedDevices[0]!.id).toBe("tv_salon");
+      expect(result.session.variableModifiers["tv"]).toBe("@oneof");
+      expect(result.session.variableResolvedIds["tv"]).toBe("tv_salon");
+
+      const assignExec = result.executed[1]!;
+      expect(assignExec.resolvedDevices).toHaveLength(1);
+      expect(assignExec.resolvedDevices[0]!.id).toBe("tv_salon");
+
+      const pwr = await getProperty(assignExec.resolvedDevices[0]!, "power");
+      expect(pwr).toBe(true);
+    });
+
+    it("should trigger ambiguity on @oneof with multiple devices", async () => {
+      const program = parse("$my_light = @oneof(light)");
+      const result = await interpret_home_dsl(program, await ctx());
+
+      expect(result.status).toBe("waiting");
+      expect(result.awaiting).toBeDefined();
+      expect(result.awaiting!.tree.type).toBe("light");
+      expect(result.awaiting!.tree.children).toHaveLength(1);
+      expect(result.awaiting!.tree.children[0]!.key).toBe("salon");
+      expect(result.awaiting!.tree.children[0]!.children).toHaveLength(2);
+    });
+
+    it("should error on @oneof with zero matching devices", async () => {
+      const program = parse("$v = @oneof(vacuum[chambre])");
+      const result = await interpret_home_dsl(program, await ctx());
+
+      expect(result.status).toBe("error");
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]!.message).toContain("@oneof(vacuum)");
+    });
+
+    it("should resolve @oneof across multiple programs after ambiguity resolution", async () => {
+      const program1 = parse("$light = @oneof(light)");
+      const context1 = await ctx();
+      const result1 = await interpret_home_dsl(program1, context1);
+
+      expect(result1.status).toBe("waiting");
+      expect(result1.awaiting!.tree.type).toBe("light");
+
+      applyResolution(result1.session, "light", "light_salon_1");
+      const program2 = parse("$light = @oneof(light)\n$light.power = off");
+      const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
+
+      expect(result2.status).toBe("success");
+      expect(result2.session.variableResolvedIds["light"]).toBe("light_salon_1");
+
+      const assignExec = result2.executed[result2.executed.length - 1]!;
+      expect(assignExec.resolvedDevices).toHaveLength(1);
+      expect(assignExec.resolvedDevices[0]!.id).toBe("light_salon_1");
+
+      const pwr = await getProperty(assignExec.resolvedDevices[0]!, "power");
+      expect(pwr).toBe(false);
+    });
+
+    it("should work with @oneof in @if condition after resolution", async () => {
+      const program = parse(`$l = @oneof(light)\n@if $l.power? == off\n$l.power = on\n@endif`);
+      const context = await ctx();
+
+      // First run: ambiguity on @oneof
+      const result1 = await interpret_home_dsl(program, context);
+      expect(result1.status).toBe("waiting");
+
+      // Resolve to light_salon_2 which has power: true
+      applyResolution(result1.session, "light", "light_salon_2");
+      const result2 = await interpret_home_dsl(program, { devices: context.devices, session: result1.session });
+
+      expect(result2.status).toBe("success");
+      // light_salon_2 has power: true, so condition is false and body is not executed
+      expect(result2.session.variableResolvedIds["l"]).toBe("light_salon_2");
+    });
+
+    it("should return error for @oneof in @if when no resolution happened", async () => {
+      // Direct device ref in @if with multiple matches — should give the new error message
+      const driver = makeDriver();
+      const devs: Device[] = [
+        await makeDevice("a", "light", "salon", "A", driver, { power: true }),
+        await makeDevice("b", "light", "salon", "B", driver, { power: false }),
+      ];
+      const program = parse("@if light.power? == on\nspeaker.power = on\n@endif");
+      const result = await interpret_home_dsl(program, { devices: devs });
+
+      expect(result.status).toBe("error");
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]!.message).toContain("@oneof");
+      expect(result.errors[0]!.message).toContain("$var = @oneof(device_type)");
+    });
+
     it("should assign tv power and volume in sequence", async () => {
       const program = parse(`tv[salon].power = on\n$it.volume = 20`);
       const result = await interpret_home_dsl(program, await ctx());

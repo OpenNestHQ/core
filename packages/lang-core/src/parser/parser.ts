@@ -122,7 +122,7 @@ function parseDeviceRef(raw: string, line: number, col: number): { deviceType: s
 function parseExpr(raw: string, line: number, col: number): Expr {
   const trimmed = raw.trim();
 
-  const collectionMatch = trimmed.match(/^@(all|first)\((.+)\)$/);
+  const collectionMatch = trimmed.match(/^@(all|first|oneof)\((.+)\)$/);
   if (collectionMatch) {
     const modifier = `@${collectionMatch[1]}` as CollectionModifier;
     const device = parseDeviceRef(collectionMatch[2]!.trim(), line, col + collectionMatch[1]!.length + 2);

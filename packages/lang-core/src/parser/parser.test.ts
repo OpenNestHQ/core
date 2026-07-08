@@ -236,6 +236,51 @@ describe("parseHomeDSL", () => {
       }]));
     });
 
+    it("should parse @oneof collection", () => {
+      expect(parseHomeDSL("$my_tv = @oneof(tv[salon])")).toEqual(result([{
+        kind: "variable_assignment",
+        name: "my_tv",
+        value: {
+          kind: "collection",
+          modifier: "@oneof",
+          device: {
+            deviceType: "tv",
+            roomSelector: { kind: "room", name: "salon" },
+          },
+        },
+      }]));
+    });
+
+    it("should parse @oneof without room selector", () => {
+      expect(parseHomeDSL("$main_light = @oneof(light)")).toEqual(result([{
+        kind: "variable_assignment",
+        name: "main_light",
+        value: {
+          kind: "collection",
+          modifier: "@oneof",
+          device: {
+            deviceType: "light",
+            roomSelector: null,
+          },
+        },
+      }]));
+    });
+
+    it("should parse @oneof with wildcard", () => {
+      expect(parseHomeDSL("$any_tv = @oneof(tv[*])")).toEqual(result([{
+        kind: "variable_assignment",
+        name: "any_tv",
+        value: {
+          kind: "collection",
+          modifier: "@oneof",
+          device: {
+            deviceType: "tv",
+            roomSelector: { kind: "wildcard" },
+          },
+        },
+      }]));
+    });
+
     it("should parse collection with wildcard", () => {
       expect(parseHomeDSL("$all_lights = @all(light[*])")).toEqual(result([{
         kind: "variable_assignment",

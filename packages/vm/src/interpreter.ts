@@ -107,7 +107,7 @@ async function interpretStatement(
     case "action":
       return interpretAction(statement, devices, session);
     case "variable_assignment":
-      return interpretVariableAssignment(statement, session);
+      return interpretVariableAssignment(statement, devices, session);
     case "if":
       return interpretIfStatement(statement, devices, session);
   }
@@ -305,10 +305,11 @@ async function interpretAction(
   return { kind: "success" };
 }
 
-function interpretVariableAssignment(
+async function interpretVariableAssignment(
   stmt: VariableAssignment,
+  devices: Device[],
   session: Session,
-): InterpretResult {
+): Promise<InterpretResult> {
   if (stmt.value.kind === "device_ref") {
     session.variables[stmt.name] = stmt.value;
     delete session.variableResolvedIds[stmt.name];
@@ -326,6 +327,46 @@ function interpretVariableAssignment(
       deviceType: stmt.value.device.deviceType,
       roomSelector: stmt.value.device.roomSelector,
     };
+
+    if (stmt.value.modifier === "@oneof") {
+      const pseudoSegments = [
+        {
+          identifier: stmt.value.device.deviceType,
+          roomSelector: stmt.value.device.roomSelector,
+        },
+      ];
+      const resolutionResult = resolveDevices(pseudoSegments, devices, session);
+
+      if (resolutionResult.ambiguous) {
+        return {
+          kind: "waiting",
+          ambiguity: buildAmbiguityInfo(resolutionResult.devices),
+        };
+      }
+
+      if (resolutionResult.devices.length === 0) {
+        return {
+          kind: "error",
+          errors: [{
+            statement: stmt,
+            message: `No devices found for @oneof(${stmt.value.device.deviceType})`,
+          }],
+        };
+      }
+
+      const device = resolutionResult.devices[0]!;
+      session.variables[stmt.name] = deviceRef;
+      session.variableResolvedIds[stmt.name] = device.id;
+      session.variableModifiers[stmt.name] = "@oneof";
+      session.it = device;
+      session.history.push({
+        statement: stmt,
+        resolvedDevices: [device],
+        changes: [],
+      });
+      return { kind: "success" };
+    }
+
     session.variables[stmt.name] = deviceRef;
     session.variableModifiers[stmt.name] = stmt.value.modifier;
     delete session.variableResolvedIds[stmt.name];
@@ -431,7 +472,7 @@ async function evaluateSimpleCondition(
   if (resolutionResult.ambiguous) {
     return {
       kind: "error",
-      message: "Ambiguous device in @if condition — use a variable to pre-resolve the device",
+      message: "Ambiguous device in @if condition — use @oneof to pre-resolve: $var = @oneof(device_type)",
     };
   }
 
@@ -445,7 +486,7 @@ async function evaluateSimpleCondition(
   if (resolutionResult.devices.length > 1) {
     return {
       kind: "error",
-      message: "Multiple devices matched in @if condition — use a specific room selector or variable",
+      message: "Multiple devices matched in @if condition — use @oneof to pre-resolve: $var = @oneof(device_type)",
     };
   }
 

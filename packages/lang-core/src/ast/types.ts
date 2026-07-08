@@ -49,7 +49,7 @@ export interface DeviceRef {
   roomSelector: RoomSelector | null;
 }
 
-export type CollectionModifier = "@all" | "@first";
+export type CollectionModifier = "@all" | "@first" | "@oneof";
 
 export interface CollectionRef {
   kind: "collection";

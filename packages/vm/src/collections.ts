@@ -20,6 +20,10 @@ export function expandCollection(
     return { ...result, devices: [result.devices[0]!], ambiguous: false };
   }
 
+  if (collection.modifier === "@oneof") {
+    return result;
+  }
+
   return result;
 }
 

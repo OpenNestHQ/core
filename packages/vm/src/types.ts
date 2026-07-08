@@ -34,7 +34,7 @@ export interface Session {
   cursor: number;
   resolvedIds: Record<string, string>;
   variableResolvedIds: Record<string, string>;
-  variableModifiers: Record<string, "@all" | "@first">;
+  variableModifiers: Record<string, "@all" | "@first" | "@oneof">;
 }
 
 export interface AmbiguityTreeDevice {

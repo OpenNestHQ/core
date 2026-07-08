@@ -108,6 +108,18 @@ $lights = @all(light[salon])
 $lights.power = on
 ```
 
+**Pre-resolved device (for conditions):**
+```text
+$tv = @oneof(tv)
+$tv.power = on
+
+@if $tv.power? == on
+    light.power = off
+@endif
+```
+
+`@oneof` resolves immediately — if multiple devices match, it triggers an ambiguity dialog instead of failing silently. This is essential before `@if` conditions, which require a single resolved device.
+
 **Wildcard room selector:**
 ```text
 light[*].power = off
@@ -115,8 +127,8 @@ light[*].power = off
 
 **Conditions:**
 ```text
-$light_salon = light[salon]
-$light_cuisine = light[cuisine]
+$light_salon = @oneof(light[salon])
+$light_cuisine = @oneof(light[cuisine])
 
 @if $light_salon.power? == on
     $light_cuisine.power = on
@@ -141,7 +153,7 @@ Conditions can be combined with `&` (AND) and `|` (OR). `&` binds tighter than `
 @endif
 ```
 
-Conditions use the query syntax (`?`) to read a property value. Devices in conditions are pre-resolved via variables to avoid ambiguity — an ambiguous device in a condition triggers an error.
+Conditions use the query syntax (`?`) to read a property value. Devices in conditions should be pre-resolved with `@oneof` — an ambiguous device in a condition triggers an error.
 
 ---
 
@@ -186,6 +198,7 @@ When a statement targets a property or action, the resolver excludes devices tha
 
 - `@all(type[room])` — expands to all matches, bypasses ambiguity, executes in batch
 - `@first(type[room])` — selects the first match
+- `@oneof(type[room])` — resolves immediately to exactly one device; triggers ambiguity if multiple match
 - `[*]` wildcard room — matches devices in all rooms
 
 ---
