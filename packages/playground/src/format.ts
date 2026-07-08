@@ -5,8 +5,10 @@ const Y = "\x1b[33m";
 const R = "\x1b[31m";
 const C = "\x1b[36m";
 const B = "\x1b[1m";
-const D = "\x1b[2m";
-const N = "\x1b[0m";
+export const D = "\x1b[2m";
+export const N = "\x1b[0m";
+export const Rcol = "\x1b[31m";
+const M = "\x1b[35m";
 
 function fmt(val: unknown): string {
   if (val === null || val === undefined) return `${D}—${N}`;
@@ -174,10 +176,36 @@ export function banner(devices: Device[]): string {
 ${N}`;
 }
 
+export function formatNlAttempt(attempt: number, dsl: string): string {
+  return `\n${M}${B}\u{1f916} Attempt ${attempt}:${N}\n  ${C}${dsl}${N}`;
+}
+
+export function formatNlRetry(attempt: number, dsl: string, errors: string[]): string {
+  const lines: string[] = [];
+  lines.push(`\n${M}${B}\u{1f916} Attempt ${attempt}:${N}`);
+  lines.push(`  ${C}${dsl}${N}`);
+  lines.push(`  ${R}\u2717 Parse errors:${N}`);
+  for (const msg of errors) {
+    lines.push(`    ${R}\u2022${N} ${msg}`);
+  }
+  lines.push(`  ${D}Retrying...${N}`);
+  return lines.join("\n");
+}
+
+export function formatNlSuccess(dsl: string): string {
+  return `\n${G}${B}\u{1f916} Translated to HomeDSL:${N}\n  ${C}${dsl}${N}`;
+}
+
+export function formatNlFailed(attempts: number): string {
+  return `\n${R}${B}\u2717${N} ${R}Translation failed after ${attempts} attempts.${N}\n  ${D}The LLM could not generate valid HomeDSL for this request.${N}`;
+}
+
 export function help(): string {
   return `${B}
 Commands:${N}
   ${G}HomeDSL${N} input        Execute HomeDSL statements (e.g. tv.power = on)
+  ${C}:nl${N}               Switch to natural language mode
+  ${C}:dsl${N}              Switch to HomeDSL mode
   ${C}:{${N}                Start multi-line input (blank line to execute)
   ${C}:}${N}                Execute accumulated multi-line input
   ${C}:h${N}, ${C}:help${N}        Show this help
@@ -185,6 +213,11 @@ Commands:${N}
   ${C}:s${N}, ${C}:session${N}     Show session state (variables, history, etc.)
   ${C}:r${N}, ${C}:reset${N}      Reset the session
   ${C}:q${N}, ${C}:quit${N}       Exit the playground
+
+${B}NL Mode:${N}
+  Type natural language commands in NL mode (${C}:nl${N}).
+  Requires ${G}OPENAI_API_KEY${N} in ${C}.env${N} file.
+  Set ${C}OPENNEST_MODEL${N} to override the default model (openai/gpt-4o-mini).
 
 ${B}Tips:${N}
   - Multiple statements as one program: use ${C}:{${N}\u2026${C}:}${N} or paste

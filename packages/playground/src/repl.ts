@@ -16,12 +16,21 @@ import {
   formatSession,
   banner,
   help,
+  formatNlRetry,
+  formatNlSuccess,
+  formatNlFailed,
+  D,
+  N,
+  Rcol,
 } from "./format.js";
+import { translateNlToDsl } from "./agent.js";
+import type { AttemptCallback } from "./agent.js";
 
 interface State {
   session: Session;
   devices: Device[];
   lastProgram: Program | null;
+  nlMode: boolean;
 }
 
 interface Choice {
@@ -37,6 +46,7 @@ function createState(devices: Device[]): State {
     session: createSession(),
     devices,
     lastProgram: null,
+    nlMode: false,
   };
 }
 
@@ -129,6 +139,39 @@ async function executeSource(state: State, src: string): Promise<AmbiguityInfo |
   return executeProgram(state);
 }
 
+async function executeNlSource(
+  state: State,
+  input: string,
+): Promise<AmbiguityInfo | null> {
+  process.stdout.write(`  ${D}Translating...${N}\n`);
+
+  const onAttempt: AttemptCallback = (attempt, dsl, errors) => {
+    if (errors && errors.length > 0) {
+      process.stdout.write(formatNlRetry(attempt, dsl, errors) + "\n");
+    }
+  };
+
+  try {
+    const result = await translateNlToDsl(input, onAttempt);
+
+    if (result.failed || !result.program) {
+      process.stdout.write(formatNlFailed(result.attempts) + "\n\n");
+      return null;
+    }
+
+    process.stdout.write(formatNlSuccess(result.dsl) + "\n");
+    state.lastProgram = result.program;
+    return executeProgram(state);
+  } catch (err: unknown) {
+    process.stdout.write(
+      `  ${Rcol}\u2717${
+        err instanceof Error ? err.message : String(err)
+      }\n\n`,
+    );
+    return null;
+  }
+}
+
 const COMMANDS = [
   ":h", ":help",
   ":d", ":devices",
@@ -137,6 +180,7 @@ const COMMANDS = [
   ":q", ":quit",
   ":{", ":}",
   ":cancel",
+  ":nl", ":dsl",
 ];
 
 export async function startRepl(devices: Device[]): Promise<void> {
@@ -256,7 +300,7 @@ export async function startRepl(devices: Device[]): Promise<void> {
     if (accumulating) {
       process.stdout.write(".. ");
     } else if (!pendingAmbiguity) {
-      process.stdout.write("> ");
+      process.stdout.write(state.nlMode ? "[NL] > " : "> ");
     }
   };
 
@@ -280,7 +324,12 @@ export async function startRepl(devices: Device[]): Promise<void> {
       if (trimmed === ":}") {
         accumulating = false;
         if (buffer.length > 0) {
-          pendingAmbiguity = await executeSource(state, buffer.join("\n"));
+          const src = buffer.join("\n");
+          if (state.nlMode) {
+            pendingAmbiguity = await executeNlSource(state, src);
+          } else {
+            pendingAmbiguity = await executeSource(state, src);
+          }
         }
         buffer = [];
         return;
@@ -288,7 +337,12 @@ export async function startRepl(devices: Device[]): Promise<void> {
       if (trimmed === "") {
         accumulating = false;
         if (buffer.length > 0) {
-          pendingAmbiguity = await executeSource(state, buffer.join("\n"));
+          const src = buffer.join("\n");
+          if (state.nlMode) {
+            pendingAmbiguity = await executeNlSource(state, src);
+          } else {
+            pendingAmbiguity = await executeSource(state, src);
+          }
         }
         buffer = [];
         return;
@@ -333,7 +387,27 @@ export async function startRepl(devices: Device[]): Promise<void> {
       process.stdout.write("Session reset.\n\n");
       return;
     }
+    if (trimmed === ":nl") {
+      if (!process.env["OPENAI_API_KEY"]) {
+        process.stdout.write(
+          `  ${Rcol}Warning: OPENAI_API_KEY not set. NL mode requires an API key.${N}\n`,
+        );
+      }
+      state.nlMode = true;
+      process.stdout.write("  Switched to natural language mode.\n\n");
+      return;
+    }
+    if (trimmed === ":dsl") {
+      state.nlMode = false;
+      process.stdout.write("  Switched to HomeDSL mode.\n\n");
+      return;
+    }
     if (trimmed === "") {
+      return;
+    }
+
+    if (state.nlMode) {
+      pendingAmbiguity = await executeNlSource(state, trimmed);
       return;
     }
 

@@ -11,9 +11,11 @@
     "build": "tsc"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^2",
     "@opennest/devices": "file:../devices",
     "@opennest/lang-core": "file:../lang-core",
-    "@opennest/vm": "file:../vm"
+    "@opennest/vm": "file:../vm",
+    "ai": "^5"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",
