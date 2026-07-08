@@ -1,6 +1,7 @@
 import type {
   Statement,
   DeviceRef,
+  CollectionModifier,
 } from "@opennest/lang-core";
 import type { DeviceDriver } from "@opennest/devices";
 
@@ -34,7 +35,7 @@ export interface Session {
   cursor: number;
   resolvedIds: Record<string, string>;
   variableResolvedIds: Record<string, string>;
-  variableModifiers: Record<string, "@all" | "@first" | "@oneof">;
+  variableModifiers: Record<string, CollectionModifier>;
 }
 
 export interface AmbiguityTreeDevice {
