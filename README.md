@@ -53,9 +53,9 @@ The execution engine. Takes a parsed AST and a device context, then:
 
 - resolves device references
 - detects and handles ambiguity
-- executes assignments, queries, increments, and actions
+- executes assignments, queries, increments, actions, and conditional blocks
 - manages session state (variables, `it` context, history)
-- supports collections (`@all`, `@first`) and wildcards (`[*]`)
+- supports collections (`@all`, `@first`), wildcards (`[*]`), and conditions (`@if`/`@else`/`@endif`)
 
 ### 4. `playground` — Interactive REPL
 
@@ -112,6 +112,36 @@ $lights.power = on
 ```text
 light[*].power = off
 ```
+
+**Conditions:**
+```text
+$light_salon = light[salon]
+$light_cuisine = light[cuisine]
+
+@if $light_salon.power? == on
+    $light_cuisine.power = on
+@else
+    $light_cuisine.power = off
+@endif
+```
+
+Conditions can be combined with `&` (AND) and `|` (OR). `&` binds tighter than `|`, and parentheses `()` control explicit grouping:
+
+```text
+@if $a.power? == on & $b.power? == on
+    speaker.power = on
+@endif
+
+@if $a.power? == on | $b.power? == on
+    light.power = off
+@endif
+
+@if $tv.power? != on & ($therm.temperature? == 25 | $fan.power? == on)
+    thermostat.temperature = 20
+@endif
+```
+
+Conditions use the query syntax (`?`) to read a property value. Devices in conditions are pre-resolved via variables to avoid ambiguity — an ambiguous device in a condition triggers an error.
 
 ---
 
