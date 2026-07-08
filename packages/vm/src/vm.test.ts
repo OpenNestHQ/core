@@ -865,6 +865,317 @@ describe("interpret_home_dsl", () => {
     });
   });
 
+  describe("conditional blocks (@if)", () => {
+    it("should execute body when condition is true", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("light_1", { power: true, brightness: 80 });
+      driver.seed("tv_1", { power: false, volume: 10 });
+      const devs: Device[] = [
+        { id: "light_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+        { id: "tv_1", type: "tv", room: "salon", name: "Salon TV", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`@if light[salon].power? == on\ntv[salon].power = on\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const tvPwr = await driver.getProperty("tv_1", "power", {});
+      expect(tvPwr).toBe(true);
+    });
+
+    it("should NOT execute body when condition is false", async () => {
+      const program = parse(`@if light[salon].power? == "on"\ntv[salon].power = on\n@endif`);
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("light_1", { power: false, brightness: 50 });
+      driver.seed("tv_1", { power: false, volume: 10 });
+      const devs: Device[] = [
+        { id: "light_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+        { id: "tv_1", type: "tv", room: "salon", name: "Salon TV", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const tvPwr = await driver.getProperty("tv_1", "power", {});
+      expect(tvPwr).toBe(false);
+    });
+
+    it("should execute body when condition is true (power value)", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("light_1", { power: true });
+      driver.seed("tv_1", { power: false, volume: 10 });
+      const devs: Device[] = [
+        { id: "light_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+        { id: "tv_1", type: "tv", room: "salon", name: "Salon TV", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`@if light[salon].power? == on\ntv[salon].power = on\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const tvPwr = await driver.getProperty("tv_1", "power", {});
+      expect(tvPwr).toBe(true);
+    });
+
+    it("should execute else body when condition is false", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("light_1", { power: false });
+      driver.seed("tv_1", { power: false, volume: 10 });
+      const devs: Device[] = [
+        { id: "light_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+        { id: "tv_1", type: "tv", room: "salon", name: "Salon TV", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`@if light[salon].power? == on\ntv[salon].power = on\n@else\ntv[salon].power = off\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const tvPwr = await driver.getProperty("tv_1", "power", {});
+      expect(tvPwr).toBe(false);
+    });
+
+    it("should not execute else body when condition is true", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("light_1", { power: true });
+      driver.seed("tv_1", { power: false, volume: 10 });
+      const devs: Device[] = [
+        { id: "light_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+        { id: "tv_1", type: "tv", room: "salon", name: "Salon TV", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`@if light[salon].power? == on\ntv[salon].volume = 40\n@else\ntv[salon].volume = 10\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const tvVol = await driver.getProperty("tv_1", "volume", {});
+      expect(tvVol).toBe(40);
+    });
+
+    it("should evaluate condition with variable reference", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("light_salon_1", { power: true, brightness: 80 });
+      driver.seed("light_cuisine_1", { power: false, brightness: 60 });
+      const devs: Device[] = [
+        { id: "light_salon_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+        { id: "light_cuisine_1", type: "light", room: "cuisine", name: "Cuisine Light", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`$light_salon = light[salon]\n$light_cuisine = light[cuisine]\n@if $light_salon.power? == on\n$light_cuisine.power = on\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const cuisinePwr = await driver.getProperty("light_cuisine_1", "power", {});
+      expect(cuisinePwr).toBe(true);
+    });
+
+    it("should not execute when variable condition is false", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("light_salon_1", { power: false, brightness: 80 });
+      driver.seed("light_cuisine_1", { power: false, brightness: 60 });
+      const devs: Device[] = [
+        { id: "light_salon_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+        { id: "light_cuisine_1", type: "light", room: "cuisine", name: "Cuisine Light", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`$light_salon = light[salon]\n@if $light_salon.power? == on\nlight[cuisine].power = on\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const cuisinePwr = await driver.getProperty("light_cuisine_1", "power", {});
+      expect(cuisinePwr).toBe(false);
+    });
+
+    it("should evaluate != operator correctly", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("light_1", { power: false });
+      driver.seed("tv_1", { power: false, volume: 10 });
+      const devs: Device[] = [
+        { id: "light_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+        { id: "tv_1", type: "tv", room: "salon", name: "Salon TV", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`@if light[salon].power? != on\ntv[salon].power = on\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const tvPwr = await driver.getProperty("tv_1", "power", {});
+      expect(tvPwr).toBe(true);
+    });
+
+    it("should evaluate numeric comparison correctly", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("thermostat_1", { temperature: 21 });
+      driver.seed("fan_1", { power: false, speed: 0 });
+      const devs: Device[] = [
+        { id: "thermostat_1", type: "thermostat", room: "salon", name: "Salon Thermostat", driver, driverConfig: {} },
+        { id: "fan_1", type: "fan", room: "salon", name: "Salon Fan", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`@if thermostat[salon].temperature? == 21\nfan[salon].power = on\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const fanPwr = await driver.getProperty("fan_1", "power", {});
+      expect(fanPwr).toBe(true);
+    });
+
+    it("should handle nested @if blocks", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("tv_1", { power: true, volume: 15 });
+      driver.seed("light_1", { power: false, brightness: 80 });
+      driver.seed("speaker_1", { power: false, volume: 30 });
+      const devs: Device[] = [
+        { id: "tv_1", type: "tv", room: "salon", name: "Salon TV", driver, driverConfig: {} },
+        { id: "light_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+        { id: "speaker_1", type: "speaker", room: "salon", name: "Salon Speaker", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`@if tv[salon].power? == on\n@if light[salon].power? == on\nspeaker[salon].power = on\n@endif\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const spkPwr = await driver.getProperty("speaker_1", "power", {});
+      // Outer condition is true (tv is on), inner condition is false (light is off)
+      expect(spkPwr).toBe(false);
+    });
+
+    it("should execute nested @if when both conditions are true", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("tv_1", { power: true, volume: 15 });
+      driver.seed("light_1", { power: true, brightness: 80 });
+      driver.seed("speaker_1", { power: false, volume: 30 });
+      const devs: Device[] = [
+        { id: "tv_1", type: "tv", room: "salon", name: "Salon TV", driver, driverConfig: {} },
+        { id: "light_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+        { id: "speaker_1", type: "speaker", room: "salon", name: "Salon Speaker", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`@if tv[salon].power? == on\n@if light[salon].power? == on\nspeaker[salon].power = on\n@endif\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const spkPwr = await driver.getProperty("speaker_1", "power", {});
+      expect(spkPwr).toBe(true);
+    });
+
+    it("should record condition in session history", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("light_1", { power: true, brightness: 80 });
+      driver.seed("tv_1", { power: false, volume: 10 });
+      const devs: Device[] = [
+        { id: "light_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+        { id: "tv_1", type: "tv", room: "salon", name: "Salon TV", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`@if light[salon].power? == on\ntv[salon].power = on\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const lastEntry = result.session.history[result.session.history.length - 1];
+      expect(lastEntry!.changes[0]!.property).toBe("condition:power");
+    });
+
+    it("should set $it to condition device after evaluating condition", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("light_1", { power: true, brightness: 50 });
+      const devs: Device[] = [
+        { id: "light_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`@if light[salon].power? == on\n$it.brightness = 80\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const brightness = await driver.getProperty("light_1", "brightness", {});
+      expect(brightness).toBe(80);
+    });
+
+    it("should handle empty body (true condition)", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("light_1", { power: true, brightness: 80 });
+      const devs: Device[] = [
+        { id: "light_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`@if light[salon].power? == on\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+    });
+
+    it("should handle empty body with @else (false condition)", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("light_1", { power: false });
+      driver.seed("tv_1", { power: false, volume: 10 });
+      const devs: Device[] = [
+        { id: "light_1", type: "light", room: "salon", name: "Salon Light", driver, driverConfig: {} },
+        { id: "tv_1", type: "tv", room: "salon", name: "Salon TV", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`@if light[salon].power? == on\n@else\ntv[salon].power = on\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const tvPwr = await driver.getProperty("tv_1", "power", {});
+      expect(tvPwr).toBe(true);
+    });
+
+    it("should error when condition device is ambiguous (no room)", async () => {
+      const program = parse(`@if tv.power? == on\nspeaker.power = on\n@endif`);
+      const result = await interpret_home_dsl(program, await ctx());
+
+      expect(result.status).toBe("error");
+      expect(result.errors[0]!.message).toMatch(/Ambiguous device/);
+    });
+
+    it("should handle string comparison in condition", async () => {
+      const driver = makeDriver();
+      await driver.init({});
+      driver.seed("tv_1", { power: false, source: "hdmi1", volume: 10 });
+      const devs: Device[] = [
+        { id: "tv_1", type: "tv", room: "salon", name: "Salon TV", driver, driverConfig: {} },
+      ];
+      const context: VMContext = { devices: devs };
+
+      const program = parse(`@if tv[salon].source? == "hdmi1"\ntv[salon].volume = 50\n@endif`);
+      const result = await interpret_home_dsl(program, context);
+
+      expect(result.status).toBe("success");
+      const vol = await driver.getProperty("tv_1", "volume", {});
+      expect(vol).toBe(50);
+    });
+  });
+
   describe("README example flows", () => {
     it("should turn on all lights in the living room", async () => {
       const program = parse(`$lights = @all(light[salon])\n$lights.power = on`);

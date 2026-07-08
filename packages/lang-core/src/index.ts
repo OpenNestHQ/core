@@ -39,5 +39,8 @@ export type {
   Increment,
   Action,
   VariableAssignment,
+  IfStatement,
+  Condition,
+  ComparisonOp,
   Program,
 } from "./ast/index.js";

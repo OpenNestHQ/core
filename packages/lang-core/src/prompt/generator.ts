@@ -185,6 +185,50 @@ function renderMultipleInstructionsSection(): string {
   ].join("\n");
 }
 
+function renderConditionsSection(): string {
+  return [
+    "# CONDITIONS",
+    "",
+    "Conditional blocks allow executing statements only when",
+    "a device property matches a specific value.",
+    "",
+    "## @if / @else / @endif",
+    "",
+    "$light_salon = light[salon]",
+    "$light_cuisine = light[cuisine]",
+    "",
+    '@if $light_salon.power? == "on"',
+    "    $light_cuisine.power = on",
+    "    speaker[cuisine].play()",
+    "@else",
+    "    $light_cuisine.power = off",
+    "@endif",
+    "",
+    "## Syntax",
+    "",
+    "@if <path>? == <value>",
+    "    <statements>",
+    "@else           (optional)",
+    "    <statements>",
+    "@endif",
+    "",
+    "## Operators",
+    "",
+    "- `==` — equals",
+    "- `!=` — not equals",
+    "",
+    "## Rules",
+    "",
+    "- The condition path uses the query syntax (`?`) to read a property value.",
+    "- Conditions compare against `on`, `off`, numbers, or quoted strings.",
+    "- Variables are recommended for conditions to avoid ambiguity:",
+    "  pre-resolve the device with `$var = device[room]` before the `@if`.",
+    "- `@if` blocks can be nested.",
+    "- Empty bodies are valid.",
+    "",
+  ].join("\n");
+}
+
 function renderUsageGuidelinesSection(): string {
   return [
     "# USAGE GUIDELINES",
@@ -312,6 +356,22 @@ function renderExamplesSection(userExamples?: string[]): string {
     "→ vacuum.stop()",
     "camera.snapshot()",
     "",
+    '"If the salon light is on, turn on the kitchen light too"',
+    "→ $salon = light[salon]",
+    "$cuisine = light[cuisine]",
+    '@if $salon.power? == "on"',
+    "$cuisine.power = on",
+    "@endif",
+    "",
+    '"If the temperature is above 25, turn on the fan, otherwise turn it off"',
+    "→ $temp = thermostat[salon]",
+    "$fan = fan[salon]",
+    "@if $temp.temperature? == 25",
+    "    $fan.power = on",
+    "@else",
+    "    $fan.power = off",
+    "@endif",
+    "",
   ];
 
   if (userExamples && userExamples.length > 0) {
@@ -384,6 +444,7 @@ export class OpenNestPrompt {
       renderCapabilitiesSection(this.devices),
       renderSyntaxSection(),
       renderMultipleInstructionsSection(),
+      renderConditionsSection(),
       "---",
       "",
       renderUsageGuidelinesSection(),

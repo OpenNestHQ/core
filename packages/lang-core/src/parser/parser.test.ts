@@ -559,6 +559,191 @@ describe("parseHomeDSL", () => {
     });
   });
 
+  describe("conditional blocks (@if)", () => {
+    it("should parse @if with string value", () => {
+      const r = parseHomeDSL(`@if $light.power? == "on"\nlight.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements).toHaveLength(1);
+      expect(r.program.statements[0]!.kind).toBe("if");
+    });
+
+    it("should parse @if with != operator", () => {
+      const r = parseHomeDSL(`@if $light.power? != off\nlight.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements[0]!.kind).toBe("if");
+    });
+
+    it("should parse @if with numeric comparison", () => {
+      const r = parseHomeDSL(`@if $thermostat.temperature? == 21\nfan.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements[0]!.kind).toBe("if");
+    });
+
+    it("should parse @if with power value", () => {
+      const r = parseHomeDSL(`@if $tv.power? == on\ntv.volume = 10\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements[0]!.kind).toBe("if");
+    });
+
+    it("should parse @if with @else", () => {
+      const r = parseHomeDSL(`@if $light.power? == on\nlight.power = off\n@else\nlight.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements).toHaveLength(1);
+      const stmt = r.program.statements[0]!;
+      expect(stmt.kind).toBe("if");
+      if (stmt.kind === "if") {
+        expect(stmt.body).toHaveLength(1);
+        expect(stmt.elseBody).toBeDefined();
+        expect(stmt.elseBody).toHaveLength(1);
+      }
+    });
+
+    it("should parse @if with variable in condition", () => {
+      const r = parseHomeDSL(`$light_salon = light[salon]\n@if $light_salon.power? == on\nlight[cuisine].power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements).toHaveLength(2);
+      expect(r.program.statements[0]!.kind).toBe("variable_assignment");
+      expect(r.program.statements[1]!.kind).toBe("if");
+    });
+
+    it("should parse nested @if blocks", () => {
+      const r = parseHomeDSL(`@if $tv.power? == on\n@if $light.power? == on\nspeaker.power = off\n@endif\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements).toHaveLength(1);
+      expect(r.program.statements[0]!.kind).toBe("if");
+      if (r.program.statements[0]!.kind === "if") {
+        expect(r.program.statements[0]!.body).toHaveLength(1);
+        expect(r.program.statements[0]!.body[0]!.kind).toBe("if");
+      }
+    });
+
+    it("should parse nested @if with @else", () => {
+      const r = parseHomeDSL(`@if $outer.power? == on\n@if $inner.power? == on\nlight.power = on\n@else\nlight.power = off\n@endif\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements).toHaveLength(1);
+    });
+
+    it("should parse multiple @if blocks at same level", () => {
+      const r = parseHomeDSL(`@if $light.power? == on\nspeaker.power = on\n@endif\n@if $tv.power? == on\nlight.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements).toHaveLength(2);
+      expect(r.program.statements[0]!.kind).toBe("if");
+      expect(r.program.statements[1]!.kind).toBe("if");
+    });
+
+    it("should parse @if with empty body", () => {
+      const r = parseHomeDSL(`@if $light.power? == on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements).toHaveLength(1);
+      expect(r.program.statements[0]!.kind).toBe("if");
+      if (r.program.statements[0]!.kind === "if") {
+        expect(r.program.statements[0]!.body).toHaveLength(0);
+      }
+    });
+
+    it("should parse @if with empty body and @else", () => {
+      const r = parseHomeDSL(`@if $light.power? == on\n@else\nspeaker.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements).toHaveLength(1);
+      if (r.program.statements[0]!.kind === "if") {
+        expect(r.program.statements[0]!.body).toHaveLength(0);
+        expect(r.program.statements[0]!.elseBody).toHaveLength(1);
+      }
+    });
+
+    it("should parse @if with $it in condition", () => {
+      const r = parseHomeDSL(`@if $it.power? == on\nlight.power = off\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements[0]!.kind).toBe("if");
+    });
+
+    it("should parse @if with room selector in condition", () => {
+      const r = parseHomeDSL(`@if light[salon].power? == on\nspeaker[salon].power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements[0]!.kind).toBe("if");
+    });
+
+    it("should record error for @endif outside of @if", () => {
+      const r = parseHomeDSL("@endif");
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0]!.message).toMatch(/outside/);
+    });
+
+    it("should record error for @else outside of @if", () => {
+      const r = parseHomeDSL("@else");
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0]!.message).toMatch(/outside/);
+    });
+
+    it("should record error for @if without condition", () => {
+      const r = parseHomeDSL("@if\nlight.power = on\n@endif");
+      expect(r.errors.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should record error for @if with invalid condition syntax", () => {
+      const r = parseHomeDSL("@if something without proper syntax\nlight.power = on\n@endif");
+      expect(r.errors.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should record error for missing @endif", () => {
+      const r = parseHomeDSL("@if $light.power? == on\nlight.power = off");
+      expect(r.errors.length).toBeGreaterThanOrEqual(1);
+      expect(r.errors[0]!.message).toMatch(/Missing @endif/);
+    });
+
+    it("should record error for missing @endif in nested @if", () => {
+      const r = parseHomeDSL("@if $tv.power? == on\n@if $light.power? == on\nspeaker.power = off\n@endif");
+      expect(r.errors.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should recover after invalid @if condition", () => {
+      const r = parseHomeDSL("@if bad condition\n@endif\ntv.power = on");
+      expect(r.errors.length).toBeGreaterThanOrEqual(1);
+      expect(r.program.statements).toHaveLength(1);
+      expect(r.program.statements[0]!.kind).toBe("assignment");
+    });
+
+    it("should parse @if after a regular statement", () => {
+      const r = parseHomeDSL(`$tv = tv[salon]\n@if $tv.power? == on\n$tv.volume = 20\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements).toHaveLength(2);
+      expect(r.program.statements[0]!.kind).toBe("variable_assignment");
+      expect(r.program.statements[1]!.kind).toBe("if");
+    });
+
+    it("should parse regular statements after @if block", () => {
+      const r = parseHomeDSL(`@if $light.power? == on\nspeaker.power = on\n@endif\ntv.power = off`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements).toHaveLength(2);
+      expect(r.program.statements[1]!.kind).toBe("assignment");
+    });
+
+    it("should handle @if condition with quoted string value", () => {
+      const r = parseHomeDSL(`@if $tv.source? == "hdmi1"\ntv.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements[0]!.kind).toBe("if");
+      if (r.program.statements[0]!.kind === "if") {
+        expect(r.program.statements[0]!.condition.value.kind).toBe("string");
+        if (r.program.statements[0]!.condition.value.kind === "string") {
+          expect(r.program.statements[0]!.condition.value.value).toBe("hdmi1");
+        }
+      }
+    });
+
+    it("should parse @if condition with variable path segments", () => {
+      const r = parseHomeDSL(`@if $light_salon.power? == on\nlight[cuisine].power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      const stmt = r.program.statements[0]!;
+      if (stmt.kind === "if") {
+        expect(stmt.condition.path[0]!.isVariable).toBe(true);
+        expect(stmt.condition.path[0]!.identifier).toBe("light_salon");
+        expect(stmt.condition.path[1]!.identifier).toBe("power");
+        expect(stmt.condition.op).toBe("==");
+        expect(stmt.condition.value.kind).toBe("power");
+      }
+    });
+  });
+
   describe("program structure", () => {
     it("should wrap result with parse result structure", () => {
       const r = parseHomeDSL("tv.power = on");

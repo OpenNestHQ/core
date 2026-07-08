@@ -19,6 +19,7 @@ export {
   executeIncrement,
   executeQuery,
   executeAction,
+  evaluateCondition,
 } from "./executor.js";
 export type {
   Device,

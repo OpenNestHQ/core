@@ -6,6 +6,8 @@ import type {
   Value,
   Expr,
   CollectionModifier,
+  ComparisonOp,
+  Condition,
 } from "../ast/types.js";
 
 export interface ParseErrorInfo {
@@ -225,15 +227,136 @@ function parseStatement(raw: string, lineNumber: number): Statement {
   throw new ParseError(`Unrecognized statement: "${trimmed}"`, lineNumber, col);
 }
 
-export function parseHomeDSL(input: string): ParseResult {
-  const lines = input.split("\n");
-  const statements: Statement[] = [];
-  const errors: ParseErrorInfo[] = [];
+function parseCondition(raw: string, line: number, col: number): Condition {
+  const trimmed = raw.trim();
 
-  for (let i = 0; i < lines.length; i++) {
+  const match = trimmed.match(/^@if\s+(.+?)\?\s*(==|!=)\s*(.+)$/);
+  if (!match) {
+    throw new ParseError(
+      `Invalid @if condition: "${trimmed}" — expected "@if <path>? == <value>"`,
+      line,
+      1,
+    );
+  }
+
+  const pathRaw = match[1]!.trim();
+  const op = match[2] as ComparisonOp;
+  const valueRaw = match[3]!.trim();
+
+  const pathCol = raw.length - raw.trimStart().length + 1;
+  const path = parsePath(pathRaw, line);
+  const valueCol = col + match[0].indexOf(match[3]!);
+  const value = parseValue(valueRaw, line, valueCol);
+
+  return { kind: "condition", path, op, value };
+}
+
+function parseStatements(
+  lines: string[],
+  startIndex: number,
+  errors: ParseErrorInfo[],
+  insideIf: boolean,
+): { statements: Statement[]; endIndex: number; elseSeen: boolean } {
+  const statements: Statement[] = [];
+  let i = startIndex;
+
+  while (i < lines.length) {
     const line = lines[i]!;
     const trimmed = line.trim();
-    if (trimmed.length === 0) continue;
+    const col = line.length - trimmed.length + 1;
+
+    if (trimmed.length === 0) {
+      i++;
+      continue;
+    }
+
+    if (trimmed === "@endif") {
+      if (!insideIf) {
+        errors.push({
+          message: "@endif outside of @if block",
+          line: i + 1,
+          column: 1,
+        });
+        i++;
+        continue;
+      }
+      return { statements, endIndex: i + 1, elseSeen: false };
+    }
+
+    if (trimmed === "@else") {
+      if (!insideIf) {
+        errors.push({
+          message: "@else outside of @if block",
+          line: i + 1,
+          column: 1,
+        });
+        i++;
+        continue;
+      }
+      return { statements, endIndex: i + 1, elseSeen: true };
+    }
+
+    if (trimmed.startsWith("@if ")) {
+      try {
+        const condition = parseCondition(trimmed, i + 1, col);
+        const thenBlock = parseStatements(lines, i + 1, errors, true);
+        i = thenBlock.endIndex;
+
+        let elseBody: Statement[] | undefined;
+        if (thenBlock.elseSeen) {
+          const elseBlock = parseStatements(lines, i, errors, true);
+          i = elseBlock.endIndex;
+          elseBody = elseBlock.statements;
+        }
+
+        if (i > thenBlock.endIndex || i > 0) {
+          const endLine = i > 0 ? lines[i - 1]?.trim() : "";
+          if (endLine !== "@endif") {
+            errors.push({
+              message: `Missing @endif for @if starting at line ${i > 0 ? i : 1}`,
+              line: i > 0 ? i : 1,
+              column: 1,
+            });
+          }
+        }
+
+        statements.push({
+          kind: "if",
+          condition,
+          body: thenBlock.statements,
+          ...(elseBody ? { elseBody } : {}),
+        });
+      } catch (err) {
+        if (err instanceof ParseError) {
+          errors.push(toErrorInfo(err));
+        } else {
+          errors.push({
+            message: err instanceof Error ? err.message : String(err),
+            line: i + 1,
+            column: 1,
+          });
+        }
+        i++;
+        let depth = 1;
+        while (i < lines.length && depth > 0) {
+          const t = lines[i]!.trim();
+          if (t.startsWith("@if ")) depth++;
+          if (t === "@endif") depth--;
+          i++;
+        }
+      }
+      continue;
+    }
+
+    if (trimmed === "@if") {
+      errors.push({
+        message: `Missing condition after @if`,
+        line: i + 1,
+        column: 1,
+      });
+      i++;
+      continue;
+    }
 
     try {
       statements.push(parseStatement(line, i + 1));
@@ -248,7 +371,25 @@ export function parseHomeDSL(input: string): ParseResult {
         });
       }
     }
+    i++;
   }
+
+  if (insideIf) {
+    errors.push({
+      message: `Missing @endif for @if block`,
+      line: startIndex,
+      column: 1,
+    });
+  }
+
+  return { statements, endIndex: i, elseSeen: false };
+}
+
+export function parseHomeDSL(input: string): ParseResult {
+  const lines = input.split("\n");
+  const errors: ParseErrorInfo[] = [];
+
+  const { statements } = parseStatements(lines, 0, errors, false);
 
   return { program: { kind: "program", statements }, errors };
 }

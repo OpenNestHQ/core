@@ -60,13 +60,33 @@ export interface CollectionRef {
   };
 }
 
+/** Comparison operators for conditions. */
+export type ComparisonOp = "==" | "!=";
+
+/** A condition expression inside an @if block. */
+export interface Condition {
+  kind: "condition";
+  path: Segment[];
+  op: ComparisonOp;
+  value: Value;
+}
+
+/** An @if / @else / @endif conditional block. */
+export interface IfStatement {
+  kind: "if";
+  condition: Condition;
+  body: Statement[];
+  elseBody?: Statement[];
+}
+
 /** A single HomeDSL statement. */
 export type Statement =
   | Assignment
   | Query
   | Increment
   | Action
-  | VariableAssignment;
+  | VariableAssignment
+  | IfStatement;
 
 export interface Assignment {
   kind: "assignment";

@@ -1,4 +1,4 @@
-import type { Value } from "@opennest/lang-core";
+import type { Value, Condition } from "@opennest/lang-core";
 import type { Device, StateChange } from "./types.js";
 
 export async function executeAssignment(
@@ -126,4 +126,21 @@ function extractNumericValue(value: Value): number {
       return Number.isNaN(n) ? 0 : n;
     }
   }
+}
+
+export function evaluateCondition(
+  condition: Condition,
+  actualValue: unknown,
+): boolean {
+  const expected = extractValue(condition.value);
+
+  let normalized = actualValue;
+  if (typeof actualValue === "boolean") {
+    if (expected === "on") normalized = true;
+    if (expected === "off") normalized = false;
+  }
+
+  if (condition.op === "==") return normalized == expected;
+  if (condition.op === "!=") return normalized != expected;
+  return false;
 }

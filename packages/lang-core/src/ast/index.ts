@@ -18,5 +18,8 @@ export type {
   Increment,
   Action,
   VariableAssignment,
+  IfStatement,
+  Condition,
+  ComparisonOp,
   Program,
 } from "./types.js";

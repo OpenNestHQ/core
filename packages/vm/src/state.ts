@@ -35,7 +35,7 @@ export function resolveAmbiguity(
   const stmt = program.statements[session.cursor];
   let variableName: string | undefined;
 
-  if (stmt && stmt.kind !== "variable_assignment") {
+  if (stmt && stmt.kind !== "variable_assignment" && stmt.kind !== "if") {
     if (stmt.path.length > 0) {
       const firstSeg = stmt.path[0]!;
       if (firstSeg.isVariable) {

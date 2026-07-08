@@ -6,6 +6,7 @@ import type {
   Increment,
   Action,
   VariableAssignment,
+  IfStatement,
   DeviceRef,
 } from "@opennest/lang-core";
 import type { Device, Session, VMResult, VMError } from "./types.js";
@@ -18,6 +19,7 @@ import {
   executeIncrement,
   executeQuery,
   executeAction,
+  evaluateCondition,
 } from "./executor.js";
 
 export async function interpretProgram(
@@ -104,6 +106,8 @@ async function interpretStatement(
       return interpretAction(statement, devices, session);
     case "variable_assignment":
       return interpretVariableAssignment(statement, session);
+    case "if":
+      return interpretIfStatement(statement, devices, session);
   }
 }
 
@@ -343,4 +347,73 @@ function lastPropertyName(path: { identifier: string }[]): string {
   const lastSegment = path[path.length - 1];
   if (!lastSegment) return "";
   return lastSegment.identifier;
+}
+
+async function interpretIfStatement(
+  stmt: IfStatement,
+  devices: Device[],
+  session: Session,
+): Promise<InterpretResult> {
+  const condition = stmt.condition;
+  const property = lastPropertyName(condition.path);
+  const intent: ResolutionIntent = { kind: "property", name: property };
+  const resolutionResult = resolveDevices(condition.path, devices, session, intent);
+
+  if (resolutionResult.ambiguous) {
+    return {
+      kind: "error",
+      errors: [{
+        statement: stmt,
+        message: "Ambiguous device in @if condition — use a variable to pre-resolve the device",
+      }],
+    };
+  }
+
+  if (resolutionResult.devices.length === 0) {
+    return {
+      kind: "error",
+      errors: [{
+        statement: stmt,
+        message: "No devices found for @if condition",
+      }],
+    };
+  }
+
+  if (resolutionResult.devices.length > 1) {
+    return {
+      kind: "error",
+      errors: [{
+        statement: stmt,
+        message: "Multiple devices matched in @if condition — use a specific room selector or variable",
+      }],
+    };
+  }
+
+  const device = resolutionResult.devices[0]!;
+  const currentValue = await device.driver.getProperty(device.id, property, device.driverConfig);
+  const conditionMet = evaluateCondition(condition, currentValue);
+
+  session.it = device;
+
+  const statementsToExecute = conditionMet ? stmt.body : (stmt.elseBody ?? []);
+
+  for (const bodyStmt of statementsToExecute) {
+    const result = await interpretStatement(bodyStmt, devices, session);
+    if (result.kind !== "success") {
+      return result;
+    }
+  }
+
+  session.history.push({
+    statement: stmt,
+    resolvedDevices: [device],
+    changes: [{
+      deviceId: device.id,
+      property: `condition:${property}`,
+      oldValue: currentValue,
+      newValue: currentValue,
+    }],
+  });
+
+  return { kind: "success" };
 }
