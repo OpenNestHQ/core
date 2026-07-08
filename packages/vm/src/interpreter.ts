@@ -8,6 +8,8 @@ import type {
   VariableAssignment,
   IfStatement,
   DeviceRef,
+  ConditionExpr,
+  SimpleCondition,
 } from "@opennest/lang-core";
 import type { Device, Session, VMResult, VMError } from "./types.js";
 import type { AmbiguityInfo, ResolutionIntent } from "./types.js";
@@ -354,46 +356,16 @@ async function interpretIfStatement(
   devices: Device[],
   session: Session,
 ): Promise<InterpretResult> {
-  const condition = stmt.condition;
-  const property = lastPropertyName(condition.path);
-  const intent: ResolutionIntent = { kind: "property", name: property };
-  const resolutionResult = resolveDevices(condition.path, devices, session, intent);
+  const evalResult = await evaluateConditionExpr(stmt.condition, devices, session);
 
-  if (resolutionResult.ambiguous) {
+  if (evalResult.kind === "error") {
     return {
       kind: "error",
-      errors: [{
-        statement: stmt,
-        message: "Ambiguous device in @if condition — use a variable to pre-resolve the device",
-      }],
+      errors: [{ statement: stmt, message: evalResult.message }],
     };
   }
 
-  if (resolutionResult.devices.length === 0) {
-    return {
-      kind: "error",
-      errors: [{
-        statement: stmt,
-        message: "No devices found for @if condition",
-      }],
-    };
-  }
-
-  if (resolutionResult.devices.length > 1) {
-    return {
-      kind: "error",
-      errors: [{
-        statement: stmt,
-        message: "Multiple devices matched in @if condition — use a specific room selector or variable",
-      }],
-    };
-  }
-
-  const device = resolutionResult.devices[0]!;
-  const currentValue = await device.driver.getProperty(device.id, property, device.driverConfig);
-  const conditionMet = evaluateCondition(condition, currentValue);
-
-  session.it = device;
+  const conditionMet = evalResult.value;
 
   const statementsToExecute = conditionMet ? stmt.body : (stmt.elseBody ?? []);
 
@@ -406,14 +378,81 @@ async function interpretIfStatement(
 
   session.history.push({
     statement: stmt,
-    resolvedDevices: [device],
+    resolvedDevices: [],
     changes: [{
-      deviceId: device.id,
-      property: `condition:${property}`,
-      oldValue: currentValue,
-      newValue: currentValue,
+      deviceId: "",
+      property: "condition",
+      oldValue: null,
+      newValue: conditionMet,
     }],
   });
 
   return { kind: "success" };
+}
+
+type ConditionEvalResult =
+  | { kind: "ok"; value: boolean }
+  | { kind: "error"; message: string };
+
+async function evaluateConditionExpr(
+  expr: ConditionExpr,
+  devices: Device[],
+  session: Session,
+): Promise<ConditionEvalResult> {
+  if (expr.kind === "condition") {
+    return evaluateSimpleCondition(expr, devices, session);
+  }
+
+  if (expr.kind === "compound_condition") {
+    const left = await evaluateConditionExpr(expr.left, devices, session);
+    if (left.kind === "error") return left;
+
+    if (expr.operator === "&" && !left.value) return { kind: "ok", value: false };
+    if (expr.operator === "|" && left.value) return { kind: "ok", value: true };
+
+    const right = await evaluateConditionExpr(expr.right, devices, session);
+    if (right.kind === "error") return right;
+
+    return { kind: "ok", value: right.value };
+  }
+
+  return { kind: "ok", value: false };
+}
+
+async function evaluateSimpleCondition(
+  condition: SimpleCondition,
+  devices: Device[],
+  session: Session,
+): Promise<ConditionEvalResult> {
+  const property = lastPropertyName(condition.path);
+  const intent: ResolutionIntent = { kind: "property", name: property };
+  const resolutionResult = resolveDevices(condition.path, devices, session, intent);
+
+  if (resolutionResult.ambiguous) {
+    return {
+      kind: "error",
+      message: "Ambiguous device in @if condition — use a variable to pre-resolve the device",
+    };
+  }
+
+  if (resolutionResult.devices.length === 0) {
+    return {
+      kind: "error",
+      message: "No devices found for @if condition",
+    };
+  }
+
+  if (resolutionResult.devices.length > 1) {
+    return {
+      kind: "error",
+      message: "Multiple devices matched in @if condition — use a specific room selector or variable",
+    };
+  }
+
+  const device = resolutionResult.devices[0]!;
+  const currentValue = await device.driver.getProperty(device.id, property, device.driverConfig);
+
+  session.it = device;
+
+  return { kind: "ok", value: evaluateCondition(condition, currentValue) };
 }

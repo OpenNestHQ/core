@@ -7,7 +7,9 @@ import type {
   Expr,
   CollectionModifier,
   ComparisonOp,
-  Condition,
+  CompoundOp,
+  SimpleCondition,
+  ConditionExpr,
 } from "../ast/types.js";
 
 export interface ParseErrorInfo {
@@ -227,13 +229,12 @@ function parseStatement(raw: string, lineNumber: number): Statement {
   throw new ParseError(`Unrecognized statement: "${trimmed}"`, lineNumber, col);
 }
 
-function parseCondition(raw: string, line: number, col: number): Condition {
+function parseSimpleCondition(raw: string, line: number, col: number): SimpleCondition {
   const trimmed = raw.trim();
-
-  const match = trimmed.match(/^@if\s+(.+?)\?\s*(==|!=)\s*(.+)$/);
+  const match = trimmed.match(/^(.+?)\?\s*(==|!=)\s*(.+)$/);
   if (!match) {
     throw new ParseError(
-      `Invalid @if condition: "${trimmed}" — expected "@if <path>? == <value>"`,
+      `Invalid condition: "${trimmed}" — expected "<path>? == <value>"`,
       line,
       1,
     );
@@ -243,12 +244,109 @@ function parseCondition(raw: string, line: number, col: number): Condition {
   const op = match[2] as ComparisonOp;
   const valueRaw = match[3]!.trim();
 
-  const pathCol = raw.length - raw.trimStart().length + 1;
   const path = parsePath(pathRaw, line);
-  const valueCol = col + match[0].indexOf(match[3]!);
-  const value = parseValue(valueRaw, line, valueCol);
+  const value = parseValue(valueRaw, line, col + match[0].indexOf(match[3]!));
 
   return { kind: "condition", path, op, value };
+}
+
+function splitByTopLevel(body: string, operator: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === "(") {
+      depth++;
+      current += body[i];
+      continue;
+    }
+    if (body[i] === ")") {
+      depth--;
+      current += body[i];
+      continue;
+    }
+
+    if (depth === 0 && operator === "&") {
+      const rest = body.slice(i);
+      if (rest[0] === "&") {
+        parts.push(current.trim());
+        current = "";
+        i += 1;
+        continue;
+      }
+    }
+
+    if (depth === 0 && operator === "|") {
+      const rest = body.slice(i);
+      if (rest[0] === "|") {
+        parts.push(current.trim());
+        current = "";
+        i += 1;
+        continue;
+      }
+    }
+
+    current += body[i];
+  }
+
+  const trimmed = current.trim();
+  if (trimmed.length > 0) parts.push(trimmed);
+
+  return parts.filter((p) => p.length > 0);
+}
+
+function parseAtom(body: string, line: number, col: number): ConditionExpr {
+  const trimmed = body.trim();
+
+  if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+    return parseOrExpr(trimmed.slice(1, -1).trim(), line, col);
+  }
+
+  return parseSimpleCondition(trimmed, line, col);
+}
+
+function parseAndExpr(body: string, line: number, col: number): ConditionExpr {
+  const parts = splitByTopLevel(body, "&");
+  if (parts.length === 1) return parseAtom(parts[0]!, line, col);
+
+  let expr = parseAtom(parts[0]!, line, col);
+  for (let i = 1; i < parts.length; i++) {
+    expr = {
+      kind: "compound_condition",
+      left: expr,
+      operator: "&",
+      right: parseAtom(parts[i]!, line, col),
+    };
+  }
+  return expr;
+}
+
+function parseOrExpr(body: string, line: number, col: number): ConditionExpr {
+  const parts = splitByTopLevel(body, "|");
+  if (parts.length === 1) return parseAndExpr(parts[0]!, line, col);
+
+  let expr = parseAndExpr(parts[0]!, line, col);
+  for (let i = 1; i < parts.length; i++) {
+    expr = {
+      kind: "compound_condition",
+      left: expr,
+      operator: "|",
+      right: parseAndExpr(parts[i]!, line, col),
+    };
+  }
+  return expr;
+}
+
+function parseConditionExpr(raw: string, line: number, col: number): ConditionExpr {
+  const trimmed = raw.trim();
+  const body = trimmed.replace(/^@if\s+/, "").trim();
+
+  if (body.length === 0) {
+    throw new ParseError("Missing condition after @if", line, 1);
+  }
+
+  return parseOrExpr(body, line, col);
 }
 
 function parseStatements(
@@ -298,7 +396,7 @@ function parseStatements(
 
     if (trimmed.startsWith("@if ")) {
       try {
-        const condition = parseCondition(trimmed, i + 1, col);
+        const condition = parseConditionExpr(trimmed, i + 1, col);
         const thenBlock = parseStatements(lines, i + 1, errors, true);
         i = thenBlock.endIndex;
 

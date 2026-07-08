@@ -63,18 +63,32 @@ export interface CollectionRef {
 /** Comparison operators for conditions. */
 export type ComparisonOp = "==" | "!=";
 
-/** A condition expression inside an @if block. */
-export interface Condition {
+/** A simple condition: path? == value */
+export interface SimpleCondition {
   kind: "condition";
   path: Segment[];
   op: ComparisonOp;
   value: Value;
 }
 
+/** Compound operators for combining conditions. */
+export type CompoundOp = "&" | "|";
+
+/** A compound condition combining two sub-conditions with & or |. */
+export interface CompoundCondition {
+  kind: "compound_condition";
+  left: ConditionExpr;
+  operator: CompoundOp;
+  right: ConditionExpr;
+}
+
+/** A condition expression — either a simple comparison or a compound. */
+export type ConditionExpr = SimpleCondition | CompoundCondition;
+
 /** An @if / @else / @endif conditional block. */
 export interface IfStatement {
   kind: "if";
-  condition: Condition;
+  condition: ConditionExpr;
   body: Statement[];
   elseBody?: Statement[];
 }

@@ -742,6 +742,74 @@ describe("parseHomeDSL", () => {
         expect(stmt.condition.value.kind).toBe("power");
       }
     });
+    it("should parse @if with compound & condition", () => {
+      const r = parseHomeDSL(`@if $a.power? == on & $b.power? == off\nspeaker.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements).toHaveLength(1);
+      const stmt = r.program.statements[0]!;
+      if (stmt.kind === "if") {
+        expect(stmt.condition.kind).toBe("compound_condition");
+        if (stmt.condition.kind === "compound_condition") {
+          expect(stmt.condition.operator).toBe("&");
+          expect(stmt.condition.left.kind).toBe("condition");
+          expect(stmt.condition.right.kind).toBe("condition");
+        }
+      }
+    });
+
+    it("should parse @if with compound | condition", () => {
+      const r = parseHomeDSL(`@if $a.power? == on | $b.power? == off\nspeaker.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      const stmt = r.program.statements[0]!;
+      if (stmt.kind === "if" && stmt.condition.kind === "compound_condition") {
+        expect(stmt.condition.operator).toBe("|");
+      }
+    });
+
+    it("should parse @if with three conditions joined by &", () => {
+      const r = parseHomeDSL(`@if $a.power? == on & $b.power? == off & $c.power? == on\nlight.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+    });
+
+    it("should parse @if with parentheses for grouping", () => {
+      const r = parseHomeDSL(`@if ($a.power? == on | $b.power? == off) & $c.power? == on\nspeaker.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      const stmt = r.program.statements[0]!;
+      if (stmt.kind === "if" && stmt.condition.kind === "compound_condition") {
+        expect(stmt.condition.operator).toBe("&");
+        expect(stmt.condition.left.kind).toBe("compound_condition");
+      }
+    });
+
+    it("should give & higher precedence than |", () => {
+      const r = parseHomeDSL(`@if a? == on & b? == off | c? == on\nlight.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      const stmt = r.program.statements[0]!;
+      if (stmt.kind === "if" && stmt.condition.kind === "compound_condition") {
+        expect(stmt.condition.operator).toBe("|");
+        expect(stmt.condition.left.kind).toBe("compound_condition");
+        if (stmt.condition.left.kind === "compound_condition") {
+          expect(stmt.condition.left.operator).toBe("&");
+        }
+        expect(stmt.condition.right.kind).toBe("condition");
+      }
+    });
+
+    it("should parse deeply nested parentheses", () => {
+      const r = parseHomeDSL(`@if ((a? == on)) & b? == off\nlight.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+    });
+
+    it("should parse @if with & and != operator", () => {
+      const r = parseHomeDSL(`@if $a.power? != off & $b.power? == on\nlight.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+    });
+
+    it("should parse @if with room selectors in compound condition", () => {
+      const r = parseHomeDSL(`@if light[salon].power? == on & tv[chambre].power? == on\nspeaker.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+    });
+
   });
 
   describe("program structure", () => {

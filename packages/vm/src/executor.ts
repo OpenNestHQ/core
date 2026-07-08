@@ -1,4 +1,4 @@
-import type { Value, Condition } from "@opennest/lang-core";
+import type { Value, SimpleCondition } from "@opennest/lang-core";
 import type { Device, StateChange } from "./types.js";
 
 export async function executeAssignment(
@@ -129,7 +129,7 @@ function extractNumericValue(value: Value): number {
 }
 
 export function evaluateCondition(
-  condition: Condition,
+  condition: SimpleCondition,
   actualValue: unknown,
 ): boolean {
   const expected = extractValue(condition.value);

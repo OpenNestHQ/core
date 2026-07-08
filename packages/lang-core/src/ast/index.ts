@@ -19,7 +19,10 @@ export type {
   Action,
   VariableAssignment,
   IfStatement,
-  Condition,
+  SimpleCondition,
+  CompoundCondition,
+  ConditionExpr,
   ComparisonOp,
+  CompoundOp,
   Program,
 } from "./types.js";
