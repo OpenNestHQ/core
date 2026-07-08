@@ -1,4 +1,4 @@
-import type { PromptConfig, DeviceDefinition, RoomDefinition, Capability, PropertyCapability, ActionCapability } from "./types.js";
+import type { PromptOptions, DeviceDefinition, RoomDefinition, Capability, PropertyCapability, ActionCapability } from "./types.js";
 import { DEFAULT_DEVICES, DEFAULT_ROOMS } from "./defaults.js";
 
 function renderPropertyCapability(cap: PropertyCapability): string {
@@ -29,38 +29,43 @@ function renderCapability(cap: Capability): string {
 }
 
 function renderSupportedDevicesSection(devices: DeviceDefinition[]): string {
-  const lines: string[] = ["# SUPPORTED DEVICES", "", "You may ONLY use these device types:", ""];
+  const lines: string[] = ["# SUPPORTED DEVICES", "", "Supported device types:", ""];
 
   for (const device of devices) {
-    lines.push(`- ${device.type}`);
+    const desc = device.description ? ` — ${device.description}` : "";
+    lines.push(`- ${device.type}${desc}`);
   }
 
-  lines.push("", "Never invent new device types.", "");
+  lines.push("", "Do not invent new device types.", "");
   return lines.join("\n");
 }
 
 function renderRoomsSection(rooms: RoomDefinition[]): string {
   const lines: string[] = [
-    "# ROOMS (logical grouping only)",
+    "# ROOMS",
     "",
-    "You may refer to rooms using bracket selectors:",
+    "Rooms are specified using bracket selectors:",
     "",
   ];
 
-  for (const room of rooms.slice(0, 4)) {
+  for (const room of rooms) {
     lines.push(`- ${room.name}`);
   }
 
-  lines.push("", "Examples of room selectors:", "");
-  lines.push("- device[room_name]");
-  lines.push("- light[*] (all rooms)");
+  lines.push("", "Room selector syntax:", "");
+  lines.push("- device[room_name] — targets a specific room");
+  lines.push("- light[*] — targets ALL rooms (bypasses ambiguity, batch execution)");
 
   lines.push(
     "",
-    "IMPORTANT:",
-    "Rooms are NOT authoritative.",
-    "Do NOT assume device placement correctness.",
-    "Let interpret_home_dsl resolve actual mapping.",
+    "Rooms are logical labels — they describe where a device is placed.",
+    "Devices are matched to rooms at runtime based on the actual inventory.",
+    "",
+    "The wildcard [*] bypasses ambiguity: light[*].power = off",
+    "turns off lights in every room without requiring resolution.",
+    "",
+    "[*] can be combined with @all: @all(light[*]) stores all lights",
+    "from every room in a single variable.",
     ""
   );
 
@@ -91,6 +96,11 @@ function renderCapabilitiesSection(devices: DeviceDefinition[]): string {
       }
     }
 
+    if (device.type === "nightstand") {
+      lines.push("");
+      lines.push("Note: `light.power` is a single property name (not a nested path).");
+    }
+
     lines.push("");
   }
 
@@ -110,14 +120,30 @@ function renderSyntaxSection(): string {
     "$tv = tv[salon]",
     "",
     "$lights = @all(light[salon])",
+    "$firstTv = @first(tv) (selects the first matching device)",
+    "",
+    "`@all` and `@first` are collection modifiers.",
+    "They are only valid in variable assignments, never inline in property paths.",
     "",
     "## Variable usage",
     "$tv.power = on",
     "",
     "$lights.power = off",
     "",
-    "Variables MUST be prefixed with $ (both when defining and using).",
+    "Variables are prefixed with $ (both when defining and using).",
     "A variable stores a device or collection reference for reuse.",
+    "",
+    "Variable constraints:",
+    "- Room selectors on variables are invalid:",
+    "  $tv[salon].power = on → INVALID",
+    "- $it is read-only (auto-managed at runtime):",
+    "  $it = tv[salon] → INVALID",
+    "- Variables remember their collection modifier.",
+    "  $lights = @all(light[salon]) keeps @all semantics.",
+    "- $it is auto-set after every successful device resolution.",
+    "  It persists across statements and across calls within a session.",
+    "- Using $it as the first statement of a program has no effect —",
+    "  it will not be set yet.",
     "",
     "## Query",
     "tv.power?",
@@ -136,172 +162,259 @@ function renderSyntaxSection(): string {
     "$it.power = off",
     "$it.volume = 20",
     "",
-    'Use `$it` ONLY when referring to last resolved device or selection.',
+    "`$it` refers to the most recently resolved device.",
     "",
   ].join("\n");
 }
 
-function renderStaticSections(): string {
+function renderMultipleInstructionsSection(): string {
   return [
     "# MULTIPLE INSTRUCTIONS",
     "",
-    "One action per line:",
+    "Each instruction occupies one line.",
+    "Later statements can reference earlier results via `$it`.",
     "",
-    "User:",
-    "Turn on the TV and set volume to 20",
-    "",
-    "Output:",
+    "Example:",
     "tv.power = on",
     "$it.volume = 20",
     "",
-    "---",
+    "`$it` is only available when the previous instruction resolved",
+    "successfully without ambiguity. If tv.power = on cannot be resolved",
+    "(ambiguous), $it is not set for the next line.",
     "",
-    "# CONTEXT RULES",
+  ].join("\n");
+}
+
+function renderUsageGuidelinesSection(): string {
+  return [
+    "# USAGE GUIDELINES",
     "",
-    "- Do NOT resolve which specific device exists",
-    "- Do NOT choose between multiple TVs",
-    "- Always keep expressions abstract when ambiguous",
+    "- Device expressions are always abstract (device type level).",
+    "- Do not use device-specific IDs — keep expressions generic.",
+    "- If a property or action might not exist for the target device,",
+    "  it is still valid DSL — the runtime handles invalid operations.",
     "",
-    "GOOD:",
+    "Valid:",
     "tv.power = on",
     "",
-    "BAD:",
+    "Invalid:",
     "device(tv_lg_001).power = on",
     "",
-    "---",
+  ].join("\n");
+}
+
+function renderInvalidPatternsSection(): string {
+  return [
+    "# INVALID PATTERNS",
     "",
-    "# AMBIGUITY HANDLING",
+    "The following patterns are not valid HomeDSL:",
     "",
-    "If user request is ambiguous:",
+    "$tv[salon].power = on     — room selector on variable",
+    "$it = tv[salon]             — reassigning read-only $it",
+    "$it.power = on              — $it used before being set",
+    "tv.brightness = 50          — TV has no brightness property",
+    "                              (still valid syntax, runtime handles)",
     "",
-    "Still generate abstract DSL.",
+  ].join("\n");
+}
+
+function renderAmbiguitySection(): string {
+  return [
+    "# AMBIGUITY RESOLUTION",
+    "",
+    "When a device expression matches multiple devices, the runtime returns",
+    "a waiting state with a candidate list. The caller must pick a device",
+    "and re-submit the program.",
     "",
     "Example:",
     "",
-    "User:",
-    "Turn on the TV",
+    '"Turn on the TV"',
+    "→ tv.power = on",
     "",
-    "You still output:",
-    "tv.power = on",
+    "If there are multiple TVs, the runtime returns a waiting state —",
+    "the DSL itself does not specify which TV.",
     "",
-    "DO NOT ask questions.",
-    "",
-    "interpret_home_dsl will handle resolution and return:",
-    "- waiting state OR",
-    "- execution OR",
-    "- candidate list",
-    "",
-    "---",
-    "",
-    "# IMPORTANT PRINCIPLE",
-    "",
-    "Your role is a COMPILER, not a planner.",
-    "",
-    "You convert intent → DSL only.",
-    "",
-    "All reasoning about:",
-    "- device selection",
-    "- room disambiguation",
-    "- candidate resolution",
-    "",
-    "is handled by interpret_home_dsl.",
-    "",
-    "---",
-    "",
-    "# EXAMPLES",
-    "",
-    "User:",
-    "Turn on the living room TV",
-    "",
-    "→",
-    "tv[salon].power = on",
-    "",
-    "User:",
-    "Turn on the TV",
-    "",
-    "→",
-    "tv.power = on",
-    "",
-    "User:",
-    "Turn it off",
-    "",
-    "→",
-    "$it.power = off",
-    "",
-    "User:",
-    "Set temperature to 21",
-    "",
-    "→",
-    "thermostat.temperature = 21",
-    "",
-    "User:",
-    "Turn off all lights",
-    "",
-    "→",
-    "light[*].power = off",
-    "",
-    "User:",
-    "Play music",
-    "",
-    "→",
-    "speaker.play()",
+    "Devices can be pre-resolved before execution:",
+    "- session.resolvedIds stores resolved device choices",
+    "- applyResolution() picks a specific device",
     "",
   ].join("\n");
 }
 
-export function generateHomeAgentPrompt(config?: PromptConfig): string {
-  const devices = config?.devices ?? DEFAULT_DEVICES;
-  const rooms = config?.rooms ?? DEFAULT_ROOMS;
-  const customInstruction = config?.customInstruction;
-
-  const header = [
-    "# HomeAgent — HomeDSL Compiler",
+function renderGeneralPrincipleSection(): string {
+  return [
+    "# GENERAL PRINCIPLE",
     "",
-    "You are a HomeDSL compiler for a smart home system.",
+    "HomeDSL describes intent at the device-type level.",
+    "It does not assume which specific devices exist or where they are.",
     "",
-    "Your only responsibility is to convert user requests into a valid HomeDSL program.",
-    "",
-    "You MUST NOT:",
-    "- resolve devices yourself",
-    "- access or assume inventory details",
-    "- execute actions directly",
-    "- return natural language instead of DSL",
-    "",
-    "You ONLY produce HomeDSL.",
-    "",
-    "---",
-    "",
-    "# HOME DSL OVERVIEW",
-    "",
-    "HomeDSL is a minimal language to control smart home devices.",
-    "",
-    "A program is a sequence of instructions.",
-    "",
-    "---",
+    "The runtime handles:",
+    "- device selection (matching type + room to inventory)",
+    "- room disambiguation",
+    "- candidate resolution and filtering",
     "",
   ].join("\n");
+}
 
-  const supportedDevices = renderSupportedDevicesSection(devices);
-  const roomsSection = renderRoomsSection(rooms);
-  const capabilities = renderCapabilitiesSection(devices);
-  const syntax = renderSyntaxSection();
-  const staticSections = renderStaticSections();
-
-  let prompt = [
-    header,
-    supportedDevices,
-    roomsSection,
-    capabilities,
-    syntax,
-    staticSections,
+function renderFormatSection(): string {
+  return [
+    "# OUTPUT FORMAT",
+    "",
+    "HomeDSL output consists of raw DSL lines, one per line.",
+    "No markdown fences (```), no backticks, no explanatory text.",
+    "",
+    "If a request cannot be expressed in HomeDSL,",
+    "output nothing (empty response).",
+    "",
   ].join("\n");
+}
 
-  if (customInstruction) {
-    prompt += `\n\n---\n\n# CUSTOM INSTRUCTIONS\n\n${customInstruction}\n`;
+function renderExamplesSection(userExamples?: string[]): string {
+  const lines: string[] = [
+    "# EXAMPLES",
+    "",
+    '"Turn on the living room TV"',
+    "→ tv[salon].power = on",
+    "",
+    '"Turn on the TV"',
+    "→ tv.power = on",
+    "",
+    '"Turn it off"',
+    "→ $it.power = off",
+    "",
+    '"Set temperature to 21"',
+    "→ thermostat.temperature = 21",
+    "",
+    '"Turn off all lights"',
+    "→ light[*].power = off",
+    "",
+    '"Play music"',
+    "→ speaker.play()",
+    "",
+    '"Turn on the first TV"',
+    "→ $tv = @first(tv)",
+    "$tv.power = on",
+    "",
+    '"Turn off all office lights"',
+    "→ $officeLights = @all(light[bureau])",
+    "$officeLights.power = off",
+    "",
+    '"What\'s the living room temperature?"',
+    "→ thermostat[salon].temperature?",
+    "",
+    '"Lock the front door"',
+    "→ door[entrée].lock()",
+    "",
+    '"Dim the bedroom light to 20%"',
+    "→ light[chambre].brightness = 20",
+    "",
+    '"Stop the vacuum and turn on the camera"',
+    "→ vacuum.stop()",
+    "camera.snapshot()",
+    "",
+  ];
+
+  if (userExamples && userExamples.length > 0) {
+    for (const example of userExamples) {
+      lines.push(example);
+      lines.push("");
+    }
   }
 
-  return prompt;
+  return lines.join("\n");
+}
+
+function renderHeaderSection(): string {
+  return [
+    "---",
+    "",
+    "# HomeDSL Language Reference",
+    "",
+    "HomeDSL is a declarative language for controlling smart home devices.",
+    "HomeDSL programs consist of a sequence of instructions.",
+    "Statements execute sequentially, top to bottom.",
+    "Later statements can depend on earlier ones via `$it`.",
+    "",
+  ].join("\n");
+}
+
+function renderAdditionalRulesSection(rules: string[]): string {
+  const lines: string[] = ["---", "", "# ADDITIONAL RULES", ""];
+
+  for (const rule of rules) {
+    lines.push(`- ${rule}`);
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
+function renderCustomInstructionSection(instruction: string): string {
+  return `\n---\n\n# CUSTOM INSTRUCTIONS\n\n${instruction}\n`;
+}
+
+export class OpenNestPrompt {
+  private devices: DeviceDefinition[];
+  private rooms: RoomDefinition[];
+
+  constructor(devices?: DeviceDefinition[], rooms?: RoomDefinition[]) {
+    this.devices = devices ?? DEFAULT_DEVICES;
+    this.rooms = rooms ?? DEFAULT_ROOMS;
+  }
+
+  prompt(options?: PromptOptions): string {
+    const preamble = options?.preamble;
+    const userExamples = options?.examples;
+    const additionalRules = options?.additionalRules;
+    const customInstruction = options?.customInstruction;
+
+    const sections: string[] = [];
+
+    if (preamble !== undefined) {
+      sections.push(`${preamble.trim()}`);
+    }
+
+    sections.push(
+      renderHeaderSection(),
+      "",
+      "---",
+      "",
+      renderSupportedDevicesSection(this.devices),
+      renderRoomsSection(this.rooms),
+      renderCapabilitiesSection(this.devices),
+      renderSyntaxSection(),
+      renderMultipleInstructionsSection(),
+      "---",
+      "",
+      renderUsageGuidelinesSection(),
+      "---",
+      "",
+      renderInvalidPatternsSection(),
+      "---",
+      "",
+      renderAmbiguitySection(),
+      "---",
+      "",
+      renderGeneralPrincipleSection(),
+      "---",
+      "",
+      renderFormatSection(),
+      "---",
+      "",
+      renderExamplesSection(userExamples),
+    );
+
+    if (additionalRules && additionalRules.length > 0) {
+      sections.push(renderAdditionalRulesSection(additionalRules));
+    }
+
+    if (customInstruction !== undefined) {
+      sections.push(renderCustomInstructionSection(customInstruction));
+    }
+
+    return sections.join("\n");
+  }
 }
 
 export { DEFAULT_DEVICES, DEFAULT_ROOMS };
-export type { PromptConfig, DeviceDefinition, RoomDefinition, Capability, PropertyCapability, ActionCapability };
+export type { PromptOptions, DeviceDefinition, RoomDefinition, Capability, PropertyCapability, ActionCapability };

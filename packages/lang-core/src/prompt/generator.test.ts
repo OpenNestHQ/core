@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generateHomeAgentPrompt, DEFAULT_DEVICES, DEFAULT_ROOMS } from "./generator.js";
+import { OpenNestPrompt, DEFAULT_DEVICES, DEFAULT_ROOMS } from "./generator.js";
 import type { DeviceDefinition, RoomDefinition, PropertyCapability, ActionCapability } from "./types.js";
 
 function makeDevice(type: string, capabilities: Array<PropertyCapability | ActionCapability>): DeviceDefinition {
@@ -56,20 +56,19 @@ describe("DEFAULT_ROOMS", () => {
   });
 });
 
-describe("generateHomeAgentPrompt", () => {
-  // --- Default prompt structure ---
+describe("OpenNestPrompt", () => {
 
   describe("with default config", () => {
-    const prompt = generateHomeAgentPrompt();
+    const prompt = new OpenNestPrompt().prompt();
 
     it("should start with the header", () => {
-      expect(prompt).toContain("# HomeAgent — HomeDSL Compiler");
-      expect(prompt).toContain("You are a HomeDSL compiler for a smart home system.");
+      expect(prompt).toContain("# HomeDSL Language Reference");
+      expect(prompt).toContain("HomeDSL is a declarative language for controlling smart home devices.");
     });
 
-    it("should contain the Home DSL overview", () => {
-      expect(prompt).toContain("# HOME DSL OVERVIEW");
-      expect(prompt).toContain("HomeDSL is a minimal language to control smart home devices.");
+    it("should contain the sequential execution note", () => {
+      expect(prompt).toContain("Statements execute sequentially, top to bottom.");
+      expect(prompt).toContain("Later statements can depend on earlier ones via `$it`.");
     });
 
     it("should list all supported devices", () => {
@@ -77,15 +76,15 @@ describe("generateHomeAgentPrompt", () => {
       for (const device of DEFAULT_DEVICES) {
         expect(prompt).toContain(`- ${device.type}`);
       }
-      expect(prompt).toContain("Never invent new device types.");
+      expect(prompt).toContain("Do not invent new device types.");
     });
 
     it("should contain the rooms section", () => {
-      expect(prompt).toContain("# ROOMS (logical grouping only)");
-      for (const room of DEFAULT_ROOMS.slice(0, 4)) {
+      expect(prompt).toContain("# ROOMS");
+      for (const room of DEFAULT_ROOMS) {
         expect(prompt).toContain(`- ${room.name}`);
       }
-      expect(prompt).toContain("Rooms are NOT authoritative.");
+      expect(prompt).toContain("Rooms are logical labels");
     });
 
     it("should contain the capabilities section with all device details", () => {
@@ -93,7 +92,6 @@ describe("generateHomeAgentPrompt", () => {
       expect(prompt).toContain("## TV");
       expect(prompt).toContain("Properties:");
 
-      // Check TV capabilities appear
       const capSection = prompt.substring(
         prompt.indexOf("## TV"),
         prompt.indexOf("## LIGHT"),
@@ -115,7 +113,6 @@ describe("generateHomeAgentPrompt", () => {
 
     it("should render switch capabilities correctly", () => {
       expect(prompt).toContain("## SWITCH");
-      // Switch only has properties, no actions
       const capSection = prompt.substring(
         prompt.indexOf("## SWITCH"),
         prompt.indexOf("# SYNTAX"),
@@ -135,9 +132,11 @@ describe("generateHomeAgentPrompt", () => {
 
     it("should contain the static sections", () => {
       expect(prompt).toContain("# MULTIPLE INSTRUCTIONS");
-      expect(prompt).toContain("# CONTEXT RULES");
-      expect(prompt).toContain("# AMBIGUITY HANDLING");
-      expect(prompt).toContain("# IMPORTANT PRINCIPLE");
+      expect(prompt).toContain("# USAGE GUIDELINES");
+      expect(prompt).toContain("# INVALID PATTERNS");
+      expect(prompt).toContain("# AMBIGUITY RESOLUTION");
+      expect(prompt).toContain("# GENERAL PRINCIPLE");
+      expect(prompt).toContain("# OUTPUT FORMAT");
       expect(prompt).toContain("# EXAMPLES");
     });
 
@@ -153,6 +152,10 @@ describe("generateHomeAgentPrompt", () => {
     it("should not contain custom instructions when none provided", () => {
       expect(prompt).not.toContain("# CUSTOM INSTRUCTIONS");
     });
+
+    it("should not contain preamble section when none provided", () => {
+      expect(prompt).not.toContain("# ADDITIONAL RULES");
+    });
   });
 
   // --- Custom devices ---
@@ -163,7 +166,7 @@ describe("generateHomeAgentPrompt", () => {
       makeDevice("light", [makeProp("power", "power"), makeProp("brightness", "number", [0, 100])]),
     ];
 
-    const prompt = generateHomeAgentPrompt({ devices: customDevices });
+    const prompt = new OpenNestPrompt(customDevices).prompt();
 
     it("should only list the provided devices", () => {
       expect(prompt).toContain("- tv");
@@ -183,7 +186,7 @@ describe("generateHomeAgentPrompt", () => {
 
     it("should still contain non-device sections", () => {
       expect(prompt).toContain("# SYNTAX");
-      expect(prompt).toContain("# CONTEXT RULES");
+      expect(prompt).toContain("# USAGE GUIDELINES");
       expect(prompt).toContain("# EXAMPLES");
     });
   });
@@ -196,7 +199,7 @@ describe("generateHomeAgentPrompt", () => {
       { name: "jardin" },
     ];
 
-    const prompt = generateHomeAgentPrompt({ rooms: customRooms });
+    const prompt = new OpenNestPrompt(undefined, customRooms).prompt();
 
     it("should only list the provided rooms", () => {
       expect(prompt).toContain("- garage");
@@ -207,7 +210,7 @@ describe("generateHomeAgentPrompt", () => {
 
     it("should still contain room selector examples", () => {
       expect(prompt).toContain("- device[room_name]");
-      expect(prompt).toContain("- light[*] (all rooms)");
+      expect(prompt).toContain("- light[*]");
     });
   });
 
@@ -215,7 +218,7 @@ describe("generateHomeAgentPrompt", () => {
 
   describe("with custom instruction", () => {
     const instruction = "Always prefer salon when no room is specified.";
-    const prompt = generateHomeAgentPrompt({ customInstruction: instruction });
+    const prompt = new OpenNestPrompt().prompt({ customInstruction: instruction });
 
     it("should append the custom instruction section", () => {
       expect(prompt).toContain("# CUSTOM INSTRUCTIONS");
@@ -229,13 +232,94 @@ describe("generateHomeAgentPrompt", () => {
     });
   });
 
+  // --- Preamble ---
+
+  describe("with preamble", () => {
+    const preamble = "You are a HomeDSL compiler agent. Always output raw DSL.";
+    const prompt = new OpenNestPrompt().prompt({ preamble });
+
+    it("should place preamble before the header", () => {
+      const preambleIndex = prompt.indexOf("You are a HomeDSL compiler agent.");
+      const headerIndex = prompt.indexOf("# HomeDSL Language Reference");
+      expect(preambleIndex).toBeGreaterThanOrEqual(0);
+      expect(preambleIndex).toBeLessThan(headerIndex);
+    });
+  });
+
+  // --- Additional rules ---
+
+  describe("with additional rules", () => {
+    const rules = ["Always prefer salon when no room is specified.", "Never output explanations."];
+    const prompt = new OpenNestPrompt().prompt({ additionalRules: rules });
+
+    it("should contain the additional rules section", () => {
+      expect(prompt).toContain("# ADDITIONAL RULES");
+      expect(prompt).toContain("- Always prefer salon when no room is specified.");
+      expect(prompt).toContain("- Never output explanations.");
+    });
+
+    it("should place additional rules after examples", () => {
+      const examplesIndex = prompt.indexOf("# EXAMPLES");
+      const rulesIndex = prompt.indexOf("# ADDITIONAL RULES");
+      expect(rulesIndex).toBeGreaterThan(examplesIndex);
+    });
+  });
+
+  // --- User examples ---
+
+  describe("with user examples", () => {
+    const userExamples = [
+      `"Play a movie"\n→ tv.play()`,
+      `"Goodnight"\n→ light[*].power = off\ndoor[entrée].lock()`,
+    ];
+    const prompt = new OpenNestPrompt().prompt({ examples: userExamples });
+
+    it("should append user examples after default examples", () => {
+      expect(prompt).toContain(`"Play a movie"`);
+      expect(prompt).toContain("→ tv.play()");
+      expect(prompt).toContain(`"Goodnight"`);
+      expect(prompt).toContain("door[entrée].lock()");
+    });
+  });
+
+  // --- Combined options ---
+
+  describe("with combined options", () => {
+    const prompt = new OpenNestPrompt().prompt({
+      preamble: "Preamble text",
+      examples: [`"Example"\n→ dsl.rule()`],
+      additionalRules: ["Rule 1"],
+      customInstruction: "Custom instruction",
+    });
+
+    it("should contain all sections", () => {
+      expect(prompt).toContain("Preamble text");
+      expect(prompt).toContain("# HomeDSL Language Reference");
+      expect(prompt).toContain("# ADDITIONAL RULES");
+      expect(prompt).toContain("# CUSTOM INSTRUCTIONS");
+    });
+
+    it("should keep sections in correct order", () => {
+      const preambleIdx = prompt.indexOf("Preamble text");
+      const headerIdx = prompt.indexOf("# HomeDSL Language Reference");
+      const examplesIdx = prompt.indexOf("# EXAMPLES");
+      const rulesIdx = prompt.indexOf("# ADDITIONAL RULES");
+      const customIdx = prompt.indexOf("# CUSTOM INSTRUCTIONS");
+
+      expect(preambleIdx).toBeLessThan(headerIdx);
+      expect(headerIdx).toBeLessThan(examplesIdx);
+      expect(examplesIdx).toBeLessThan(rulesIdx);
+      expect(rulesIdx).toBeLessThan(customIdx);
+    });
+  });
+
   // --- Empty configs ---
 
   describe("with empty devices array", () => {
-    const prompt = generateHomeAgentPrompt({ devices: [] });
+    const prompt = new OpenNestPrompt([]).prompt();
 
     it("should still produce a valid prompt", () => {
-      expect(prompt).toContain("# HomeAgent — HomeDSL Compiler");
+      expect(prompt).toContain("# HomeDSL Language Reference");
       expect(prompt).toContain("# SUPPORTED DEVICES");
       expect(prompt).toContain("# CAPABILITIES");
     });
@@ -251,10 +335,10 @@ describe("generateHomeAgentPrompt", () => {
   });
 
   describe("with empty rooms array", () => {
-    const prompt = generateHomeAgentPrompt({ rooms: [] });
+    const prompt = new OpenNestPrompt(undefined, []).prompt();
 
     it("should still produce a valid rooms section", () => {
-      expect(prompt).toContain("# ROOMS (logical grouping only)");
+      expect(prompt).toContain("# ROOMS");
     });
 
     it("should not list default room names", () => {
@@ -269,117 +353,105 @@ describe("generateHomeAgentPrompt", () => {
   // --- Edge cases ---
 
   describe("edge cases", () => {
-    it("should not throw with undefined config", () => {
-      expect(() => generateHomeAgentPrompt()).not.toThrow();
+    it("should not throw with undefined constructor args", () => {
+      expect(() => new OpenNestPrompt().prompt()).not.toThrow();
     });
 
-    it("should not throw with null-like empty config", () => {
-      expect(() => generateHomeAgentPrompt({})).not.toThrow();
+    it("should not throw with null-like empty prompt options", () => {
+      expect(() => new OpenNestPrompt().prompt({})).not.toThrow();
     });
 
     it("should produce the same result for no args and empty object", () => {
-      const a = generateHomeAgentPrompt();
-      const b = generateHomeAgentPrompt({});
+      const a = new OpenNestPrompt().prompt();
+      const b = new OpenNestPrompt().prompt({});
       expect(a).toBe(b);
     });
 
     it("should render device with no capabilities", () => {
-      const prompt = generateHomeAgentPrompt({
-        devices: [makeDevice("sensor", [])],
-        rooms: [],
-      });
+      const prompt = new OpenNestPrompt([
+        makeDevice("sensor", []),
+      ], []).prompt();
       expect(prompt).toContain("## SENSOR");
       expect(prompt).toContain("- sensor");
     });
 
     it("should render property without range and without values", () => {
-      const prompt = generateHomeAgentPrompt({
-        devices: [makeDevice("test", [makeProp("mode", "string")])],
-        rooms: [],
-      });
+      const prompt = new OpenNestPrompt([
+        makeDevice("test", [makeProp("mode", "string")]),
+      ], []).prompt();
       expect(prompt).toContain("- mode (optional)");
     });
 
     it("should NOT render range for number when no range provided", () => {
-      const prompt = generateHomeAgentPrompt({
-        devices: [makeDevice("test", [makeProp("count", "number")])],
-        rooms: [],
-      });
+      const prompt = new OpenNestPrompt([
+        makeDevice("test", [makeProp("count", "number")]),
+      ], []).prompt();
       expect(prompt).toContain("- count");
       expect(prompt).not.toContain("count (");
     });
 
     it("should NOT render (optional) for power type", () => {
-      const prompt = generateHomeAgentPrompt({
-        devices: [makeDevice("test", [makeProp("power", "power")])],
-        rooms: [],
-      });
+      const prompt = new OpenNestPrompt([
+        makeDevice("test", [makeProp("power", "power")]),
+      ], []).prompt();
       expect(prompt).toContain("- power (on/off)");
       expect(prompt).not.toContain("power (optional)");
     });
 
-    it("should handle rooms with more than 4 entries (only first 4 listed)", () => {
+    it("should list all rooms when more than 4 are provided", () => {
       const rooms: RoomDefinition[] = Array.from({ length: 10 }, (_, i) => ({
         name: `room_${i}`,
       }));
-      const prompt = generateHomeAgentPrompt({ rooms });
+      const prompt = new OpenNestPrompt(undefined, rooms).prompt();
       expect(prompt).toContain("- room_0");
-      expect(prompt).toContain("- room_3");
-      expect(prompt).not.toContain("- room_4");
-      expect(prompt).not.toContain("- room_9");
+      expect(prompt).toContain("- room_4");
+      expect(prompt).toContain("- room_9");
     });
   });
 });
 
 describe("capability rendering", () => {
   it("should render power properties as name (on/off)", () => {
-    const prompt = generateHomeAgentPrompt({
-      devices: [makeDevice("plug", [makeProp("power", "power")])],
-      rooms: [],
-    });
+    const prompt = new OpenNestPrompt([
+      makeDevice("plug", [makeProp("power", "power")]),
+    ], []).prompt();
     expect(prompt).toContain("- power (on/off)");
   });
 
   it("should render number properties with range as name (min–max)", () => {
-    const prompt = generateHomeAgentPrompt({
-      devices: [makeDevice("dimmer", [makeProp("level", "number", [1, 10])])],
-      rooms: [],
-    });
+    const prompt = new OpenNestPrompt([
+      makeDevice("dimmer", [makeProp("level", "number", [1, 10])]),
+    ], []).prompt();
     expect(prompt).toContain("- level (1–10)");
   });
 
   it("should render enum properties with values", () => {
-    const prompt = generateHomeAgentPrompt({
-      devices: [
-        makeDevice("media", [
-          makeProp("input", "enum", undefined, ["hdmi", "usb", "bluetooth"]),
-        ]),
-      ],
-      rooms: [],
-    });
+    const prompt = new OpenNestPrompt([
+      makeDevice("media", [
+        makeProp("input", "enum", undefined, ["hdmi", "usb", "bluetooth"]),
+      ]),
+    ], []).prompt();
     expect(prompt).toContain("- input (hdmi, usb, bluetooth)");
   });
 
   it("should render string properties as name (optional)", () => {
-    const prompt = generateHomeAgentPrompt({
-      devices: [makeDevice("display", [makeProp("label", "string")])],
-      rooms: [],
-    });
+    const prompt = new OpenNestPrompt([
+      makeDevice("display", [makeProp("label", "string")]),
+    ], []).prompt();
     expect(prompt).toContain("- label (optional)");
   });
 
   it("should render actions as name()", () => {
-    const prompt = generateHomeAgentPrompt({
-      devices: [makeDevice("robot", [makeAction("start"), makeAction("stop")])],
-      rooms: [],
-    });
+    const prompt = new OpenNestPrompt([
+      makeDevice("robot", [makeAction("start"), makeAction("stop")]),
+    ], []).prompt();
     expect(prompt).toContain("- start()");
     expect(prompt).toContain("- stop()");
   });
 });
 
 describe("section ordering", () => {
-  const prompt = generateHomeAgentPrompt();
+  const prompt = new OpenNestPrompt().prompt();
 
   function sectionOrder(sections: string[]) {
     const indices = sections.map((s) => prompt.indexOf(s));
@@ -394,16 +466,17 @@ describe("section ordering", () => {
 
   it("should have sections in the expected order", () => {
     sectionOrder([
-      "# HomeAgent — HomeDSL Compiler",
-      "# HOME DSL OVERVIEW",
+      "# HomeDSL Language Reference",
       "# SUPPORTED DEVICES",
-      "# ROOMS (logical grouping only)",
+      "# ROOMS",
       "# CAPABILITIES",
       "# SYNTAX",
       "# MULTIPLE INSTRUCTIONS",
-      "# CONTEXT RULES",
-      "# AMBIGUITY HANDLING",
-      "# IMPORTANT PRINCIPLE",
+      "# USAGE GUIDELINES",
+      "# INVALID PATTERNS",
+      "# AMBIGUITY RESOLUTION",
+      "# GENERAL PRINCIPLE",
+      "# OUTPUT FORMAT",
       "# EXAMPLES",
     ]);
   });

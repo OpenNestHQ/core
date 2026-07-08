@@ -1,10 +1,10 @@
 export {
-  generateHomeAgentPrompt,
+  OpenNestPrompt,
   DEFAULT_DEVICES,
   DEFAULT_ROOMS,
 } from "./prompt/index.js";
 export type {
-  PromptConfig,
+  PromptOptions,
   DeviceDefinition,
   RoomDefinition,
   Capability,

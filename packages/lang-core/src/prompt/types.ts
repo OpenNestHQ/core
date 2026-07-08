@@ -33,8 +33,9 @@ export interface RoomDefinition {
   description?: string;
 }
 
-export interface PromptConfig {
-  devices?: DeviceDefinition[];
-  rooms?: RoomDefinition[];
+export interface PromptOptions {
+  preamble?: string;
+  examples?: string[];
+  additionalRules?: string[];
   customInstruction?: string;
 }
