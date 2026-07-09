@@ -138,9 +138,14 @@ $tv = tv[salon]
 
 $lights = @all(light[salon])
 $firstTv = @first(tv) (selects the first matching device)
+$tv = @oneof(tv) (resolves immediately, triggers ambiguity if multiple)
 
-`@all` and `@first` are collection modifiers.
+`@all`, `@first`, and `@oneof` are collection modifiers.
 They are only valid in variable assignments, never inline in property paths.
+
+@oneof forces immediate resolution — the variable stores exactly one
+device. If multiple devices match, an ambiguity dialog is triggered.
+Use @oneof before @if conditions that require a pre-resolved variable.
 
 ## Variable usage
 $tv.power = on
@@ -205,7 +210,7 @@ Parentheses `()` control grouping — `&` binds tighter than `|`.
 ## @if / @else / @endif
 
 $light_salon = light[salon]
-$light_cuisine = light[cuisine]
+$light_cuisine = @oneof(light[cuisine])
 
 @if $light_salon.power? == "on"
     $light_cuisine.power = on
@@ -214,6 +219,23 @@ $light_cuisine = light[cuisine]
     $light_cuisine.power = off
 @endif
 
+Note: use `@oneof(device[room])` before a condition when the device
+type could be ambiguous — even with a room selector, a room may have
+multiple devices of the same type.
+
+## @oneof for condition variables
+
+Always pre-resolve condition variables with `@oneof`:
+
+$tv = @oneof(tv[salon])
+@if $tv.power? == "on"
+    speaker[salon].power = on
+@endif
+
+Without @oneof, an ambiguous variable in a condition triggers an error.
+@oneof resolves ambiguity by auto-selecting one device when only one
+matches, or requesting clarification when multiple match.
+
 ## Syntax
 
 Simple condition:
@@ -221,6 +243,12 @@ Simple condition:
     <statements>
 @else           (optional)
     <statements>
+@endif
+
+With @oneof (recommended):
+$var = @oneof(device[room])
+@if $var.property? == value
+    ...
 @endif
 
 Compound conditions:
@@ -245,8 +273,12 @@ Compound conditions:
 
 - The condition path uses the query syntax (`?`) to read a property value.
 - Conditions compare against `on`, `off`, numbers, or quoted strings.
-- Variables are recommended for conditions to avoid ambiguity:
-  pre-resolve the device with `$var = device[room]` before the `@if`.
+- ALWAYS pre-resolve condition devices with `$var = @oneof(device[room])`
+  to avoid ambiguity errors.
+- If the device is already unambiguous (exactly one in the room),
+  a direct assignment like `$var = device[room]` also works.
+- An ambiguous device in a condition triggers an error — 
+  the VM cannot guess which device to check.
 - Multiple conditions can be combined with `&` and `|`.
 - `&` binds tighter than `|` — use `(...)` for explicit grouping.
 - `@if` blocks can be nested.
@@ -366,15 +398,15 @@ camera.snapshot()
 
 "If the salon light is on, turn on the kitchen light too"
 → $salon = light[salon]
-$cuisine = light[cuisine]
+$cuisine = @oneof(light[cuisine])
 @if $salon.power? == "on"
 $cuisine.power = on
 @endif
 
 "If the temperature is above 25, turn on the fan, otherwise turn it off"
-→ $temp = thermostat[salon]
-$fan = fan[salon]
-@if $temp.temperature? == 25
+→ $therm = thermostat[salon]
+$fan = @oneof(fan[salon])
+@if $therm.temperature? == 25
     $fan.power = on
 @else
     $fan.power = off
@@ -382,22 +414,22 @@ $fan = fan[salon]
 
 "If the salon light AND the TV are both on, turn on the speaker"
 → $salon = light[salon]
-$salon_tv = tv[salon]
+$salon_tv = @oneof(tv[salon])
 @if $salon.power? == on & $salon_tv.power? == on
 speaker[salon].power = on
 @endif
 
 "If the salon light OR the kitchen light is on, close the blinds"
 → $salon = light[salon]
-$cuisine = light[cuisine]
+$cuisine = @oneof(light[cuisine])
 @if $salon.power? == on | $cuisine.power? == on
 blind[salon].position = 0
 @endif
 
 "If the TV is off AND (it is hot OR the fan is on), turn on the AC"
-→ $tv = tv[salon]
+→ $tv = @oneof(tv[salon])
 $therm = thermostat[salon]
-$fan = fan[salon]
+$fan = @oneof(fan[salon])
 @if $tv.power? != on & ($therm.temperature? == 25 | $fan.power? == on)
 thermostat[salon].temperature = 20
 @endif
