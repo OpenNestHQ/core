@@ -11,8 +11,8 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@opennest/lang-core": "file:../lang-core",
-    "@opennest/devices": "file:../devices"
+    "@opennest/lang-core": "workspace:*",
+    "@opennest/devices": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^6.0.3",

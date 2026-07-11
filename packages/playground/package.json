@@ -7,14 +7,14 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "start": "npm run build && node dist/index.js",
+    "start": "pnpm run build && node dist/index.js",
     "build": "tsc"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2",
-    "@opennest/devices": "file:../devices",
-    "@opennest/lang-core": "file:../lang-core",
-    "@opennest/vm": "file:../vm",
+    "@opennest/devices": "workspace:*",
+    "@opennest/lang-core": "workspace:*",
+    "@opennest/vm": "workspace:*",
     "ai": "^5"
   },
   "devDependencies": {

@@ -9,7 +9,7 @@
   "scripts": {
     "test": "vitest run",
     "build": "tsc",
-    "build:prompt": "npm run build && node scripts/build-prompt.js"
+    "build:prompt": "pnpm run build && node scripts/build-prompt.js"
   },
   "devDependencies": {
     "typescript": "^6.0.3",

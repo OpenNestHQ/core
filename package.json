@@ -1,0 +1,11 @@
+{
+  "name": "opennest",
+  "private": true,
+  "description": "OpenNest monorepo — DSL runtime for smart environments",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "build:prompt": "pnpm --filter @opennest/lang-core run build:prompt",
+    "test": "pnpm -r run test",
+    "start": "pnpm --filter @opennest/playground run start"
+  }
+}
