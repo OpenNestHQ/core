@@ -1,205 +1,161 @@
 # OpenNest
 
-> A domain-specific language runtime for intelligent environments. Also known as ClawNest.
+> A DSL runtime for smart environments — also known as ClawNest.
 
-OpenNest is a language, virtual machine, and agent runtime system designed to control and reason about smart environments through a structured DSL called HomeDSL.
-
-It is not just a smart home framework. It is a compiler and execution engine for real-world agent interaction systems.
-
----
-
-## Core Idea
-
-Instead of letting LLMs directly control devices or call tools with unstructured JSON, OpenNest introduces a strict separation:
+OpenNest is a language, virtual machine, and agent runtime designed to control and reason about smart environments through a structured DSL called **HomeDSL**.
 
 ```text
-Natural Language
-    ↓
-HomeAgent (LLM Compiler)
-    ↓
-HomeDSL (Intermediate Language)
-    ↓
-OpenNest VM (interpret_home_dsl)
-    ↓
-Physical / Digital Environment
+Natural Language → HomeAgent (LLM) → HomeDSL → VM (interpret_home_dsl) → Devices
 ```
 
 ---
 
-## Architecture
+## Packages
 
-OpenNest is composed of four packages:
-
-### 1. `lang-core` — Language toolkit
-
-Parses HomeDSL into an AST and generates structured prompts for the LLM.
-
-- **Parser**: `parseHomeDSL(source) → ParseResult` — validates syntax and produces a typed AST
-- **Prompt generator**: `generateHomeAgentPrompt(config?) → string` — creates strict prompts for the HomeAgent
-- **AST types**: `Program`, `Statement`, `Expr`, `Value`, etc.
-
-### 2. `devices` — Device abstraction
-
-Device registry and driver interface.
-
-- **DeviceDriver interface**: `getProperty`, `setProperty`, `executeAction`, `init`
-- **MockDriver**: in-memory driver for testing and development
-- **HADriver**: REST API driver for Home Assistant
-- **DeviceRegistry**: loads device inventories from YAML
-
-### 3. `vm` — Interpreter
-
-The execution engine. Takes a parsed AST and a device context, then:
-
-- resolves device references
-- detects and handles ambiguity
-- executes assignments, queries, increments, actions, and conditional blocks
-- manages session state (variables, `it` context, history)
-- supports collections (`@all`, `@first`), wildcards (`[*]`), and conditions (`@if`/`@else`/`@endif`)
-
-### 4. `playground` — Interactive REPL
-
-A terminal UI with 14 mock devices across 4 rooms for testing and demonstration. Starts an interactive readline-based session where you can type HomeDSL and see the VM execute it in real time.
+| Package | npm name | Role |
+|---|---|---|
+| [lang-core](./packages/lang-core/) | `@opennest/lang-core` | Parser (HomeDSL → AST), prompt generator, AST types |
+| [devices](./packages/devices/) | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers |
+| [vm](./packages/vm/) | `@opennest/vm` | Interpreter: resolution, ambiguity, state, collections, conditions |
+| [playground](./packages/playground/) | `@opennest/playground` | Interactive TUI REPL with 14 mock devices + NL→DSL AI agent |
 
 ---
 
-## HomeDSL Overview
+## Quick Start
 
-### Supported device types
+```bash
+pnpm install
+pnpm run build
+pnpm run test
+pnpm run start          # Launch the playground REPL
+```
 
-`tv`, `light`, `speaker`, `thermostat`, `fan`, `blind`, `camera`, `vacuum`, `nightstand`, `door`, `switch`
+---
 
-### Core syntax
+## HomeDSL at a Glance
 
-**State assignment:**
+**11 device types**: `tv`, `light`, `speaker`, `thermostat`, `fan`, `blind`, `camera`, `vacuum`, `nightstand`, `door`, `switch`
+
+### Syntax
+
 ```text
+# State assignment
 tv.power = on
 light.brightness = 50
-```
 
-**Queries:**
-```text
+# Queries
 tv.power?
 thermostat.temperature?
-```
 
-**Actions:**
-```text
+# Actions
 vacuum.start()
 camera.snapshot()
-```
 
-**Variables:**
-```text
-$living_tv = tv[salon]
-$living_tv.power = on
-```
+# Variables ($-prefixed)
+$salon_tv = tv[salon]
+$salon_tv.power = on
 
-Variables are prefixed with `$` to distinguish them from device types. The `$` is syntactic only — the name is stored without it internally.
-
-**Context reference:**
-```text
+# Context reference
 $it.volume = 20
-```
 
-**Collections:**
-```text
+# Collections
 $lights = @all(light[salon])
 $lights.power = on
-```
 
-**Pre-resolved device (for conditions):**
-```text
+# Wildcard rooms
+light[*].power = off
+
+# Conditions
 $tv = @oneof(tv)
-$tv.power = on
-
 @if $tv.power? == on
     light.power = off
-@endif
-```
-
-`@oneof` resolves immediately — if multiple devices match, it triggers an ambiguity dialog instead of failing silently. This is essential before `@if` conditions, which require a single resolved device.
-
-**Wildcard room selector:**
-```text
-light[*].power = off
-```
-
-**Conditions:**
-```text
-$light_salon = @oneof(light[salon])
-$light_cuisine = @oneof(light[cuisine])
-
-@if $light_salon.power? == on
-    $light_cuisine.power = on
 @else
-    $light_cuisine.power = off
-@endif
-```
-
-Conditions can be combined with `&` (AND) and `|` (OR). `&` binds tighter than `|`, and parentheses `()` control explicit grouping:
-
-```text
-@if $a.power? == on & $b.power? == on
-    speaker.power = on
+    light.power = on
 @endif
 
-@if $a.power? == on | $b.power? == on
-    light.power = off
-@endif
-
-@if $tv.power? != on & ($therm.temperature? == 25 | $fan.power? == on)
+# Compound conditions (& binds tighter than |)
+@if $a.power? == on & ($b.temperature? == 25 | $c.power? == on)
     thermostat.temperature = 20
 @endif
 ```
 
-Conditions use the query syntax (`?`) to read a property value. Devices in conditions should be pre-resolved with `@oneof` — an ambiguous device in a condition triggers an error.
+### Collection modifiers
+
+| Modifier | Behavior |
+|---|---|
+| `@all(type[room])` | Expands to all matches, batch execution |
+| `@first(type[room])` | Selects the first match |
+| `@oneof(type[room])` | Resolves immediately to one device, ambiguity if multiple |
+| `[*]` | Wildcard room — matches all rooms |
 
 ---
 
 ## VM Behavior
 
-The OpenNest VM, exposed through `interpret_home_dsl(program, context)`, is responsible for:
+The VM (`interpret_home_dsl`) resolves device references, detects ambiguity, and executes statements — returning one of three statuses:
 
-- parsing the DSL AST
-- resolving device references
-- detecting ambiguity
-- requesting clarification when needed
-- executing actions
-- updating session state
+| Status | Meaning |
+|---|---|
+| `success` | All statements executed |
+| `waiting` | Ambiguity detected — caller must pick a device via `applyResolution()` |
+| `error` | One or more errors occurred |
 
-### Ambiguity handling
+### Key features
 
-Instead of failing, the VM returns a waiting state:
+- **Ambiguity as a first-class state** — ambiguous device references return a structured `AmbiguityInfo` tree, not an error
+- **Intent filtering** — devices that don't support a targeted property/action are auto-excluded
+- **Stateful sessions** — variables, `$it` context, and execution history persist across VM calls
 
-```json
-{
-  "status": "waiting",
-  "awaiting": {
-    "kind": "target",
-    "tree": {
-      "type": "tv",
-      "children": [
-        { "key": "salon", "dsl": "tv[salon]", "children": [{ "id": "tv_salon", "dsl": "tv[salon]" }] },
-        { "key": "chambre", "dsl": "tv[chambre]", "children": [{ "id": "tv_chambre", "dsl": "tv[chambre]" }] }
-      ]
-    }
-  }
-}
+---
+
+## Natural Language Mode
+
+The playground includes an AI agent (`:nl` command) that translates natural language to HomeDSL:
+
+```text
+[NL] > turn on all lights in the living room and set the tv volume to 20
+  Translated to HomeDSL:
+  $lights = @all(light[salon])
+  $lights.power = on
+  $tv = @oneof(tv[salon])
+  $tv.volume = 20
+  ✓ OK
 ```
 
-The caller picks a device via `applyResolution(session, deviceType, deviceId)` and re-invokes the VM.
+Requires `OPENAI_API_KEY` (or compatible API via `OPENAI_BASE_URL`). Uses `gpt-4o-mini` by default, overridable via `OPENNEST_MODEL`.
 
-### Intent filtering
+---
 
-When a statement targets a property or action, the resolver excludes devices that don't support it (based on their `driverConfig`). This can resolve ambiguity automatically without user input.
+## Repository Structure
 
-### Collections
-
-- `@all(type[room])` — expands to all matches, bypasses ambiguity, executes in batch
-- `@first(type[room])` — selects the first match
-- `@oneof(type[room])` — resolves immediately to exactly one device; triggers ambiguity if multiple match
-- `[*]` wildcard room — matches devices in all rooms
+```
+packages/
+  lang-core/         # Parser + prompt generator
+    src/
+      ast/           # AST type definitions
+      parser/        # parseHomeDSL()
+      prompt/        # OpenNestPrompt, defaults, types
+      validator/     # (future) AST validation
+  devices/           # Device registry + drivers
+    src/
+      drivers/       # DeviceDriver interface, MockDriver, HADriver
+      registry.ts    # DeviceRegistry (YAML → devices)
+  vm/                # VM interpreter
+    src/
+      interpreter.ts # Main execution loop
+      resolver.ts    # Device resolution
+      executor.ts    # Assignment, query, action, condition execution
+      state.ts       # Session management, ambiguity resolution
+      collections.ts # @all, @first, @oneof expansion
+      ambiguity.ts   # Ambiguity tree construction
+    __fixtures__/    # Sample inventory.yaml
+  playground/        # Interactive TUI REPL
+    src/
+      repl.ts        # Readline-based REPL with tab-completion
+      agent.ts       # NL→DSL AI translator (OpenAI via ai-sdk)
+      devices.ts     # 14 mock devices across 4 rooms
+      format.ts      # Colored terminal output
+```
 
 ---
 
@@ -208,66 +164,8 @@ When a statement targets a property or action, the resolver excludes devices tha
 1. **Separation of concerns** — LLM = compiler, VM = execution engine
 2. **Deterministic execution** — same DSL + same state → same result
 3. **Structured ambiguity** — ambiguity is a first-class state, not an error
-4. **Stateful runtime** — the session remembers variables, selections, history
-5. **DSL as interface contract** — HomeDSL is the only interface between the LLM and the system
-
----
-
-## Example Flow
-
-**User:**
-> Turn on all the lights in the living room.
-
-**HomeAgent output:**
-```text
-$lights = @all(light[salon])
-$lights.power = on
-```
-
-**VM execution:**
-- resolves all lights in the salon
-- executes a batch power update
-- returns success
-
----
-
-## Repository Structure
-
-```
-packages/
-  lang-core/         # Parser + Prompt generator
-    src/
-      parser/        # parseHomeDSL()
-      prompt/        # generateHomeAgentPrompt(), defaults, types
-      ast/           # AST type definitions
-  devices/           # Device registry + drivers
-    src/
-      drivers/       # DeviceDriver interface, MockDriver, HADriver
-  vm/                # VM interpreter
-    src/             # interpret_home_dsl(), resolver, state, executor
-  playground/        # Interactive TUI REPL
-    src/             # 14 mock devices, readline-based REPL
-```
-
----
-
-## Getting Started
-
-```bash
-# Build everything (order matters)
-cd packages/devices && npm run build
-cd packages/lang-core && npm run build
-cd packages/vm && npm run build
-cd packages/playground && npm run build
-
-# Run tests
-cd packages/devices && npm run test
-cd packages/lang-core && npm run test
-cd packages/vm && npm run test
-
-# Start the playground REPL
-cd packages/playground && npm start
-```
+4. **Stateful runtime** — session remembers variables, selections, history
+5. **DSL as interface contract** — HomeDSL is the only interface between LLM and system
 
 ---
 
