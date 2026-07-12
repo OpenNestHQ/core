@@ -4,6 +4,7 @@ import type {
   CollectionModifier,
 } from "@opennest/lang-core";
 import type { DeviceDriver } from "@opennest/devices";
+import type { UserInteraction, PendingInteraction } from "./interactions/types.js";
 
 export interface Device {
   id: string;
@@ -36,28 +37,7 @@ export interface Session {
   resolvedIds: Record<string, string>;
   variableResolvedIds: Record<string, string>;
   variableModifiers: Record<string, CollectionModifier>;
-}
-
-export interface AmbiguityTreeDevice {
-  key: string;
-  id: string;
-  dsl: string;
-}
-
-export interface AmbiguityTreeRoom {
-  key: string;
-  dsl: string;
-  children: AmbiguityTreeDevice[];
-}
-
-export interface AmbiguityTreeNode {
-  type: string;
-  children: AmbiguityTreeRoom[];
-}
-
-export interface AmbiguityInfo {
-  kind: "target";
-  tree: AmbiguityTreeNode;
+  pendingInteraction: PendingInteraction | null;
 }
 
 export interface VMError {
@@ -65,13 +45,13 @@ export interface VMError {
   message: string;
 }
 
-export type VMStatus = "success" | "waiting" | "error";
+export type VMStatus = "success" | "awaiting_interaction" | "error";
 
 export interface VMResult {
   status: VMStatus;
   session: Session;
   executed: ExecutedStatement[];
-  awaiting: AmbiguityInfo | null;
+  interaction: UserInteraction | null;
   errors: VMError[];
 }
 

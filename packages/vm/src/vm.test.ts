@@ -5,14 +5,13 @@ import type { DeviceDriver } from "@opennest/devices";
 import {
   interpret_home_dsl,
   createSession,
-  applyResolution,
+  resumeWithResponse,
   resolveDevices,
   expandCollection,
   executeAssignment,
   executeQuery,
   executeAction,
-  buildAmbiguityInfo,
-  buildAmbiguityTree,
+  registerHandler,
 } from "./index.js";
 import type {
   Device,
@@ -22,7 +21,13 @@ import type {
   PowerValue,
   ResolutionFilter,
   ExcludedDevice,
+  DeviceSelectionInteraction,
 } from "./index.js";
+import { deviceSelectionHandler } from "./interactions/device-selection.js";
+import { createInteraction } from "./interactions/registry.js";
+import type { DeviceSelectionContext } from "./interactions/device-selection.js";
+
+registerHandler(deviceSelectionHandler);
 
 function makeDriver(): MockDriver {
   return new MockDriver();
@@ -113,6 +118,14 @@ function num(n: number) {
 
 async function getProperty(d: Device, prop: string): Promise<unknown> {
   return d.driver.getProperty(d.id, prop, d.driverConfig);
+}
+
+function resolveDevice(session: Session, deviceId: string): Session {
+  return resumeWithResponse(session, {
+    interactionId: session.pendingInteraction!.id,
+    type: "device_selection",
+    deviceId,
+  });
 }
 
 describe("interpret_home_dsl", () => {
@@ -277,30 +290,27 @@ describe("interpret_home_dsl", () => {
   });
 
   describe("ambiguity handling", () => {
-    it("should return waiting state when device type is ambiguous (no room)", async () => {
+    it("should return awaiting_interaction state when device type is ambiguous (no room)", async () => {
       const program = parse("tv.power = on");
       const result = await interpret_home_dsl(program, await ctx());
 
-      expect(result.status).toBe("waiting");
-      expect(result.awaiting).not.toBeNull();
-      expect(result.awaiting!.kind).toBe("target");
+      expect(result.status).toBe("awaiting_interaction");
+      expect(result.interaction).not.toBeNull();
+      expect(result.interaction!.type).toBe("device_selection");
 
-      const tree = result.awaiting!.tree;
-      expect(tree.type).toBe("tv");
-      expect(tree.children).toHaveLength(2);
+      const sel = result.interaction as DeviceSelectionInteraction;
+      expect(sel.devices).toHaveLength(2);
+      expect(sel.devices[0]!.type).toBe("tv");
 
-      const salonRoom = tree.children.find((r) => r.key === "salon")!;
-      expect(salonRoom).toBeDefined();
-      expect(salonRoom.dsl).toBe("tv[salon]");
-      expect(salonRoom.children).toHaveLength(1);
-      expect(salonRoom.children[0]!.key).toBe("Salon TV");
-      expect(salonRoom.children[0]!.dsl).toBe("device(tv_salon)");
+      const salonDevs = sel.devices.filter((d) => d.room === "salon");
+      expect(salonDevs).toHaveLength(1);
+      expect(salonDevs[0]!.name).toBe("Salon TV");
+      expect(salonDevs[0]!.id).toBe("tv_salon");
 
-      const chambreRoom = tree.children.find((r) => r.key === "chambre")!;
-      expect(chambreRoom).toBeDefined();
-      expect(chambreRoom.dsl).toBe("tv[chambre]");
-      expect(chambreRoom.children[0]!.key).toBe("Chambre TV");
-      expect(chambreRoom.children[0]!.dsl).toBe("device(tv_chambre)");
+      const chambreDevs = sel.devices.filter((d) => d.room === "chambre");
+      expect(chambreDevs).toHaveLength(1);
+      expect(chambreDevs[0]!.name).toBe("Chambre TV");
+      expect(chambreDevs[0]!.id).toBe("tv_chambre");
     });
 
     it("should not be ambiguous when room is specified", async () => {
@@ -314,29 +324,19 @@ describe("interpret_home_dsl", () => {
       const program = parse("thermostat.power = on");
       const result = await interpret_home_dsl(program, await ctx());
 
-      expect(result.status).not.toBe("waiting");
+      expect(result.status).not.toBe("awaiting_interaction");
     });
 
-    it("should return tree with correct DSL for rooms", async () => {
+    it("should include device ids and names in device_selection interaction", async () => {
       const program = parse("tv.power = on");
       const result = await interpret_home_dsl(program, await ctx());
 
-      const tree = result.awaiting!.tree;
-      for (const room of tree.children) {
-        expect(room.dsl).toContain("tv[");
-      }
-    });
-
-    it("should include device id in ambiguity tree", async () => {
-      const program = parse("tv.power = on");
-      const result = await interpret_home_dsl(program, await ctx());
-
-      const tree = result.awaiting!.tree;
-      for (const room of tree.children) {
-        for (const device of room.children) {
-          expect(device.id).toBeDefined();
-          expect(typeof device.id).toBe("string");
-        }
+      const sel = result.interaction as DeviceSelectionInteraction;
+      for (const device of sel.devices) {
+        expect(device.id).toBeDefined();
+        expect(typeof device.id).toBe("string");
+        expect(device.name).toBeDefined();
+        expect(device.room).toBeDefined();
       }
     });
   });
@@ -347,11 +347,11 @@ describe("interpret_home_dsl", () => {
       const context = await ctx();
       const result1 = await interpret_home_dsl(program, context);
 
-      expect(result1.status).toBe("waiting");
-      expect(result1.awaiting).not.toBeNull();
+      expect(result1.status).toBe("awaiting_interaction");
+      expect(result1.interaction).not.toBeNull();
       expect(result1.executed).toHaveLength(0);
 
-      applyResolution(result1.session, "tv", "tv_salon");
+      resolveDevice(result1.session, "tv_salon");
 
       const result2 = await interpret_home_dsl(program, { devices: context.devices, session: result1.session });
 
@@ -368,12 +368,12 @@ describe("interpret_home_dsl", () => {
       const context = await ctx();
 
       const result1 = await interpret_home_dsl(program, context);
-      expect(result1.status).toBe("waiting");
+      expect(result1.status).toBe("awaiting_interaction");
       expect(result1.executed).toHaveLength(1);
       expect(result1.executed[0]!.changes[0]!.property).toBe("volume");
       expect(result1.executed[0]!.changes[0]!.newValue).toBe(30);
 
-      applyResolution(result1.session, "tv", "tv_chambre");
+      resolveDevice(result1.session, "tv_chambre");
 
       const result2 = await interpret_home_dsl(program, { devices: context.devices, session: result1.session });
 
@@ -398,14 +398,14 @@ describe("interpret_home_dsl", () => {
       const program1 = parse("tv.power = on");
       const result1 = await interpret_home_dsl(program1, context);
 
-      applyResolution(result1.session, "tv", "tv_salon");
+      resolveDevice(result1.session, "tv_salon");
       const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
       expect(result2.status).toBe("success");
 
       const program2 = parse("tv.power = off");
       const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
 
-      expect(result3.status).toBe("waiting");
+      expect(result3.status).toBe("awaiting_interaction");
     });
 
     it("should be ambiguous again if resolved id doesn't match the room", async () => {
@@ -413,7 +413,7 @@ describe("interpret_home_dsl", () => {
       const program1 = parse("tv.power = on");
       const result1 = await interpret_home_dsl(program1, context);
 
-      applyResolution(result1.session, "tv", "tv_salon");
+      resolveDevice(result1.session, "tv_salon");
 
       const program2 = parse("tv[chambre].power = on");
       const result2 = await interpret_home_dsl(program2, { devices: context.devices, session: result1.session });
@@ -447,9 +447,9 @@ describe("interpret_home_dsl", () => {
       const program = parse(`$my_tv = tv[salon]\n$my_tv.power = on`);
       const result1 = await interpret_home_dsl(program, context);
 
-      expect(result1.status).toBe("waiting");
+      expect(result1.status).toBe("awaiting_interaction");
 
-      applyResolution(result1.session, "tv", "tv_samsung_salon", "my_tv");
+      resolveDevice(result1.session, "tv_samsung_salon");
 
       const result2 = await interpret_home_dsl(program, { devices: context.devices, session: result1.session });
       expect(result2.status).toBe("success");
@@ -461,9 +461,9 @@ describe("interpret_home_dsl", () => {
 
       const program1 = parse(`$my_tv = tv[salon]\n$my_tv.power = on`);
       const result1 = await interpret_home_dsl(program1, context);
-      expect(result1.status).toBe("waiting");
+      expect(result1.status).toBe("awaiting_interaction");
 
-      applyResolution(result1.session, "tv", "tv_samsung_salon", "my_tv");
+      resolveDevice(result1.session, "tv_samsung_salon");
       const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
       expect(result2.status).toBe("success");
 
@@ -481,14 +481,14 @@ describe("interpret_home_dsl", () => {
 
       const program1 = parse(`$my_tv = tv[salon]\n$my_tv.power = on`);
       const result1 = await interpret_home_dsl(program1, context);
-      applyResolution(result1.session, "tv", "tv_samsung_salon", "my_tv");
+      resolveDevice(result1.session, "tv_samsung_salon");
       const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
       expect(result2.status).toBe("success");
 
       const program2 = parse(`$my_tv = tv\n$my_tv.power = off`);
       const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
 
-      expect(result3.status).toBe("waiting");
+      expect(result3.status).toBe("awaiting_interaction");
     });
 
     it("should not auto-resolve direct references unlike variables", async () => {
@@ -496,14 +496,14 @@ describe("interpret_home_dsl", () => {
 
       const program1 = parse("tv.power = on");
       const result1 = await interpret_home_dsl(program1, context);
-      applyResolution(result1.session, "tv", "tv_salon");
+      resolveDevice(result1.session, "tv_salon");
       const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
       expect(result2.status).toBe("success");
 
       const program2 = parse("tv.volume = 50");
       const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
 
-      expect(result3.status).toBe("waiting");
+      expect(result3.status).toBe("awaiting_interaction");
     });
   });
 
@@ -531,23 +531,22 @@ describe("interpret_home_dsl", () => {
       const program = parse("tv[salon].power = on");
       const result = await interpret_home_dsl(program, ctx);
 
-      expect(result.status).toBe("waiting");
-      expect(result.awaiting).not.toBeNull();
+      expect(result.status).toBe("awaiting_interaction");
+      expect(result.interaction).not.toBeNull();
 
-      const tree = result.awaiting!.tree;
-      expect(tree.children).toHaveLength(1);
-      expect(tree.children[0]!.key).toBe("salon");
-      expect(tree.children[0]!.children).toHaveLength(2);
+      const sel = result.interaction as DeviceSelectionInteraction;
+      const salonDevs = sel.devices.filter((d) => d.room === "salon");
+      expect(salonDevs).toHaveLength(2);
     });
 
-    it("should resolve multi-device room ambiguity with applyResolution", async () => {
+    it("should resolve multi-device room ambiguity with resumeWithResponse", async () => {
       const ctx = await multiDeviceCtx();
       const program = parse("tv[salon].power = on");
       const result1 = await interpret_home_dsl(program, ctx);
 
-      expect(result1.status).toBe("waiting");
+      expect(result1.status).toBe("awaiting_interaction");
 
-      applyResolution(result1.session, "tv", "tv_samsung_salon");
+      resolveDevice(result1.session, "tv_samsung_salon");
 
       const result2 = await interpret_home_dsl(program, { devices: ctx.devices, session: result1.session });
 
@@ -572,7 +571,7 @@ describe("interpret_home_dsl", () => {
       const program = parse(`tv[salon].power = on\ntv.power = on\nlight[salon].power = on`);
       const result = await interpret_home_dsl(program, await ctx());
 
-      expect(result.status).toBe("waiting");
+      expect(result.status).toBe("awaiting_interaction");
       expect(result.executed).toHaveLength(1);
     });
 
@@ -832,36 +831,44 @@ describe("interpret_home_dsl", () => {
     });
   });
 
-  describe("ambiguity module", () => {
-    it("should build ambiguity info with tree", async () => {
+  describe("interaction module", () => {
+    it("should create device_selection interaction", async () => {
       const devs = await devices();
       const tvDevices = devs.filter((d) => d.type === "tv");
-      const info = buildAmbiguityInfo(tvDevices);
+      const ctx: DeviceSelectionContext = {
+        devices: tvDevices,
+        deviceType: "tv",
+        variableName: undefined,
+      };
+      const interaction = createInteraction("device_selection", ctx);
+      const sel = interaction as DeviceSelectionInteraction;
 
-      expect(info.kind).toBe("target");
-      expect(info.tree.type).toBe("tv");
-      expect(info.tree.children).toHaveLength(2);
+      expect(sel.type).toBe("device_selection");
+      expect(sel.devices).toHaveLength(2);
+      expect(sel.devices[0]!.type).toBe("tv");
+      expect(sel.id).toBeDefined();
     });
 
-    it("should build ambiguity tree grouping devices by room", async () => {
+    it("should include device details in interaction", async () => {
       const devs = await devices();
       const tvDevices = devs.filter((d) => d.type === "tv");
-      const tree = buildAmbiguityTree(tvDevices);
+      const ctx: DeviceSelectionContext = {
+        devices: tvDevices,
+        deviceType: "tv",
+        variableName: undefined,
+      };
+      const interaction = createInteraction("device_selection", ctx);
+      const sel = interaction as DeviceSelectionInteraction;
 
-      expect(tree.type).toBe("tv");
+      const salonDevs = sel.devices.filter((d) => d.room === "salon");
+      expect(salonDevs).toHaveLength(1);
+      expect(salonDevs[0]!.name).toBe("Salon TV");
+      expect(salonDevs[0]!.id).toBe("tv_salon");
 
-      const salon = tree.children.find((r) => r.key === "salon")!;
-      expect(salon).toBeDefined();
-      expect(salon.dsl).toBe("tv[salon]");
-      expect(salon.children).toHaveLength(1);
-      expect(salon.children[0]!.key).toBe("Salon TV");
-      expect(salon.children[0]!.dsl).toBe("device(tv_salon)");
-
-      const chambre = tree.children.find((r) => r.key === "chambre")!;
-      expect(chambre).toBeDefined();
-      expect(chambre.dsl).toBe("tv[chambre]");
-      expect(chambre.children[0]!.key).toBe("Chambre TV");
-      expect(chambre.children[0]!.dsl).toBe("device(tv_chambre)");
+      const chambreDevs = sel.devices.filter((d) => d.room === "chambre");
+      expect(chambreDevs).toHaveLength(1);
+      expect(chambreDevs[0]!.name).toBe("Chambre TV");
+      expect(chambreDevs[0]!.id).toBe("tv_chambre");
     });
   });
 
@@ -1427,12 +1434,14 @@ describe("interpret_home_dsl", () => {
       const program = parse("$my_light = @oneof(light)");
       const result = await interpret_home_dsl(program, await ctx());
 
-      expect(result.status).toBe("waiting");
-      expect(result.awaiting).toBeDefined();
-      expect(result.awaiting!.tree.type).toBe("light");
-      expect(result.awaiting!.tree.children).toHaveLength(1);
-      expect(result.awaiting!.tree.children[0]!.key).toBe("salon");
-      expect(result.awaiting!.tree.children[0]!.children).toHaveLength(2);
+      expect(result.status).toBe("awaiting_interaction");
+      expect(result.interaction).toBeDefined();
+
+      const sel = result.interaction as DeviceSelectionInteraction;
+      expect(sel.devices).toHaveLength(2);
+      expect(sel.devices[0]!.type).toBe("light");
+      const salonDevs = sel.devices.filter((d) => d.room === "salon");
+      expect(salonDevs).toHaveLength(2);
     });
 
     it("should error on @oneof with zero matching devices", async () => {
@@ -1449,10 +1458,10 @@ describe("interpret_home_dsl", () => {
       const context1 = await ctx();
       const result1 = await interpret_home_dsl(program1, context1);
 
-      expect(result1.status).toBe("waiting");
-      expect(result1.awaiting!.tree.type).toBe("light");
+      expect(result1.status).toBe("awaiting_interaction");
+      expect((result1.interaction as DeviceSelectionInteraction).devices[0]!.type).toBe("light");
 
-      applyResolution(result1.session, "light", "light_salon_1");
+      resolveDevice(result1.session, "light_salon_1");
       const program2 = parse("$light = @oneof(light)\n$light.power = off");
       const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
 
@@ -1473,10 +1482,10 @@ describe("interpret_home_dsl", () => {
 
       // First run: ambiguity on @oneof
       const result1 = await interpret_home_dsl(program, context);
-      expect(result1.status).toBe("waiting");
+      expect(result1.status).toBe("awaiting_interaction");
 
       // Resolve to light_salon_2 which has power: true
-      applyResolution(result1.session, "light", "light_salon_2");
+      resolveDevice(result1.session, "light_salon_2");
       const result2 = await interpret_home_dsl(program, { devices: context.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
@@ -1620,8 +1629,8 @@ describe("interpret_home_dsl", () => {
       const program = parse("tv.power = on");
       const result = await interpret_home_dsl(program, await filteredCtx());
 
-      expect(result.status).toBe("waiting");
-      expect(result.awaiting!.tree.children).toHaveLength(2);
+      expect(result.status).toBe("awaiting_interaction");
+      expect((result.interaction as DeviceSelectionInteraction).devices).toHaveLength(2);
     });
 
     it("should resolve to the only device supporting the action (no ambiguity)", async () => {
@@ -1683,7 +1692,7 @@ describe("interpret_home_dsl", () => {
       const program = parse("tv.power = on");
       const result = await interpret_home_dsl(program, await filteredCtx());
 
-      expect(result.status).toBe("waiting");
+      expect(result.status).toBe("awaiting_interaction");
     });
 
     it("should include filter feedback on error when no device supports the intent", async () => {
@@ -1727,8 +1736,8 @@ describe("interpret_home_dsl", () => {
       const program = parse("tv.power = on");
       const result = await interpret_home_dsl(program, ctx);
 
-      expect(result.status).toBe("waiting");
-      expect(result.awaiting!.tree.children).toHaveLength(2);
+      expect(result.status).toBe("awaiting_interaction");
+      expect((result.interaction as DeviceSelectionInteraction).devices).toHaveLength(2);
     });
 
     it("should not set filter on executed statement when no intent is used", async () => {

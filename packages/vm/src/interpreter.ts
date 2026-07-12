@@ -11,11 +11,12 @@ import type {
   ConditionExpr,
   SimpleCondition,
 } from "@opennest/lang-core";
-import type { Device, Session, VMResult, VMError } from "./types.js";
-import type { AmbiguityInfo, ResolutionIntent } from "./types.js";
+import type { Device, Session, VMResult, VMError, ResolutionIntent, ResolutionResult } from "./types.js";
+import type { UserInteraction } from "./interactions/types.js";
+import type { DeviceSelectionContext } from "./interactions/device-selection.js";
 import { createSession } from "./state.js";
 import { resolveDevices } from "./resolver.js";
-import { buildAmbiguityInfo } from "./ambiguity.js";
+import { createInteraction } from "./interactions/registry.js";
 import {
   executeAssignment,
   executeIncrement,
@@ -32,15 +33,20 @@ export async function interpretProgram(
   const session = existingSession ?? createSession();
   const errors: VMError[] = [];
   let awaiting = false;
-  let ambiguityInfo: AmbiguityInfo | null = null;
+  let interactionResult: UserInteraction | null = null;
 
   for (let i = session.cursor; i < program.statements.length; i++) {
     const statement = program.statements[i]!;
     const result = await interpretStatement(statement, devices, session);
 
-    if (result.kind === "waiting") {
+    if (result.kind === "awaiting_interaction") {
       awaiting = true;
-      ambiguityInfo = result.ambiguity;
+      interactionResult = result.interaction;
+      session.pendingInteraction = {
+        id: result.interaction.id,
+        type: result.interaction.type,
+        context: result.pendingContext,
+      };
       session.cursor = i;
       break;
     }
@@ -60,10 +66,10 @@ export async function interpretProgram(
 
   if (awaiting) {
     return {
-      status: "waiting",
+      status: "awaiting_interaction",
       session,
       executed: session.history,
-      awaiting: ambiguityInfo,
+      interaction: interactionResult,
       errors,
     };
   }
@@ -73,7 +79,7 @@ export async function interpretProgram(
       status: "error",
       session,
       executed: session.history,
-      awaiting: null,
+      interaction: null,
       errors,
     };
   }
@@ -82,14 +88,14 @@ export async function interpretProgram(
     status: "success",
     session,
     executed: session.history,
-    awaiting: null,
+    interaction: null,
     errors: [],
   };
 }
 
 type InterpretResult =
   | { kind: "success" }
-  | { kind: "waiting"; ambiguity: AmbiguityInfo }
+  | { kind: "awaiting_interaction"; interaction: UserInteraction; pendingContext: unknown }
   | { kind: "error"; errors: VMError[] };
 
 async function interpretStatement(
@@ -113,6 +119,41 @@ async function interpretStatement(
   }
 }
 
+function awaitDeviceSelection(
+  result: ResolutionResult,
+  deviceType: string,
+  variableName?: string,
+): InterpretResult {
+  const ctx: DeviceSelectionContext = {
+    devices: result.devices,
+    deviceType,
+    variableName,
+  };
+  return {
+    kind: "awaiting_interaction",
+    interaction: createInteraction("device_selection", ctx),
+    pendingContext: ctx,
+  };
+}
+
+function extractDeviceContext(
+  path: { identifier: string; isVariable?: boolean }[],
+  session: Session,
+): { deviceType: string; variableName: string | undefined } {
+  const firstSeg = path[0];
+  if (!firstSeg) return { deviceType: "unknown", variableName: undefined };
+
+  if (firstSeg.isVariable) {
+    const varRef = session.variables[firstSeg.identifier];
+    return {
+      deviceType: varRef?.deviceType ?? firstSeg.identifier,
+      variableName: firstSeg.identifier,
+    };
+  }
+
+  return { deviceType: firstSeg.identifier, variableName: undefined };
+}
+
 async function interpretAssignment(
   stmt: Assignment,
   devices: Device[],
@@ -123,21 +164,14 @@ async function interpretAssignment(
   const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
 
   if (resolutionResult.ambiguous) {
-    return {
-      kind: "waiting",
-      ambiguity: buildAmbiguityInfo(resolutionResult.devices),
-    };
+    const { deviceType, variableName } = extractDeviceContext(stmt.path, session);
+    return awaitDeviceSelection(resolutionResult, deviceType, variableName);
   }
 
   if (resolutionResult.devices.length === 0) {
     return {
       kind: "error",
-      errors: [
-        {
-          statement: stmt,
-          message: `No devices found for path`,
-        },
-      ],
+      errors: [{ statement: stmt, message: `No devices found for path` }],
     };
   }
 
@@ -171,28 +205,19 @@ async function interpretQuery(
   const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
 
   if (resolutionResult.ambiguous) {
-    return {
-      kind: "waiting",
-      ambiguity: buildAmbiguityInfo(resolutionResult.devices),
-    };
+    const { deviceType, variableName } = extractDeviceContext(stmt.path, session);
+    return awaitDeviceSelection(resolutionResult, deviceType, variableName);
   }
 
   if (resolutionResult.devices.length === 0) {
     return {
       kind: "error",
-      errors: [
-        {
-          statement: stmt,
-          message: `No devices found for query`,
-        },
-      ],
+      errors: [{ statement: stmt, message: `No devices found for query` }],
     };
   }
 
   const changes = await Promise.all(
-    resolutionResult.devices.map((device) =>
-      executeQuery(device, property),
-    ),
+    resolutionResult.devices.map((device) => executeQuery(device, property)),
   );
 
   session.history.push({
@@ -219,21 +244,14 @@ async function interpretIncrement(
   const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
 
   if (resolutionResult.ambiguous) {
-    return {
-      kind: "waiting",
-      ambiguity: buildAmbiguityInfo(resolutionResult.devices),
-    };
+    const { deviceType, variableName } = extractDeviceContext(stmt.path, session);
+    return awaitDeviceSelection(resolutionResult, deviceType, variableName);
   }
 
   if (resolutionResult.devices.length === 0) {
     return {
       kind: "error",
-      errors: [
-        {
-          statement: stmt,
-          message: `No devices found for increment`,
-        },
-      ],
+      errors: [{ statement: stmt, message: `No devices found for increment` }],
     };
   }
 
@@ -267,28 +285,19 @@ async function interpretAction(
   const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
 
   if (resolutionResult.ambiguous) {
-    return {
-      kind: "waiting",
-      ambiguity: buildAmbiguityInfo(resolutionResult.devices),
-    };
+    const { deviceType, variableName } = extractDeviceContext(stmt.path, session);
+    return awaitDeviceSelection(resolutionResult, deviceType, variableName);
   }
 
   if (resolutionResult.devices.length === 0) {
     return {
       kind: "error",
-      errors: [
-        {
-          statement: stmt,
-          message: `No devices found for action`,
-        },
-      ],
+      errors: [{ statement: stmt, message: `No devices found for action` }],
     };
   }
 
   const changes = await Promise.all(
-    resolutionResult.devices.map((device) =>
-      executeAction(device, method),
-    ),
+    resolutionResult.devices.map((device) => executeAction(device, method)),
   );
 
   session.history.push({
@@ -338,10 +347,11 @@ async function interpretVariableAssignment(
       const resolutionResult = resolveDevices(pseudoSegments, devices, session);
 
       if (resolutionResult.ambiguous) {
-        return {
-          kind: "waiting",
-          ambiguity: buildAmbiguityInfo(resolutionResult.devices),
-        };
+        return awaitDeviceSelection(
+          resolutionResult,
+          stmt.value.device.deviceType,
+          stmt.name,
+        );
       }
 
       if (resolutionResult.devices.length === 0) {

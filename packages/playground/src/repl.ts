@@ -3,13 +3,18 @@ import { parseHomeDSL } from "@opennest/lang-core";
 import type { Program } from "@opennest/lang-core";
 import {
   interpret_home_dsl,
-  resolveAmbiguity as applyAmbiguityResolution,
+  resumeWithResponse,
   createSession,
 } from "@opennest/vm";
-import type { Session, Device, AmbiguityInfo } from "@opennest/vm";
+import type {
+  Session,
+  Device,
+  UserInteraction,
+  DeviceSelectionInteraction,
+} from "@opennest/vm";
 import {
   formatSuccess,
-  formatWaiting,
+  formatInteraction,
   formatErrors,
   formatParseErrors,
   formatDevices,
@@ -33,14 +38,6 @@ interface State {
   nlMode: boolean;
 }
 
-interface Choice {
-  index: number;
-  id: string;
-  type: string;
-  room: string;
-  name: string;
-}
-
 function createState(devices: Device[]): State {
   return {
     session: createSession(),
@@ -50,24 +47,7 @@ function createState(devices: Device[]): State {
   };
 }
 
-function flattenTree(info: AmbiguityInfo): Choice[] {
-  const result: Choice[] = [];
-  let idx = 0;
-  for (const room of info.tree.children) {
-    for (const dev of room.children) {
-      result.push({
-        index: ++idx,
-        id: dev.id,
-        type: info.tree.type,
-        room: room.key,
-        name: dev.key,
-      });
-    }
-  }
-  return result;
-}
-
-async function executeProgram(state: State): Promise<AmbiguityInfo | null> {
+async function executeProgram(state: State): Promise<UserInteraction | null> {
   if (!state.lastProgram) return null;
 
   const prevHistoryLen = state.session.history.length;
@@ -87,24 +67,27 @@ async function executeProgram(state: State): Promise<AmbiguityInfo | null> {
         process.stdout.write("  (no-ops)\n\n");
       }
       return null;
-    case "waiting":
+    case "awaiting_interaction":
       if (result.executed.length > prevHistoryLen) {
         process.stdout.write(formatSuccess(result, prevHistoryLen) + "\n");
       }
-      process.stdout.write(formatWaiting(result.awaiting!) + "\n");
-      process.stdout.write(
-        `  \u2192 Choose a device (1-${flattenTree(result.awaiting!).length}, or :cancel): `,
-      );
-      return result.awaiting;
+      process.stdout.write(formatInteraction(result.interaction!) + "\n");
+      if (result.interaction!.type === "device_selection") {
+        const sel = result.interaction as DeviceSelectionInteraction;
+        process.stdout.write(
+          `  \u2192 Choose a device (1-${sel.devices.length}, or :cancel): `,
+        );
+      }
+      return result.interaction;
     case "error":
       process.stdout.write(formatErrors(result.errors) + "\n");
       return null;
   }
 }
 
-function resolveAmbiguity(
+function processResponse(
   state: State,
-  info: AmbiguityInfo,
+  interaction: UserInteraction,
   answer: string,
 ): boolean {
   const trimmed = answer.trim();
@@ -113,20 +96,27 @@ function resolveAmbiguity(
     return false;
   }
 
-  const devices = flattenTree(info);
-  const idx = parseInt(trimmed, 10);
-  if (isNaN(idx) || idx < 1 || idx > devices.length) {
-    process.stdout.write("  Invalid choice.\n\n");
-    return false;
+  if (interaction.type === "device_selection") {
+    const idx = parseInt(trimmed, 10);
+    if (isNaN(idx) || idx < 1 || idx > interaction.devices.length) {
+      process.stdout.write("  Invalid choice.\n\n");
+      return false;
+    }
+
+    const chosen = interaction.devices[idx - 1]!;
+    resumeWithResponse(state.session, {
+      interactionId: interaction.id,
+      type: "device_selection",
+      deviceId: chosen.id,
+    });
+    return true;
   }
 
-  const chosen = devices[idx - 1]!;
-
-  applyAmbiguityResolution(state.session, chosen.type, chosen.id, state.lastProgram!);
-  return true;
+  process.stdout.write("  Unsupported interaction type.\n\n");
+  return false;
 }
 
-async function executeSource(state: State, src: string): Promise<AmbiguityInfo | null> {
+async function executeSource(state: State, src: string): Promise<UserInteraction | null> {
   const parseResult = parseHomeDSL(src);
   if (parseResult.errors.length > 0) {
     process.stdout.write(
@@ -142,7 +132,7 @@ async function executeSource(state: State, src: string): Promise<AmbiguityInfo |
 async function executeNlSource(
   state: State,
   input: string,
-): Promise<AmbiguityInfo | null> {
+): Promise<UserInteraction | null> {
   process.stdout.write(`  ${D}Translating...${N}\n`);
 
   const onAttempt: AttemptCallback = (attempt, dsl, errors) => {
@@ -286,7 +276,7 @@ export async function startRepl(devices: Device[]): Promise<void> {
     completer,
   });
 
-  let pendingAmbiguity: AmbiguityInfo | null = null;
+  let pendingInteraction: UserInteraction | null = null;
   let processing = false;
   const queue: string[] = [];
 
@@ -299,7 +289,7 @@ export async function startRepl(devices: Device[]): Promise<void> {
   const prompt = () => {
     if (accumulating) {
       process.stdout.write(".. ");
-    } else if (!pendingAmbiguity) {
+    } else if (!pendingInteraction) {
       process.stdout.write(state.nlMode ? "[NL] > " : "> ");
     }
   };
@@ -309,12 +299,12 @@ export async function startRepl(devices: Device[]): Promise<void> {
   async function processNext(line: string): Promise<void> {
     const trimmed = line.trim();
 
-    // Handle pending ambiguity
-    if (pendingAmbiguity) {
-      const info = pendingAmbiguity;
-      pendingAmbiguity = null;
-      if (resolveAmbiguity(state, info, trimmed)) {
-        pendingAmbiguity = await executeProgram(state);
+    // Handle pending interaction
+    if (pendingInteraction) {
+      const interaction = pendingInteraction;
+      pendingInteraction = null;
+      if (processResponse(state, interaction, trimmed)) {
+        pendingInteraction = await executeProgram(state);
       }
       return;
     }
@@ -326,9 +316,9 @@ export async function startRepl(devices: Device[]): Promise<void> {
         if (buffer.length > 0) {
           const src = buffer.join("\n");
           if (state.nlMode) {
-            pendingAmbiguity = await executeNlSource(state, src);
+            pendingInteraction = await executeNlSource(state, src);
           } else {
-            pendingAmbiguity = await executeSource(state, src);
+            pendingInteraction = await executeSource(state, src);
           }
         }
         buffer = [];
@@ -339,9 +329,9 @@ export async function startRepl(devices: Device[]): Promise<void> {
         if (buffer.length > 0) {
           const src = buffer.join("\n");
           if (state.nlMode) {
-            pendingAmbiguity = await executeNlSource(state, src);
+            pendingInteraction = await executeNlSource(state, src);
           } else {
-            pendingAmbiguity = await executeSource(state, src);
+            pendingInteraction = await executeSource(state, src);
           }
         }
         buffer = [];
@@ -407,11 +397,11 @@ export async function startRepl(devices: Device[]): Promise<void> {
     }
 
     if (state.nlMode) {
-      pendingAmbiguity = await executeNlSource(state, trimmed);
+      pendingInteraction = await executeNlSource(state, trimmed);
       return;
     }
 
-    pendingAmbiguity = await executeSource(state, trimmed);
+    pendingInteraction = await executeSource(state, trimmed);
   }
 
   rl.on("line", (rawLine: string) => {

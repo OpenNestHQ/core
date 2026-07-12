@@ -1,4 +1,13 @@
-import type { VMResult, ExecutedStatement, StateChange, AmbiguityInfo, AmbiguityTreeDevice, VMError, Device, Session } from "@opennest/vm";
+import type {
+  VMResult,
+  ExecutedStatement,
+  StateChange,
+  VMError,
+  Device,
+  Session,
+  UserInteraction,
+  DeviceSelectionInteraction,
+} from "@opennest/vm";
 
 const G = "\x1b[32m";
 const Y = "\x1b[33m";
@@ -61,26 +70,49 @@ export function formatSuccess(result: VMResult, since: number = 0): string {
   return lines.join("\n");
 }
 
-function flattenDevices(info: AmbiguityInfo): { index: number; device: AmbiguityTreeDevice; room: string }[] {
-  const result: { index: number; device: AmbiguityTreeDevice; room: string }[] = [];
-  let idx = 0;
-  for (const room of info.tree.children) {
-    for (const dev of room.children) {
-      result.push({ index: ++idx, device: dev, room: room.key });
-    }
+export function formatInteraction(interaction: UserInteraction): string {
+  const lines: string[] = [];
+
+  switch (interaction.type) {
+    case "device_selection":
+      return formatDeviceSelection(interaction);
+    case "confirmation":
+      lines.push(`\n${Y}${B}?${N} ${Y}${interaction.message}${N}`);
+      lines.push(`  ${D}(y/n or :cancel)${N}`);
+      return lines.join("\n");
+    case "text_input":
+      lines.push(`\n${Y}${B}?${N} ${Y}${interaction.message}${N}`);
+      return lines.join("\n");
+    case "number_input":
+      lines.push(`\n${Y}${B}#${N} ${Y}${interaction.message}${N}`);
+      return lines.join("\n");
+    case "choice":
+      lines.push(`\n${Y}${B}?${N} ${Y}${interaction.message}${N}`);
+      for (const opt of interaction.options) {
+        lines.push(`  ${G}[${opt.value}]${N} ${opt.label}`);
+      }
+      return lines.join("\n");
   }
-  return result;
 }
 
-export function formatWaiting(info: AmbiguityInfo): string {
+function formatDeviceSelection(info: DeviceSelectionInteraction): string {
   const lines: string[] = [];
-  const type = info.tree.type;
-  const flat = flattenDevices(info);
-  lines.push(`\n${Y}${B}\u26a0${N} ${Y}Ambiguity for "${type}":${N}`);
+  lines.push(`\n${Y}${B}\u26a0${N} ${Y}${info.message}${N}`);
 
-  for (const item of flat) {
-    const pad = String(item.index).padStart(2);
-    lines.push(`  ${G}[${pad}]${N} ${C}${item.room.padEnd(10)}${N} \u2192 ${B}${item.device.id}${N} ${D}(${item.device.key})${N}`);
+  // Group by room for display
+  const byRoom = new Map<string, typeof info.devices>();
+  for (const d of info.devices) {
+    const list = byRoom.get(d.room) ?? [];
+    list.push(d);
+    byRoom.set(d.room, list);
+  }
+
+  let idx = 0;
+  for (const [room, devs] of byRoom) {
+    for (const dev of devs) {
+      const pad = String(++idx).padStart(2);
+      lines.push(`  ${G}[${pad}]${N} ${C}${room.padEnd(10)}${N} \u2192 ${B}${dev.id}${N} ${D}(${dev.name})${N}`);
+    }
   }
   return lines.join("\n");
 }
