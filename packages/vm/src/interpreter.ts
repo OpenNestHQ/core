@@ -14,21 +14,21 @@ import type {
 import type { Device, Session, VMResult, VMError, ResolutionIntent, ResolutionResult } from "./types.js";
 import type { UserInteraction } from "./interactions/types.js";
 import type { DeviceSelectionContext } from "./interactions/device-selection.js";
+import type { ExecutionPolicy, PlannedAction } from "./policies/types.js";
 import { createSession } from "./state.js";
 import { resolveDevices } from "./resolver.js";
 import { createInteraction } from "./interactions/registry.js";
 import {
-  executeAssignment,
-  executeIncrement,
-  executeQuery,
-  executeAction,
+  executePlannedAction,
   evaluateCondition,
 } from "./executor.js";
+import { runPolicyPipeline } from "./policies/pipeline.js";
 
 export async function interpretProgram(
   program: Program,
   devices: Device[],
   existingSession?: Session,
+  policies?: ExecutionPolicy[],
 ): Promise<VMResult> {
   const session = existingSession ?? createSession();
   const errors: VMError[] = [];
@@ -37,7 +37,7 @@ export async function interpretProgram(
 
   for (let i = session.cursor; i < program.statements.length; i++) {
     const statement = program.statements[i]!;
-    const result = await interpretStatement(statement, devices, session);
+    const result = await interpretStatement(statement, devices, session, policies);
 
     if (result.kind === "awaiting_interaction") {
       awaiting = true;
@@ -102,20 +102,21 @@ async function interpretStatement(
   statement: Statement,
   devices: Device[],
   session: Session,
+  policies?: ExecutionPolicy[],
 ): Promise<InterpretResult> {
   switch (statement.kind) {
     case "assignment":
-      return interpretAssignment(statement, devices, session);
+      return interpretAssignment(statement, devices, session, policies);
     case "query":
-      return interpretQuery(statement, devices, session);
+      return interpretQuery(statement, devices, session, policies);
     case "increment":
-      return interpretIncrement(statement, devices, session);
+      return interpretIncrement(statement, devices, session, policies);
     case "action":
-      return interpretAction(statement, devices, session);
+      return interpretAction(statement, devices, session, policies);
     case "variable_assignment":
       return interpretVariableAssignment(statement, devices, session);
     case "if":
-      return interpretIfStatement(statement, devices, session);
+      return interpretIfStatement(statement, devices, session, policies);
   }
 }
 
@@ -158,6 +159,7 @@ async function interpretAssignment(
   stmt: Assignment,
   devices: Device[],
   session: Session,
+  policies?: ExecutionPolicy[],
 ): Promise<InterpretResult> {
   const property = lastPropertyName(stmt.path);
   const intent: ResolutionIntent = { kind: "property", name: property };
@@ -175,30 +177,21 @@ async function interpretAssignment(
     };
   }
 
-  const changes = await Promise.all(
-    resolutionResult.devices.map((device) =>
-      executeAssignment(device, property, stmt.value),
-    ),
-  );
+  const actions: PlannedAction[] = resolutionResult.devices.map((device) => ({
+    kind: "set_property" as const,
+    device,
+    property,
+    value: stmt.value,
+  }));
 
-  session.history.push({
-    statement: stmt,
-    resolvedDevices: resolutionResult.devices,
-    changes,
-    ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
-  });
-
-  if (resolutionResult.devices[0]) {
-    session.it = resolutionResult.devices[0];
-  }
-
-  return { kind: "success" };
+  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult);
 }
 
 async function interpretQuery(
   stmt: Query,
   devices: Device[],
   session: Session,
+  policies?: ExecutionPolicy[],
 ): Promise<InterpretResult> {
   const property = lastPropertyName(stmt.path);
   const intent: ResolutionIntent = { kind: "property", name: property };
@@ -216,28 +209,20 @@ async function interpretQuery(
     };
   }
 
-  const changes = await Promise.all(
-    resolutionResult.devices.map((device) => executeQuery(device, property)),
-  );
+  const actions: PlannedAction[] = resolutionResult.devices.map((device) => ({
+    kind: "read_property" as const,
+    device,
+    property,
+  }));
 
-  session.history.push({
-    statement: stmt,
-    resolvedDevices: resolutionResult.devices,
-    changes,
-    ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
-  });
-
-  if (resolutionResult.devices[0]) {
-    session.it = resolutionResult.devices[0];
-  }
-
-  return { kind: "success" };
+  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult);
 }
 
 async function interpretIncrement(
   stmt: Increment,
   devices: Device[],
   session: Session,
+  policies?: ExecutionPolicy[],
 ): Promise<InterpretResult> {
   const property = lastPropertyName(stmt.path);
   const intent: ResolutionIntent = { kind: "property", name: property };
@@ -255,30 +240,21 @@ async function interpretIncrement(
     };
   }
 
-  const changes = await Promise.all(
-    resolutionResult.devices.map((device) =>
-      executeIncrement(device, property, stmt.value),
-    ),
-  );
+  const actions: PlannedAction[] = resolutionResult.devices.map((device) => ({
+    kind: "increment_property" as const,
+    device,
+    property,
+    value: stmt.value,
+  }));
 
-  session.history.push({
-    statement: stmt,
-    resolvedDevices: resolutionResult.devices,
-    changes,
-    ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
-  });
-
-  if (resolutionResult.devices[0]) {
-    session.it = resolutionResult.devices[0];
-  }
-
-  return { kind: "success" };
+  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult);
 }
 
 async function interpretAction(
   stmt: Action,
   devices: Device[],
   session: Session,
+  policies?: ExecutionPolicy[],
 ): Promise<InterpretResult> {
   const method = lastPropertyName(stmt.path);
   const intent: ResolutionIntent = { kind: "action", name: method };
@@ -296,19 +272,101 @@ async function interpretAction(
     };
   }
 
+  const actions: PlannedAction[] = resolutionResult.devices.map((device) => ({
+    kind: "invoke_action" as const,
+    device,
+    method,
+  }));
+
+  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult);
+}
+
+async function applyPoliciesAndFinish(
+  actions: PlannedAction[],
+  policies: ExecutionPolicy[] | undefined,
+  session: Session,
+  devices: Device[],
+  statement: Statement,
+  resolutionResult: ResolutionResult,
+): Promise<InterpretResult> {
+  if (!policies || policies.length === 0) {
+    const changes = await Promise.all(
+      actions.map((action) => executePlannedAction(action)),
+    );
+
+    session.history.push({
+      statement,
+      resolvedDevices: resolutionResult.devices,
+      changes,
+      ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
+    });
+
+    if (resolutionResult.devices[0]) {
+      session.it = resolutionResult.devices[0];
+    }
+
+    return { kind: "success" };
+  }
+
+  const env = { session, devices };
+  const approved: PlannedAction[] = [];
+
+  for (const action of actions) {
+    const outcome = await runPolicyPipeline(action, policies, env);
+
+    switch (outcome.kind) {
+      case "execute":
+        approved.push(...outcome.actions);
+        break;
+
+      case "blocked":
+        return {
+          kind: "error",
+          errors: [{
+            statement,
+            message: `Blocked by policy "${outcome.policyName}": ${outcome.reason}`,
+          }],
+        };
+
+      case "skipped":
+        continue;
+
+      case "paused":
+        return {
+          kind: "awaiting_interaction",
+          interaction: outcome.interaction,
+          pendingContext: outcome.context ?? null,
+        };
+    }
+  }
+
+  if (approved.length === 0) {
+    session.history.push({
+      statement,
+      resolvedDevices: resolutionResult.devices,
+      changes: [],
+      ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
+    });
+
+    return { kind: "success" };
+  }
+
   const changes = await Promise.all(
-    resolutionResult.devices.map((device) => executeAction(device, method)),
+    approved.map((action) => executePlannedAction(action)),
   );
 
+  const resolvedIds = new Set(approved.map((a) => a.device.id));
+  const executedDevices = resolutionResult.devices.filter((d) => resolvedIds.has(d.id));
+
   session.history.push({
-    statement: stmt,
-    resolvedDevices: resolutionResult.devices,
+    statement,
+    resolvedDevices: executedDevices,
     changes,
     ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
   });
 
-  if (resolutionResult.devices[0]) {
-    session.it = resolutionResult.devices[0];
+  if (executedDevices[0]) {
+    session.it = executedDevices[0];
   }
 
   return { kind: "success" };
@@ -406,6 +464,7 @@ async function interpretIfStatement(
   stmt: IfStatement,
   devices: Device[],
   session: Session,
+  policies?: ExecutionPolicy[],
 ): Promise<InterpretResult> {
   const evalResult = await evaluateConditionExpr(stmt.condition, devices, session);
 
@@ -421,7 +480,7 @@ async function interpretIfStatement(
   const statementsToExecute = conditionMet ? stmt.body : (stmt.elseBody ?? []);
 
   for (const bodyStmt of statementsToExecute) {
-    const result = await interpretStatement(bodyStmt, devices, session);
+    const result = await interpretStatement(bodyStmt, devices, session, policies);
     if (result.kind !== "success") {
       return result;
     }

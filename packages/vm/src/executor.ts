@@ -1,5 +1,21 @@
 import type { Value, SimpleCondition } from "@opennest/lang-core";
 import type { Device, StateChange } from "./types.js";
+import type { PlannedAction } from "./policies/types.js";
+
+export async function executePlannedAction(
+  action: PlannedAction,
+): Promise<StateChange> {
+  switch (action.kind) {
+    case "set_property":
+      return executeAssignment(action.device, action.property, action.value);
+    case "increment_property":
+      return executeIncrement(action.device, action.property, action.value);
+    case "read_property":
+      return executeQuery(action.device, action.property);
+    case "invoke_action":
+      return executeAction(action.device, action.method);
+  }
+}
 
 export async function executeAssignment(
   device: Device,

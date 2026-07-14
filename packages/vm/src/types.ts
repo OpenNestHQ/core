@@ -5,6 +5,7 @@ import type {
 } from "@opennest/lang-core";
 import type { DeviceDriver } from "@opennest/devices";
 import type { UserInteraction, PendingInteraction } from "./interactions/types.js";
+import type { ExecutionPolicy } from "./policies/types.js";
 
 export interface Device {
   id: string;
@@ -58,6 +59,7 @@ export interface VMResult {
 export interface VMContext {
   devices: Device[];
   session?: Session;
+  policies?: ExecutionPolicy[];
 }
 
 export interface ResolutionIntent {

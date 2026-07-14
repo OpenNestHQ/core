@@ -11,7 +11,7 @@ export async function interpret_home_dsl(
   program: Program,
   context: VMContext,
 ): Promise<VMResult> {
-  return interpretProgram(program, context.devices, context.session);
+  return interpretProgram(program, context.devices, context.session, context.policies);
 }
 
 export { interpretProgram } from "./interpreter.js";
@@ -28,6 +28,7 @@ export {
   executeIncrement,
   executeQuery,
   executeAction,
+  executePlannedAction,
   evaluateCondition,
 } from "./executor.js";
 export type {
@@ -63,3 +64,27 @@ export type {
   PendingInteraction,
 } from "./interactions/types.js";
 export type { DeviceSelectionContext } from "./interactions/device-selection.js";
+export { NoopExecutionPolicy } from "./policies/noop.js";
+export { runPolicyPipeline } from "./policies/pipeline.js";
+export type { PipelineEnvironment } from "./policies/pipeline.js";
+export type {
+  ExecutionPolicy,
+  PolicyContext,
+  PolicyDecision,
+  ContinueDecision,
+  BlockDecision,
+  SkipDecision,
+  PauseDecision,
+  ReplaceDecision,
+  ExpandDecision,
+  PlannedAction,
+  SetPropertyAction,
+  IncrementPropertyAction,
+  ReadPropertyAction,
+  InvokeActionAction,
+  PipelineOutcome,
+  ExecuteOutcome,
+  BlockedOutcome,
+  SkippedOutcome,
+  PausedOutcome,
+} from "./policies/types.js";
