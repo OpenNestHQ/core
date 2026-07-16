@@ -5,6 +5,7 @@ import {
   interpret_home_dsl,
   resumeWithResponse,
   createSession,
+  ConfirmationPolicy,
 } from "@opennest/vm";
 import type {
   Session,
@@ -55,6 +56,13 @@ async function executeProgram(state: State): Promise<UserInteraction | null> {
   const result = await interpret_home_dsl(state.lastProgram, {
     devices: state.devices,
     session: state.session,
+    policies:[
+      new ConfirmationPolicy({
+        requireConfirmation(action) {
+          return action.device.type == "thermostat" && action.kind === "set_property" && action.property === "temperature";
+        },
+      })
+    ]
   });
 
   state.session = result.session;
@@ -77,6 +85,9 @@ async function executeProgram(state: State): Promise<UserInteraction | null> {
         process.stdout.write(
           `  \u2192 Choose a device (1-${sel.devices.length}, or :cancel): `,
         );
+      }
+      if (result.interaction!.type === "confirmation") {
+        process.stdout.write("  \u2192 ");
       }
       return result.interaction;
     case "error":
@@ -108,6 +119,21 @@ function processResponse(
       interactionId: interaction.id,
       type: "device_selection",
       deviceId: chosen.id,
+    });
+    return true;
+  }
+
+  if (interaction.type === "confirmation") {
+    const lower = trimmed.toLowerCase();
+    const confirmed = lower === "y" || lower === "yes";
+    if (!confirmed && lower !== "n" && lower !== "no") {
+      process.stdout.write("  Invalid answer. Type y/n.\n\n");
+      return false;
+    }
+    resumeWithResponse(state.session, {
+      interactionId: interaction.id,
+      type: "confirmation",
+      confirmed,
     });
     return true;
   }

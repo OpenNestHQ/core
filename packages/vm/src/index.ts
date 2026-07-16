@@ -3,9 +3,11 @@ import type { VMResult, VMContext } from "./types.js";
 import { interpretProgram } from "./interpreter.js";
 import { registerHandler } from "./interactions/registry.js";
 import { deviceSelectionHandler } from "./interactions/device-selection.js";
+import { confirmationHandler } from "./interactions/confirmation.js";
 
 // Register built-in interaction handlers
 registerHandler(deviceSelectionHandler);
+registerHandler(confirmationHandler);
 
 export async function interpret_home_dsl(
   program: Program,
@@ -64,7 +66,10 @@ export type {
   PendingInteraction,
 } from "./interactions/types.js";
 export type { DeviceSelectionContext } from "./interactions/device-selection.js";
+export { confirmationHandler } from "./interactions/confirmation.js";
+export type { ConfirmationContext } from "./interactions/confirmation.js";
 export { NoopExecutionPolicy } from "./policies/noop.js";
+export { ConfirmationPolicy } from "./policies/confirmation.js";
 export { runPolicyPipeline } from "./policies/pipeline.js";
 export type { PipelineEnvironment } from "./policies/pipeline.js";
 export type {
