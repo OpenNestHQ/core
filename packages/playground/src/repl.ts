@@ -5,13 +5,13 @@ import {
   interpret_home_dsl,
   resumeWithResponse,
   createSession,
-  ConfirmationPolicy,
 } from "@opennest/vm";
 import type {
   Session,
   Device,
   UserInteraction,
   DeviceSelectionInteraction,
+  ExecutionPolicy,
 } from "@opennest/vm";
 import {
   formatSuccess,
@@ -37,14 +37,16 @@ interface State {
   devices: Device[];
   lastProgram: Program | null;
   nlMode: boolean;
+  policies: ExecutionPolicy[];
 }
 
-function createState(devices: Device[]): State {
+function createState(devices: Device[], policies: ExecutionPolicy[]): State {
   return {
     session: createSession(),
     devices,
     lastProgram: null,
     nlMode: false,
+    policies,
   };
 }
 
@@ -56,13 +58,7 @@ async function executeProgram(state: State): Promise<UserInteraction | null> {
   const result = await interpret_home_dsl(state.lastProgram, {
     devices: state.devices,
     session: state.session,
-    policies:[
-      new ConfirmationPolicy({
-        requireConfirmation(action) {
-          return action.device.type == "thermostat" && action.kind === "set_property" && action.property === "temperature";
-        },
-      })
-    ]
+    policies: state.policies,
   });
 
   state.session = result.session;
@@ -199,8 +195,8 @@ const COMMANDS = [
   ":nl", ":dsl",
 ];
 
-export async function startRepl(devices: Device[]): Promise<void> {
-  const state = createState(devices);
+export async function startRepl(devices: Device[], policies?: ExecutionPolicy[]): Promise<void> {
+  const state = createState(devices, policies ?? []);
 
   function deviceTypes(): string[] {
     return [...new Set(state.devices.map((d) => d.type))];
