@@ -7,6 +7,7 @@ import type {
 import type { DeviceDriver } from "@opennest/devices";
 import type { UserInteraction, PendingInteraction } from "./interactions/types.js";
 import type { ExecutionPolicy } from "./policies/types.js";
+import type { ExecutionTrace, ExecutionTracer } from "./trace/types.js";
 
 export interface Device {
   id: string;
@@ -56,12 +57,14 @@ export interface VMResult {
   executed: ExecutedStatement[];
   interaction: UserInteraction | null;
   errors: VMError[];
+  trace?: ExecutionTrace;
 }
 
 export interface VMContext {
   devices: Device[];
   session?: Session;
   policies?: ExecutionPolicy[];
+  tracer?: ExecutionTracer;
 }
 
 export interface ResolutionIntent {

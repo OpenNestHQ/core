@@ -50,5 +50,6 @@ async function runProgram(
       : context.devices,
     context.session,
     context.policies,
+    context.tracer,
   );
 }

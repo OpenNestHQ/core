@@ -56,5 +56,6 @@ export async function resumeAndContinue(
     context.devices,
     session,
     context.policies,
+    context.tracer,
   );
 }

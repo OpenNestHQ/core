@@ -15,6 +15,8 @@ import type { Device, Session, VMResult, VMError, ResolutionIntent, ResolutionRe
 import type { UserInteraction } from "./interactions/types.js";
 import type { DeviceSelectionContext } from "./interactions/device-selection.js";
 import type { ExecutionPolicy, PlannedAction } from "./policies/types.js";
+import type { ExecutionTracer } from "./trace/types.js";
+import { NodeKind } from "./trace/types.js";
 import { createSession } from "./state.js";
 import { resolveDevices } from "./resolver.js";
 import { validateProgram } from "./validate.js";
@@ -30,6 +32,7 @@ export async function interpretProgram(
   devices: Device[],
   existingSession?: Session,
   policies?: ExecutionPolicy[],
+  tracer?: ExecutionTracer,
 ): Promise<VMResult> {
   const session = existingSession ?? createSession();
   const isFresh = !existingSession || existingSession.cursor === 0;
@@ -47,15 +50,24 @@ export async function interpretProgram(
     }
   }
 
+  tracer?.beginNode(NodeKind.Program, "program");
+  tracer?.attribute("statementCount", program.statements.length);
+
   const errors: VMError[] = [];
   let awaiting = false;
   let interactionResult: UserInteraction | null = null;
 
   for (let i = session.cursor; i < program.statements.length; i++) {
     const statement = program.statements[i]!;
+
+    tracer?.beginNode(NodeKind.Statement, `statement[${i}]`);
+    tracer?.attribute("index", i);
+    tracer?.attribute("kind", statement.kind);
+
     const result = await interpretStatement(statement, devices, session, policies);
 
     if (result.kind === "awaiting_interaction") {
+      tracer?.endWaiting();
       awaiting = true;
       interactionResult = result.interaction;
       session.pendingInteraction = {
@@ -69,7 +81,10 @@ export async function interpretProgram(
     }
 
     if (result.kind === "error") {
+      tracer?.endFailed();
       errors.push(...result.errors);
+    } else {
+      tracer?.endSuccess();
     }
 
     session.resolvedIds = {};
@@ -83,31 +98,40 @@ export async function interpretProgram(
   }
 
   if (awaiting) {
+    tracer?.endWaiting();
+    const trace = tracer?.getTrace();
     return {
       status: "awaiting_interaction",
       session,
       executed: session.history,
       interaction: interactionResult,
       errors,
+      ...(trace ? { trace } : {}),
     };
   }
 
   if (errors.length > 0) {
+    tracer?.endFailed();
+    const trace = tracer?.getTrace();
     return {
       status: "error",
       session,
       executed: session.history,
       interaction: null,
       errors,
+      ...(trace ? { trace } : {}),
     };
   }
 
+  tracer?.endSuccess();
+  const trace = tracer?.getTrace();
   return {
     status: "success",
     session,
     executed: session.history,
     interaction: null,
     errors: [],
+    ...(trace ? { trace } : {}),
   };
 }
 

@@ -33,6 +33,9 @@ export type {
   ResolutionResult,
 } from "./types.js";
 
+export { NodeStatus, NodeKind } from "./trace/index.js";
+export type { ExecutionNode, ExecutionTrace, ExecutionTracer } from "./trace/index.js";
+
 export type {
   UserInteraction,
   UserResponse,
