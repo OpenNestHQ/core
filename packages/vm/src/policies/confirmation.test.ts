@@ -2,11 +2,11 @@ import { describe, it, expect } from "vitest";
 import { parseHomeDSL } from "@opennest/lang-core";
 import { MockDriver } from "@opennest/devices";
 import {
-  interpret_home_dsl,
+  executeCommand,
   createSession,
-  resumeWithResponse,
   ConfirmationPolicy,
 } from "../index.js";
+import { resumeWithResponse } from "../state.js";
 import type {
   Device,
   VMContext,
@@ -55,7 +55,7 @@ describe("ConfirmationPolicy", () => {
     });
 
     const program = parse("tv[salon].power = on");
-    const result = await interpret_home_dsl(program, await ctx(undefined, [policy]));
+    const result = await executeCommand({ kind: "run_program", program: program }, await ctx(undefined, [policy]));
 
     expect(result.status).toBe("success");
     expect(result.executed).toHaveLength(1);
@@ -68,7 +68,7 @@ describe("ConfirmationPolicy", () => {
     });
 
     const program = parse("tv[salon].power = on");
-    const result = await interpret_home_dsl(program, await ctx(undefined, [policy]));
+    const result = await executeCommand({ kind: "run_program", program: program }, await ctx(undefined, [policy]));
 
     expect(result.status).toBe("awaiting_interaction");
     expect(result.interaction).not.toBeNull();
@@ -82,11 +82,11 @@ describe("ConfirmationPolicy", () => {
     });
 
     const tvProgram = parse("tv[salon].power = on");
-    const tvResult = await interpret_home_dsl(tvProgram, await ctx(undefined, [policy]));
+    const tvResult = await executeCommand({ kind: "run_program", program: tvProgram }, await ctx(undefined, [policy]));
     expect(tvResult.status).toBe("success");
 
     const thermoProgram = parse("thermostat[salon].temperature = 22");
-    const thermoResult = await interpret_home_dsl(thermoProgram, await ctx(undefined, [policy]));
+    const thermoResult = await executeCommand({ kind: "run_program", program: thermoProgram }, await ctx(undefined, [policy]));
     expect(thermoResult.status).toBe("awaiting_interaction");
   });
 
@@ -97,7 +97,7 @@ describe("ConfirmationPolicy", () => {
     const session = createSession();
     const program = parse("tv[salon].power = on");
 
-    const firstResult = await interpret_home_dsl(program, await ctx(session, [policy]));
+    const firstResult = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [policy]));
     expect(firstResult.status).toBe("awaiting_interaction");
 
     resumeWithResponse(session, {
@@ -106,7 +106,7 @@ describe("ConfirmationPolicy", () => {
       confirmed: true,
     });
 
-    const secondResult = await interpret_home_dsl(program, await ctx(session, [policy]));
+    const secondResult = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [policy]));
     expect(secondResult.status).toBe("success");
     expect(secondResult.executed).toHaveLength(1);
     expect(secondResult.executed[0]!.changes[0]!.newValue).toBe(true);
@@ -119,7 +119,7 @@ describe("ConfirmationPolicy", () => {
     const session = createSession();
     const program = parse("tv[salon].power = on");
 
-    const firstResult = await interpret_home_dsl(program, await ctx(session, [policy]));
+    const firstResult = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [policy]));
     expect(firstResult.status).toBe("awaiting_interaction");
 
     resumeWithResponse(session, {
@@ -128,7 +128,7 @@ describe("ConfirmationPolicy", () => {
       confirmed: false,
     });
 
-    const secondResult = await interpret_home_dsl(program, await ctx(session, [policy]));
+    const secondResult = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [policy]));
     expect(secondResult.status).toBe("error");
     expect(secondResult.errors[0]!.message).toContain("denied by user");
   });
@@ -140,17 +140,17 @@ describe("ConfirmationPolicy", () => {
     const session = createSession();
     const program = parse("tv[salon].power = on");
 
-    const first = await interpret_home_dsl(program, await ctx(session, [policy]));
+    const first = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [policy]));
     resumeWithResponse(session, {
       interactionId: first.interaction!.id,
       type: "confirmation",
       confirmed: true,
     });
 
-    const second = await interpret_home_dsl(program, await ctx(session, [policy]));
+    const second = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [policy]));
     expect(second.status).toBe("success");
 
-    const third = await interpret_home_dsl(program, await ctx(session, [policy]));
+    const third = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [policy]));
     expect(third.status).toBe("success");
   });
 
@@ -161,7 +161,7 @@ describe("ConfirmationPolicy", () => {
     const session = createSession();
 
     const programTv = parse("tv[salon].power = on");
-    const r1 = await interpret_home_dsl(programTv, await ctx(session, [policy]));
+    const r1 = await executeCommand({ kind: "run_program", program: programTv }, await ctx(session, [policy]));
     expect(r1.status).toBe("awaiting_interaction");
     resumeWithResponse(session, {
       interactionId: r1.interaction!.id,
@@ -170,7 +170,7 @@ describe("ConfirmationPolicy", () => {
     });
 
     const programLight = parse("light[salon].power = on");
-    const r2 = await interpret_home_dsl(programLight, await ctx(session, [policy]));
+    const r2 = await executeCommand({ kind: "run_program", program: programLight }, await ctx(session, [policy]));
     expect(r2.status).toBe("awaiting_interaction");
     expect(r2.interaction!.id).not.toBe(r1.interaction!.id);
   });
@@ -182,7 +182,7 @@ describe("ConfirmationPolicy", () => {
     });
 
     const program = parse("tv[salon].power = on");
-    const result = await interpret_home_dsl(program, await ctx(undefined, [policy]));
+    const result = await executeCommand({ kind: "run_program", program: program }, await ctx(undefined, [policy]));
 
     expect(result.interaction!.message).toContain("[CUSTOM]");
     expect(result.interaction!.message).toContain("Salon TV");

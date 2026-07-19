@@ -10,82 +10,67 @@ pnpm add @opennest/vm
 
 ## API
 
-### `interpret_home_dsl(program, context): Promise<VMResult>`
+### `executeCommand(command, context): Promise<VMResult>`
 
-Main entry point. Takes a parsed AST and device context, returns execution result.
-
-```ts
-import { interpret_home_dsl, createSession } from "@opennest/vm";
-
-const result = await interpret_home_dsl(program, {
-  devices: myDevices,
-  session: createSession(),
-});
-
-// result.status → "success" | "waiting" | "error"
-```
-
-### Session management
+Single entry point. Accepts a discriminated union of commands:
 
 ```ts
-import { createSession, applyResolution } from "@opennest/vm";
+import { executeCommand, createSession } from "@opennest/vm";
 
-const session = createSession();
-// ... after VM returns "waiting" with ambiguity ...
-applyResolution(session, "tv", "tv_salon");
-// re-invoke interpret_home_dsl with updated session
+// Run a parsed program
+const result = await executeCommand(
+  { kind: "run_program", program },
+  { devices: myDevices, session: createSession() },
+);
+
+// Resume after a user interaction
+const resumed = await executeCommand(
+  { kind: "resume_interaction", response },
+  { devices: myDevices, session: result.session },
+);
+
+// Cancel current execution
+await executeCommand(
+  { kind: "cancel_execution" },
+  { devices: myDevices, session },
+);
 ```
 
-### Resolution & collections
+### `createSession(): Session`
 
-```ts
-import { resolveDevices, expandCollection } from "@opennest/vm";
-```
+Creates a fresh VM session (variables, history, `$it` context).
 
-### Executors (low-level)
+### `validateProgram(program, devices, session?): VMError[]`
 
-```ts
-import { executeAssignment, executeQuery, executeAction, evaluateCondition } from "@opennest/vm";
-```
+Pre-validates a program before execution. Returns validation errors without side effects.
 
-## VMResult
+### `VMResult`
 
 ```ts
 {
-  status: "success" | "waiting" | "error",
-  session: Session,           // updated session (variables, history, $it)
+  status: "success" | "awaiting_interaction" | "error",
+  session: Session,
   executed: ExecutedStatement[],
-  awaiting: AmbiguityInfo | null,  // structured ambiguity tree when status === "waiting"
+  interaction: UserInteraction | null,
   errors: VMError[]
 }
 ```
 
+## Command types
+
+| Command | Description |
+|---|---|
+| `RunProgramCommand` | Execute a full DSL program (`kind: "run_program"`) |
+| `ExecuteActionCommand` | Execute a single action on a device (`kind: "execute_action"`) |
+| `ExecuteStatementCommand` | Execute a single statement (`kind: "execute_statement"`) |
+| `ResumeInteractionCommand` | Resume after user interaction (`kind: "resume_interaction"`) |
+| `CancelExecutionCommand` | Cancel and reset session (`kind: "cancel_execution"`) |
+
 ## Key features
 
-- **Ambiguity as first-class state** — returns `AmbiguityInfo` tree instead of failing
+- **Ambiguity as first-class state** — returns interaction instead of failing on ambiguous device references
 - **Intent filtering** — auto-excludes devices that don't support targeted properties/actions
 - **Stateful sessions** — variables, `$it` context, and history persist across calls
-- **Collections** — `@all`, `@first`, `@oneof` with batch execution
+- **Collections** — `@all`, `@first` with batch execution
 - **Conditions** — `@if`/`@else`/`@endif` with `&` (AND) and `|` (OR)
-
-## Exports
-
-| Export | Kind | Description |
-|---|---|---|
-| `interpret_home_dsl` | function | Main VM entry point |
-| `interpretProgram` | function | Core interpreter (used internally) |
-| `createSession` | function | Create a fresh session |
-| `applyResolution` | function | Resolve ambiguity by device ID |
-| `resolveAmbiguity` | function | Resolve ambiguity via intent |
-| `resolveLastAmbiguity` | function | Resolve last ambiguity from session |
-| `resolveDevices` | function | Resolve device references |
-| `resolveDeviceById` | function | Resolve a single device by ID |
-| `expandCollection` | function | Expand `@all`/`@first`/`@oneof` |
-| `selectFirst` | function | Select first match from collection |
-| `selectAll` | function | Select all matches from collection |
-| `buildAmbiguityInfo` | function | Build structured ambiguity tree |
-| `executeAssignment` | function | Execute assignment statement |
-| `executeIncrement` | function | Execute increment statement |
-| `executeQuery` | function | Execute query statement |
-| `executeAction` | function | Execute action statement |
-| `evaluateCondition` | function | Evaluate `@if` condition |
+- **Policies** — `ExecutionPolicy` interface with confirmation, blocking, skipping, expansion

@@ -11,13 +11,11 @@ import type { PowerValue } from "@opennest/lang-core";
 import { MockDriver } from "@opennest/devices";
 import {
   executeCommand,
-  interpret_home_dsl,
   createSession,
-  resumeWithResponse,
-  resumeAndContinue,
   ConfirmationPolicy,
 } from "../index.js";
 import type { Device, Session, VMCommand } from "../index.js";
+import { resumeWithResponse } from "../state.js";
 
 function makeDriver(): MockDriver {
   return new MockDriver();
@@ -105,10 +103,7 @@ describe("executeCommand", () => {
         { devices: devs },
       );
 
-      const dslResult = await interpret_home_dsl(
-        parse("vacuum[salon].start()"),
-        { devices: devs },
-      );
+      const dslResult = await executeCommand({ kind: "run_program", program: parse("vacuum[salon].start()") }, { devices: devs },);
 
       expect(commandResult.status).toBe(dslResult.status);
       expect(commandResult.errors).toEqual(dslResult.errors);
@@ -279,10 +274,7 @@ describe("executeCommand", () => {
         { devices: devs },
       );
 
-      const dslResult = await interpret_home_dsl(
-        parse("light[salon].power = on"),
-        { devices: devs },
-      );
+      const dslResult = await executeCommand({ kind: "run_program", program: parse("light[salon].power = on") }, { devices: devs },);
 
       expect(commandResult.status).toBe("success");
       expect(commandResult.executed[0]!.statement).toEqual(
@@ -617,7 +609,7 @@ describe("executeCommand", () => {
       const devs = await devices();
       const session: Session = createSession();
 
-      const dslResult = await interpret_home_dsl(parse("light[salon].power = on"), {
+      const dslResult = await executeCommand({ kind: "run_program", program: parse("light[salon].power = on") }, {
         devices: devs,
         session,
       });

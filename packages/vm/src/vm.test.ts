@@ -1,30 +1,26 @@
 import { describe, it, expect } from "vitest";
 import { parseHomeDSL } from "@opennest/lang-core";
+import type { Segment, PowerValue } from "@opennest/lang-core";
 import { MockDriver } from "@opennest/devices";
 import type { DeviceDriver } from "@opennest/devices";
 import {
-  interpret_home_dsl,
+  executeCommand,
   createSession,
-  resumeWithResponse,
-  resolveDevices,
-  expandCollection,
-  executeAssignment,
-  executeQuery,
-  executeAction,
-  registerHandler,
 } from "./index.js";
 import type {
   Device,
   VMContext,
   Session,
-  Segment,
-  PowerValue,
   ResolutionFilter,
   ExcludedDevice,
   DeviceSelectionInteraction,
 } from "./index.js";
+import { resumeWithResponse } from "./state.js";
+import { resolveDevices } from "./resolver.js";
+import { expandCollection } from "./collections.js";
+import { executeAssignment, executeQuery, executeAction } from "./executor.js";
+import { registerHandler, createInteraction } from "./interactions/registry.js";
 import { deviceSelectionHandler } from "./interactions/device-selection.js";
-import { createInteraction } from "./interactions/registry.js";
 import type { DeviceSelectionContext } from "./interactions/device-selection.js";
 
 registerHandler(deviceSelectionHandler);
@@ -133,7 +129,7 @@ describe("interpret_home_dsl", () => {
     it("should assign a property on an unambiguous device", async () => {
       const program = parse("tv[salon].power = on");
       const context = await ctx();
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(1);
@@ -149,7 +145,7 @@ describe("interpret_home_dsl", () => {
 
     it("should assign a numeric value", async () => {
       const program = parse("tv[salon].volume = 42");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed[0]!.changes[0]!.newValue).toBe(42);
@@ -157,7 +153,7 @@ describe("interpret_home_dsl", () => {
 
     it("should assign a string value", async () => {
       const program = parse(`tv[salon].source = "hdmi1"`);
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed[0]!.changes[0]!.newValue).toBe("hdmi1");
@@ -165,7 +161,7 @@ describe("interpret_home_dsl", () => {
 
     it("should assign to a wildcard room selector (all rooms)", async () => {
       const program = parse("tv[*].power = on");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed[0]!.resolvedDevices).toHaveLength(2);
@@ -178,7 +174,7 @@ describe("interpret_home_dsl", () => {
   describe("queries", () => {
     it("should query a device property", async () => {
       const program = parse("thermostat[salon].temperature?");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed[0]!.changes[0]!.newValue).toBe(21);
@@ -186,7 +182,7 @@ describe("interpret_home_dsl", () => {
 
     it("should query tv power", async () => {
       const program = parse("tv[salon].power?");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed[0]!.changes[0]!.newValue).toBe(false);
@@ -196,7 +192,7 @@ describe("interpret_home_dsl", () => {
   describe("increments", () => {
     it("should increment a numeric property", async () => {
       const program = parse("tv[salon].volume += 5");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed[0]!.changes[0]!.oldValue).toBe(15);
@@ -207,7 +203,7 @@ describe("interpret_home_dsl", () => {
   describe("actions", () => {
     it("should execute an action on a device", async () => {
       const program = parse("vacuum[salon].start()");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       const change = result.executed[0]!.changes[0]!;
@@ -219,7 +215,7 @@ describe("interpret_home_dsl", () => {
   describe("variable assignments", () => {
     it("should store a variable reference", async () => {
       const program = parse("$salon_tv = tv[salon]");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.session.variables["salon_tv"]).toEqual({
@@ -231,7 +227,7 @@ describe("interpret_home_dsl", () => {
 
     it("should use a variable to reference a device", async () => {
       const program = parse(`$salon_tv = tv[salon]\n$salon_tv.power = on`);
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(2);
@@ -242,7 +238,7 @@ describe("interpret_home_dsl", () => {
 
     it("should store a collection variable", async () => {
       const program = parse("$lights = @all(light[salon])");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.session.variables["lights"]).toEqual({
@@ -256,7 +252,7 @@ describe("interpret_home_dsl", () => {
   describe("context reference (it)", () => {
     it("should use 'it' to reference the last resolved device", async () => {
       const program = parse(`tv[salon].volume = 20\n$it.power = on`);
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(2);
@@ -269,7 +265,7 @@ describe("interpret_home_dsl", () => {
 
     it("should error when 'it' is used before any resolution", async () => {
       const program = parse("$it.power = on");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("error");
     });
@@ -277,12 +273,12 @@ describe("interpret_home_dsl", () => {
     it("should carry 'it' across sessions", async () => {
       const program1 = parse("tv[salon].volume = 30");
       const context1 = await ctx();
-      const result1 = await interpret_home_dsl(program1, context1);
+      const result1 = await executeCommand({ kind: "run_program", program: program1 }, context1);
 
       expect(result1.session.it?.id).toBe("tv_salon");
 
       const program2 = parse("$it.power = on");
-      const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program2 }, { devices: context1.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
       expect(result2.executed[0]!.resolvedDevices[0]!.id).toBe("tv_salon");
@@ -292,7 +288,7 @@ describe("interpret_home_dsl", () => {
   describe("ambiguity handling", () => {
     it("should return awaiting_interaction state when device type is ambiguous (no room)", async () => {
       const program = parse("tv.power = on");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("awaiting_interaction");
       expect(result.interaction).not.toBeNull();
@@ -315,21 +311,21 @@ describe("interpret_home_dsl", () => {
 
     it("should not be ambiguous when room is specified", async () => {
       const program = parse("tv[salon].power = on");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
     });
 
     it("should not be ambiguous for a single device type across rooms", async () => {
       const program = parse("thermostat.power = on");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).not.toBe("awaiting_interaction");
     });
 
     it("should include device ids and names in device_selection interaction", async () => {
       const program = parse("tv.power = on");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       const sel = result.interaction as DeviceSelectionInteraction;
       for (const device of sel.devices) {
@@ -345,7 +341,7 @@ describe("interpret_home_dsl", () => {
     it("should resolve ambiguity and re-interpret the same program", async () => {
       const program = parse("tv.power = on");
       const context = await ctx();
-      const result1 = await interpret_home_dsl(program, context);
+      const result1 = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result1.status).toBe("awaiting_interaction");
       expect(result1.interaction).not.toBeNull();
@@ -353,7 +349,7 @@ describe("interpret_home_dsl", () => {
 
       resolveDevice(result1.session, "tv_salon");
 
-      const result2 = await interpret_home_dsl(program, { devices: context.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program }, { devices: context.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
       expect(result2.executed).toHaveLength(1);
@@ -367,7 +363,7 @@ describe("interpret_home_dsl", () => {
       const program = parse("tv[salon].volume = 30\ntv.power = on\nspeaker[salon].volume = 20");
       const context = await ctx();
 
-      const result1 = await interpret_home_dsl(program, context);
+      const result1 = await executeCommand({ kind: "run_program", program: program }, context);
       expect(result1.status).toBe("awaiting_interaction");
       expect(result1.executed).toHaveLength(1);
       expect(result1.executed[0]!.changes[0]!.property).toBe("volume");
@@ -375,7 +371,7 @@ describe("interpret_home_dsl", () => {
 
       resolveDevice(result1.session, "tv_chambre");
 
-      const result2 = await interpret_home_dsl(program, { devices: context.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program }, { devices: context.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
       expect(result2.executed).toHaveLength(3);
@@ -396,14 +392,14 @@ describe("interpret_home_dsl", () => {
     it("should be ambiguous on direct references even after previous resolution", async () => {
       const context = await ctx();
       const program1 = parse("tv.power = on");
-      const result1 = await interpret_home_dsl(program1, context);
+      const result1 = await executeCommand({ kind: "run_program", program: program1 }, context);
 
       resolveDevice(result1.session, "tv_salon");
-      const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program1 }, { devices: context.devices, session: result1.session });
       expect(result2.status).toBe("success");
 
       const program2 = parse("tv.power = off");
-      const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
+      const result3 = await executeCommand({ kind: "run_program", program: program2 }, { devices: context.devices, session: result2.session });
 
       expect(result3.status).toBe("awaiting_interaction");
     });
@@ -411,12 +407,12 @@ describe("interpret_home_dsl", () => {
     it("should be ambiguous again if resolved id doesn't match the room", async () => {
       const context = await ctx();
       const program1 = parse("tv.power = on");
-      const result1 = await interpret_home_dsl(program1, context);
+      const result1 = await executeCommand({ kind: "run_program", program: program1 }, context);
 
       resolveDevice(result1.session, "tv_salon");
 
       const program2 = parse("tv[chambre].power = on");
-      const result2 = await interpret_home_dsl(program2, { devices: context.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program2 }, { devices: context.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
       expect(result2.executed[0]!.resolvedDevices[0]!.id).toBe("tv_chambre");
@@ -445,13 +441,13 @@ describe("interpret_home_dsl", () => {
     it("should auto-resolve variable after previous resolution", async () => {
       const context = await multiTvSalonCtx();
       const program = parse(`$my_tv = tv[salon]\n$my_tv.power = on`);
-      const result1 = await interpret_home_dsl(program, context);
+      const result1 = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result1.status).toBe("awaiting_interaction");
 
       resolveDevice(result1.session, "tv_samsung_salon");
 
-      const result2 = await interpret_home_dsl(program, { devices: context.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program }, { devices: context.devices, session: result1.session });
       expect(result2.status).toBe("success");
       expect(result2.executed[result2.executed.length - 1]!.resolvedDevices[0]!.id).toBe("tv_samsung_salon");
     });
@@ -460,15 +456,15 @@ describe("interpret_home_dsl", () => {
       const context = await multiTvSalonCtx();
 
       const program1 = parse(`$my_tv = tv[salon]\n$my_tv.power = on`);
-      const result1 = await interpret_home_dsl(program1, context);
+      const result1 = await executeCommand({ kind: "run_program", program: program1 }, context);
       expect(result1.status).toBe("awaiting_interaction");
 
       resolveDevice(result1.session, "tv_samsung_salon");
-      const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program1 }, { devices: context.devices, session: result1.session });
       expect(result2.status).toBe("success");
 
       const program2 = parse("$my_tv.volume = 50");
-      const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
+      const result3 = await executeCommand({ kind: "run_program", program: program2 }, { devices: context.devices, session: result2.session });
 
       expect(result3.status).toBe("success");
       const lastExec = result3.executed[result3.executed.length - 1]!;
@@ -480,13 +476,13 @@ describe("interpret_home_dsl", () => {
       const context = await multiTvSalonCtx();
 
       const program1 = parse(`$my_tv = tv[salon]\n$my_tv.power = on`);
-      const result1 = await interpret_home_dsl(program1, context);
+      const result1 = await executeCommand({ kind: "run_program", program: program1 }, context);
       resolveDevice(result1.session, "tv_samsung_salon");
-      const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program1 }, { devices: context.devices, session: result1.session });
       expect(result2.status).toBe("success");
 
       const program2 = parse(`$my_tv = tv\n$my_tv.power = off`);
-      const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
+      const result3 = await executeCommand({ kind: "run_program", program: program2 }, { devices: context.devices, session: result2.session });
 
       expect(result3.status).toBe("awaiting_interaction");
     });
@@ -495,13 +491,13 @@ describe("interpret_home_dsl", () => {
       const context = await ctx();
 
       const program1 = parse("tv.power = on");
-      const result1 = await interpret_home_dsl(program1, context);
+      const result1 = await executeCommand({ kind: "run_program", program: program1 }, context);
       resolveDevice(result1.session, "tv_salon");
-      const result2 = await interpret_home_dsl(program1, { devices: context.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program1 }, { devices: context.devices, session: result1.session });
       expect(result2.status).toBe("success");
 
       const program2 = parse("tv.volume = 50");
-      const result3 = await interpret_home_dsl(program2, { devices: context.devices, session: result2.session });
+      const result3 = await executeCommand({ kind: "run_program", program: program2 }, { devices: context.devices, session: result2.session });
 
       expect(result3.status).toBe("awaiting_interaction");
     });
@@ -529,7 +525,7 @@ describe("interpret_home_dsl", () => {
     it("should be ambiguous when room selector has multiple devices", async () => {
       const ctx = await multiDeviceCtx();
       const program = parse("tv[salon].power = on");
-      const result = await interpret_home_dsl(program, ctx);
+      const result = await executeCommand({ kind: "run_program", program: program }, ctx);
 
       expect(result.status).toBe("awaiting_interaction");
       expect(result.interaction).not.toBeNull();
@@ -542,13 +538,13 @@ describe("interpret_home_dsl", () => {
     it("should resolve multi-device room ambiguity with resumeWithResponse", async () => {
       const ctx = await multiDeviceCtx();
       const program = parse("tv[salon].power = on");
-      const result1 = await interpret_home_dsl(program, ctx);
+      const result1 = await executeCommand({ kind: "run_program", program: program }, ctx);
 
       expect(result1.status).toBe("awaiting_interaction");
 
       resolveDevice(result1.session, "tv_samsung_salon");
 
-      const result2 = await interpret_home_dsl(program, { devices: ctx.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program }, { devices: ctx.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
       expect(result2.executed[0]!.resolvedDevices).toHaveLength(1);
@@ -561,7 +557,7 @@ describe("interpret_home_dsl", () => {
       const program = parse(
         `tv[salon].power = on\ntv[salon].volume = 25\nspeaker[salon].volume = 30`,
       );
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(3);
@@ -569,7 +565,7 @@ describe("interpret_home_dsl", () => {
 
     it("should stop at the first ambiguous statement", async () => {
       const program = parse(`tv[salon].power = on\ntv.power = on\nlight[salon].power = on`);
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("awaiting_interaction");
       expect(result.executed).toHaveLength(1);
@@ -579,7 +575,7 @@ describe("interpret_home_dsl", () => {
       const program = parse(
         `tv[salon].power = on\nspeaker[salon].volume = 20`,
       );
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(2);
@@ -591,7 +587,7 @@ describe("interpret_home_dsl", () => {
       const program = parse(
         `tv[salon].power = on\nspeaker[salon].volume = 20`,
       );
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.session.history).toHaveLength(2);
     });
@@ -599,10 +595,10 @@ describe("interpret_home_dsl", () => {
     it("should persist variables across calls", async () => {
       const program1 = parse("$salon_tv = tv[salon]");
       const context1 = await ctx();
-      const result1 = await interpret_home_dsl(program1, context1);
+      const result1 = await executeCommand({ kind: "run_program", program: program1 }, context1);
 
       const program2 = parse("$salon_tv.volume = 50");
-      const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program2 }, { devices: context1.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
       expect(result2.session.variables["salon_tv"]).toBeDefined();
@@ -613,10 +609,10 @@ describe("interpret_home_dsl", () => {
     it("should accumulate history across calls", async () => {
       const program1 = parse("tv[salon].power = on");
       const context1 = await ctx();
-      const result1 = await interpret_home_dsl(program1, context1);
+      const result1 = await executeCommand({ kind: "run_program", program: program1 }, context1);
 
       const program2 = parse("speaker[salon].volume = 10");
-      const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program2 }, { devices: context1.devices, session: result1.session });
 
       expect(result2.session.history).toHaveLength(2);
     });
@@ -624,10 +620,10 @@ describe("interpret_home_dsl", () => {
     it("should accumulate history across calls", async () => {
       const program1 = parse("tv[salon].power = on");
       const context1 = await ctx();
-      const result1 = await interpret_home_dsl(program1, context1);
+      const result1 = await executeCommand({ kind: "run_program", program: program1 }, context1);
 
       const program2 = parse("speaker[salon].volume = 10");
-      const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program2 }, { devices: context1.devices, session: result1.session });
 
       expect(result2.session.history).toHaveLength(2);
     });
@@ -636,7 +632,7 @@ describe("interpret_home_dsl", () => {
   describe("error cases", () => {
     it("should error when no devices match the type", async () => {
       const program = parse("camera[salon].snapshot()");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("error");
       expect(result.errors[0]!.message).toContain("No device of type 'camera' found");
@@ -644,7 +640,7 @@ describe("interpret_home_dsl", () => {
 
     it("should error when no devices match the room", async () => {
       const program = parse("tv[cuisine].power = on");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("error");
     });
@@ -885,7 +881,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if light[salon].power? == on\ntv[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const tvPwr = await driver.getProperty("tv_1", "power", {});
@@ -904,7 +900,7 @@ describe("interpret_home_dsl", () => {
       ];
       const context: VMContext = { devices: devs };
 
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const tvPwr = await driver.getProperty("tv_1", "power", {});
@@ -923,7 +919,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if light[salon].power? == on\ntv[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const tvPwr = await driver.getProperty("tv_1", "power", {});
@@ -942,7 +938,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if light[salon].power? == on\ntv[salon].power = on\n@else\ntv[salon].power = off\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const tvPwr = await driver.getProperty("tv_1", "power", {});
@@ -961,7 +957,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if light[salon].power? == on\ntv[salon].volume = 40\n@else\ntv[salon].volume = 10\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const tvVol = await driver.getProperty("tv_1", "volume", {});
@@ -980,7 +976,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`$light_salon = light[salon]\n$light_cuisine = light[cuisine]\n@if $light_salon.power? == on\n$light_cuisine.power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const cuisinePwr = await driver.getProperty("light_cuisine_1", "power", {});
@@ -999,7 +995,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`$light_salon = light[salon]\n@if $light_salon.power? == on\nlight[cuisine].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const cuisinePwr = await driver.getProperty("light_cuisine_1", "power", {});
@@ -1018,7 +1014,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if light[salon].power? != on\ntv[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const tvPwr = await driver.getProperty("tv_1", "power", {});
@@ -1037,7 +1033,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if thermostat[salon].temperature? == 21\nfan[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const fanPwr = await driver.getProperty("fan_1", "power", {});
@@ -1058,7 +1054,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if tv[salon].power? == on\n@if light[salon].power? == on\nspeaker[salon].power = on\n@endif\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const spkPwr = await driver.getProperty("speaker_1", "power", {});
@@ -1080,7 +1076,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if tv[salon].power? == on\n@if light[salon].power? == on\nspeaker[salon].power = on\n@endif\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const spkPwr = await driver.getProperty("speaker_1", "power", {});
@@ -1099,7 +1095,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if light[salon].power? == on\ntv[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const lastEntry = result.session.history[result.session.history.length - 1];
@@ -1117,7 +1113,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if light[salon].power? == on\n$it.brightness = 80\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const brightness = await driver.getProperty("light_1", "brightness", {});
@@ -1134,7 +1130,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if light[salon].power? == on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
     });
@@ -1151,7 +1147,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if light[salon].power? == on\n@else\ntv[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const tvPwr = await driver.getProperty("tv_1", "power", {});
@@ -1160,7 +1156,7 @@ describe("interpret_home_dsl", () => {
 
     it("should error when condition device is ambiguous (no room)", async () => {
       const program = parse(`@if tv.power? == on\nspeaker.power = on\n@endif`);
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("error");
       expect(result.errors[0]!.message).toMatch(/Ambiguous device/);
@@ -1176,7 +1172,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if tv[salon].source? == "hdmi1"\ntv[salon].volume = 50\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const vol = await driver.getProperty("tv_1", "volume", {});
@@ -1197,7 +1193,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if light[salon].power? == on & tv[salon].power? == on\nspeaker[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const spkPwr = await driver.getProperty("speaker_1", "power", {});
@@ -1218,7 +1214,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if light[salon].power? == on & tv[salon].power? == on\nspeaker[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const spkPwr = await driver.getProperty("speaker_1", "power", {});
@@ -1239,7 +1235,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if light[salon].power? == on | tv[salon].power? == on\nspeaker[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const spkPwr = await driver.getProperty("speaker_1", "power", {});
@@ -1260,7 +1256,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if light[salon].power? == on | tv[salon].power? == on\nspeaker[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const spkPwr = await driver.getProperty("speaker_1", "power", {});
@@ -1281,7 +1277,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
 
       const program = parse(`@if (light[salon].power? == on | tv[salon].power? == on) & tv[salon].power? == on\nspeaker[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const spkPwr = await driver.getProperty("speaker_1", "power", {});
@@ -1304,7 +1300,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
       // a?==on & b?==on | c?==on → (true & false) | false → false → body NOT executed
       const program = parse(`@if light[salon].power? == on & light[chambre].power? == on | light[cuisine].power? == on\nspeaker[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       // Condition is false → only the if-statement history entry, no assignment
@@ -1328,7 +1324,7 @@ describe("interpret_home_dsl", () => {
       const context: VMContext = { devices: devs };
       // a?==on | (b?==on & c?==on) → false | (true & false) → false | false → false
       const program = parse(`@if light[salon].power? == on | (light[chambre].power? == on & light[cuisine].power? == on)\nspeaker[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const lastEntry = result.session.history[result.session.history.length - 1];
@@ -1350,7 +1346,7 @@ describe("interpret_home_dsl", () => {
       ];
       const context: VMContext = { devices: devs };
       const program = parse(`$a = light[salon]\n$b = light[chambre]\n$c = light[cuisine]\n@if $a.power? == on & $b.power? == on & $c.power? == on\nspeaker[salon].power = on\n@endif`);
-      const result = await interpret_home_dsl(program, context);
+      const result = await executeCommand({ kind: "run_program", program: program }, context);
 
       expect(result.status).toBe("success");
       const spkPwr = await driver.getProperty("spk", "power", {});
@@ -1361,7 +1357,7 @@ describe("interpret_home_dsl", () => {
   describe("README example flows", () => {
     it("should turn on all lights in the living room", async () => {
       const program = parse(`$lights = @all(light[salon])\n$lights.power = on`);
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(2);
@@ -1377,7 +1373,7 @@ describe("interpret_home_dsl", () => {
 
     it("should turn on only the first light with @first", async () => {
       const program = parse(`$first_light = @first(light[salon])\n$first_light.power = on`);
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(2);
@@ -1395,13 +1391,13 @@ describe("interpret_home_dsl", () => {
     it("should resolve @first across multiple programs", async () => {
       const program1 = parse("$my_light = @first(light[salon])");
       const context1 = await ctx();
-      const result1 = await interpret_home_dsl(program1, context1);
+      const result1 = await executeCommand({ kind: "run_program", program: program1 }, context1);
 
       expect(result1.status).toBe("success");
       expect(result1.session.variableModifiers["my_light"]).toBe("@first");
 
       const program2 = parse("$my_light.power = off");
-      const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program2 }, { devices: context1.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
       const exec = result2.executed[result2.executed.length - 1]!;
@@ -1411,7 +1407,7 @@ describe("interpret_home_dsl", () => {
 
     it("should resolve @oneof with a single matching device", async () => {
       const program = parse(`$tv = @oneof(tv[salon])\n$tv.power = on`);
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(2);
@@ -1432,7 +1428,7 @@ describe("interpret_home_dsl", () => {
 
     it("should trigger ambiguity on @oneof with multiple devices", async () => {
       const program = parse("$my_light = @oneof(light)");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("awaiting_interaction");
       expect(result.interaction).toBeDefined();
@@ -1446,7 +1442,7 @@ describe("interpret_home_dsl", () => {
 
     it("should error on @oneof with zero matching devices", async () => {
       const program = parse("$v = @oneof(vacuum[chambre])");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("error");
       expect(result.errors).toHaveLength(1);
@@ -1456,14 +1452,14 @@ describe("interpret_home_dsl", () => {
     it("should resolve @oneof across multiple programs after ambiguity resolution", async () => {
       const program1 = parse("$light = @oneof(light)");
       const context1 = await ctx();
-      const result1 = await interpret_home_dsl(program1, context1);
+      const result1 = await executeCommand({ kind: "run_program", program: program1 }, context1);
 
       expect(result1.status).toBe("awaiting_interaction");
       expect((result1.interaction as DeviceSelectionInteraction).devices[0]!.type).toBe("light");
 
       resolveDevice(result1.session, "light_salon_1");
       const program2 = parse("$light = @oneof(light)\n$light.power = off");
-      const result2 = await interpret_home_dsl(program2, { devices: context1.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program2 }, { devices: context1.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
       expect(result2.session.variableResolvedIds["light"]).toBe("light_salon_1");
@@ -1481,12 +1477,12 @@ describe("interpret_home_dsl", () => {
       const context = await ctx();
 
       // First run: ambiguity on @oneof
-      const result1 = await interpret_home_dsl(program, context);
+      const result1 = await executeCommand({ kind: "run_program", program: program }, context);
       expect(result1.status).toBe("awaiting_interaction");
 
       // Resolve to light_salon_2 which has power: true
       resolveDevice(result1.session, "light_salon_2");
-      const result2 = await interpret_home_dsl(program, { devices: context.devices, session: result1.session });
+      const result2 = await executeCommand({ kind: "run_program", program: program }, { devices: context.devices, session: result1.session });
 
       expect(result2.status).toBe("success");
       // light_salon_2 has power: true, so condition is false and body is not executed
@@ -1501,7 +1497,7 @@ describe("interpret_home_dsl", () => {
         await makeDevice("b", "light", "salon", "B", driver, { power: false }),
       ];
       const program = parse("@if light.power? == on\nspeaker.power = on\n@endif");
-      const result = await interpret_home_dsl(program, { devices: devs });
+      const result = await executeCommand({ kind: "run_program", program: program }, { devices: devs });
 
       expect(result.status).toBe("error");
       expect(result.errors).toHaveLength(1);
@@ -1511,7 +1507,7 @@ describe("interpret_home_dsl", () => {
 
     it("should assign tv power and volume in sequence", async () => {
       const program = parse(`tv[salon].power = on\n$it.volume = 20`);
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(2);
@@ -1525,7 +1521,7 @@ describe("interpret_home_dsl", () => {
 
     it("should handle 'turn off all lights'", async () => {
       const program = parse(`light[*].power = off`);
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(1);
@@ -1541,7 +1537,7 @@ describe("interpret_home_dsl", () => {
   describe("edge cases", () => {
     it("should handle an empty program", async () => {
       const program = parse("");
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(0);
@@ -1551,7 +1547,7 @@ describe("interpret_home_dsl", () => {
       const program = parse(
         `tv[salon].power = on\ntv[salon].volume = 50\ntv[salon].power = off`,
       );
-      const result = await interpret_home_dsl(program, await ctx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(3);
@@ -1572,7 +1568,7 @@ describe("interpret_home_dsl", () => {
       };
 
       const program = parse("light[salon].power = on");
-      const result = await interpret_home_dsl(program, await ctx(session));
+      const result = await executeCommand({ kind: "run_program", program: program }, await ctx(session));
 
       expect(result.session.variables["foo"]).toBeDefined();
       expect(result.session.variables["foo"]!.deviceType).toBe("tv");
@@ -1617,7 +1613,7 @@ describe("interpret_home_dsl", () => {
 
     it("should resolve to the only device supporting the property (no ambiguity)", async () => {
       const program = parse("tv.mute = on");
-      const result = await interpret_home_dsl(program, await filteredCtx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await filteredCtx());
 
       expect(result.status).toBe("success");
       expect(result.executed).toHaveLength(1);
@@ -1627,7 +1623,7 @@ describe("interpret_home_dsl", () => {
 
     it("should still be ambiguous when all devices support the property", async () => {
       const program = parse("tv.power = on");
-      const result = await interpret_home_dsl(program, await filteredCtx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await filteredCtx());
 
       expect(result.status).toBe("awaiting_interaction");
       expect((result.interaction as DeviceSelectionInteraction).devices).toHaveLength(2);
@@ -1663,7 +1659,7 @@ describe("interpret_home_dsl", () => {
 
       const ctx: VMContext = { devices: [speaker_next, speaker_basic] };
       const program = parse("speaker.next()");
-      const result = await interpret_home_dsl(program, ctx);
+      const result = await executeCommand({ kind: "run_program", program: program }, ctx);
 
       expect(result.status).toBe("success");
       expect(result.executed[0]!.resolvedDevices).toHaveLength(1);
@@ -1672,7 +1668,7 @@ describe("interpret_home_dsl", () => {
 
     it("should include filter feedback in executed statement", async () => {
       const program = parse("tv.mute = on");
-      const result = await interpret_home_dsl(program, await filteredCtx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await filteredCtx());
 
       expect(result.status).toBe("success");
       const stmt = result.executed[0]!;
@@ -1690,7 +1686,7 @@ describe("interpret_home_dsl", () => {
 
     it("should include filter feedback when all candidates match", async () => {
       const program = parse("tv.power = on");
-      const result = await interpret_home_dsl(program, await filteredCtx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await filteredCtx());
 
       expect(result.status).toBe("awaiting_interaction");
     });
@@ -1713,7 +1709,7 @@ describe("interpret_home_dsl", () => {
 
       const ctx: VMContext = { devices: [light] };
       const program = parse("light.volume = 50");
-      const result = await interpret_home_dsl(program, ctx);
+      const result = await executeCommand({ kind: "run_program", program: program }, ctx);
 
       expect(result.status).toBe("error");
       expect(result.errors[0]!.message).toContain("does not support property 'volume'");
@@ -1734,7 +1730,7 @@ describe("interpret_home_dsl", () => {
 
       const ctx: VMContext = { devices: [tv1, tv2] };
       const program = parse("tv.power = on");
-      const result = await interpret_home_dsl(program, ctx);
+      const result = await executeCommand({ kind: "run_program", program: program }, ctx);
 
       expect(result.status).toBe("awaiting_interaction");
       expect((result.interaction as DeviceSelectionInteraction).devices).toHaveLength(2);
@@ -1742,7 +1738,7 @@ describe("interpret_home_dsl", () => {
 
     it("should not set filter on executed statement when no intent is used", async () => {
       const program = parse("$salon_tv = tv[salon]");
-      const result = await interpret_home_dsl(program, await filteredCtx());
+      const result = await executeCommand({ kind: "run_program", program: program }, await filteredCtx());
 
       expect(result.status).toBe("success");
       const stmt = result.executed[0]!;

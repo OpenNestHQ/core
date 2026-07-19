@@ -4,7 +4,7 @@
 
 OpenNest (also called ClawNest) — a DSL runtime for smart environments: HomeDSL → parser → VM interpreter.
 
-The pipeline: **Natural Language → HomeAgent (LLM) → HomeDSL → VM (`interpret_home_dsl`) → Devices.**
+The pipeline: **Natural Language → HomeAgent (LLM) → HomeDSL → VM (`executeCommand`) → Devices.**
 
 No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm workspaces** (`pnpm-workspace.yaml` + root `package.json`).
 
@@ -14,7 +14,7 @@ No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm w
 |---|---|---|---|
 | `packages/lang-core` | `@opennest/lang-core` | Parser (HomeDSL → AST), prompt generator, AST types | *none* |
 | `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers | *none* (only `js-yaml`) |
-| `packages/vm` | `@opennest/vm` | Interpreter: `interpret_home_dsl()`, resolver, state, ambiguity | `lang-core`, `devices` |
+| `packages/vm` | `@opennest/vm` | Interpreter: `executeCommand()`, resolver, state, ambiguity | `lang-core`, `devices` |
 | `packages/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `lang-core`, `devices`, `vm` |
 
 Cross-package deps use `"workspace:*"` in package.json, resolved by pnpm.
@@ -110,7 +110,7 @@ Key flags:
 
 ### Entry points
 
-- **VM**: `interpret_home_dsl(program: Program, context: VMContext) → Promise<VMResult>` in `packages/vm/src/index.ts`. Delegates to `interpretProgram()` in `interpreter.ts`.
+- **VM**: `executeCommand(command: VMCommand, context: VMContext) → Promise<VMResult>` in `packages/vm/src/index.ts`. Delegates to `interpretProgram()` in `interpreter.ts`.
 - **Parser**: `parseHomeDSL(source: string) → ParseResult` in `packages/lang-core/src/parser/parser.ts`.
 - **Prompt**: `generateHomeAgentPrompt(config?: PromptConfig) → string` in `packages/lang-core/src/prompt/generator.ts`.
 - **Registry**: `DeviceRegistry.fromYaml(yaml: string)` in `packages/devices/src/registry.ts`.
@@ -136,7 +136,7 @@ Key flags:
 
 Ambiguity is a first-class concern. When device resolution produces multiple matches, the VM returns `status: "waiting"` with an `AmbiguityInfo` tree — not an error.
 
-The caller uses `applyResolution(session, deviceType, deviceId)` to pick a device, then re-calls `interpret_home_dsl` with the updated session.
+The caller sends a `DeviceSelectionResponse` via `executeCommand({ kind: "resume_interaction", response }, ...)` with the updated session.
 
 ### Intent filtering (auto-disambiguation)
 
@@ -204,12 +204,12 @@ packages/
     homeagent-prompt.md  # Generated output (260 lines)
   vm/
     src/
-      index.ts           # interpret_home_dsl() + re-exports
+      index.ts           # executeCommand() — single entry point
       types.ts           # VMContext, VMResult, Session, Device, etc.
       interpreter.ts     # interpretProgram() — main execution loop
       executor.ts        # executeAssignment, executeIncrement, executeQuery, executeAction
       resolver.ts        # resolveDevices(), resolveDeviceById()
-      state.ts           # createSession(), applyResolution()
+      state.ts           # createSession()
       collections.ts     # expandCollection(), selectFirst(), selectAll()
       ambiguity.ts       # buildAmbiguityInfo(), buildAmbiguityTree()
     __fixtures__/

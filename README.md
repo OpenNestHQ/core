@@ -5,7 +5,7 @@
 OpenNest is a language, virtual machine, and agent runtime designed to control and reason about smart environments through a structured DSL called **HomeDSL**.
 
 ```text
-Natural Language → HomeAgent (LLM) → HomeDSL → VM (interpret_home_dsl) → Devices
+Natural Language → HomeAgent (LLM) → HomeDSL → VM (executeCommand) → Devices
 ```
 
 ---
@@ -92,12 +92,12 @@ $tv = @oneof(tv)
 
 ## VM Behavior
 
-The VM (`interpret_home_dsl`) resolves device references, detects ambiguity, and executes statements — returning one of three statuses:
+The VM (`executeCommand`) resolves device references, detects ambiguity, and executes statements — returning one of three statuses:
 
 | Status | Meaning |
 |---|---|
 | `success` | All statements executed |
-| `waiting` | Ambiguity detected — caller must pick a device via `applyResolution()` |
+| `awaiting_interaction` | Ambiguity detected — caller must resume via `executeCommand({ kind: "resume_interaction", response }, context)` |
 | `error` | One or more errors occurred |
 
 ### Key features

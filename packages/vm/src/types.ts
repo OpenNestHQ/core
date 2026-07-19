@@ -88,11 +88,3 @@ export interface ResolutionResult {
   filter?: ResolutionFilter;
 }
 
-export interface ResolvedStatement {
-  kind: "assignment" | "query" | "increment" | "action" | "variable_assignment";
-  devices: Device[];
-  propertyOrMethod: string;
-  value?: unknown;
-  variableName?: string;
-  variableRef?: DeviceRef;
-}

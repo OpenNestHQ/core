@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { parseHomeDSL } from "@opennest/lang-core";
 import { MockDriver } from "@opennest/devices";
-import { interpret_home_dsl, createSession } from "../index.js";
+import { executeCommand, createSession } from "../index.js";
 import { runPolicyPipeline } from "../policies/pipeline.js";
 import { NoopExecutionPolicy } from "../policies/noop.js";
 import type {
@@ -251,8 +251,8 @@ describe("VM with execution policies", () => {
     const noPolicies = await ctx();
     const withNoop = await ctx(undefined, [new NoopExecutionPolicy()]);
 
-    const resultNoPolicies = await interpret_home_dsl(program, noPolicies);
-    const resultWithNoop = await interpret_home_dsl(program, withNoop);
+    const resultNoPolicies = await executeCommand({ kind: "run_program", program: program }, noPolicies);
+    const resultWithNoop = await executeCommand({ kind: "run_program", program: program }, withNoop);
 
     expect(resultWithNoop.status).toBe("success");
     expect(resultWithNoop.executed).toHaveLength(1);
@@ -273,7 +273,7 @@ describe("VM with execution policies", () => {
     };
 
     const program = parse("tv[salon].power = on");
-    const result = await interpret_home_dsl(program, await ctx(undefined, [blocker]));
+    const result = await executeCommand({ kind: "run_program", program: program }, await ctx(undefined, [blocker]));
 
     expect(result.status).toBe("error");
     expect(result.errors).toHaveLength(1);
@@ -288,7 +288,7 @@ describe("VM with execution policies", () => {
     };
 
     const program = parse("tv[salon].power = on");
-    const result = await interpret_home_dsl(program, await ctx(undefined, [skipper]));
+    const result = await executeCommand({ kind: "run_program", program: program }, await ctx(undefined, [skipper]));
 
     expect(result.status).toBe("success");
     expect(result.executed).toHaveLength(1);
@@ -309,7 +309,7 @@ describe("VM with execution policies", () => {
     };
 
     const program = parse("tv[salon].power = on");
-    const result = await interpret_home_dsl(program, await ctx(undefined, [pauser]));
+    const result = await executeCommand({ kind: "run_program", program: program }, await ctx(undefined, [pauser]));
 
     expect(result.status).toBe("awaiting_interaction");
     expect(result.interaction).not.toBeNull();
@@ -326,7 +326,7 @@ describe("VM with execution policies", () => {
     };
 
     const program = parse("tv[salon].power = on");
-    await interpret_home_dsl(program, await ctx(session, [inspectorPolicy]));
+    await executeCommand({ kind: "run_program", program: program }, await ctx(session, [inspectorPolicy]));
 
     expect(spy).toHaveBeenCalled();
     const ctxArg: PolicyContext = spy.mock.calls[0]![0]!;
@@ -340,19 +340,19 @@ describe("VM with execution policies", () => {
 
     const context = await ctx(undefined, [inspector]);
 
-    await interpret_home_dsl(parse("tv[salon].power = on"), context);
+    await executeCommand({ kind: "run_program", program: parse("tv[salon].power = on") }, context);
     expect(spy.mock.calls[0]![0]!.action.kind).toBe("set_property");
     spy.mockClear();
 
-    await interpret_home_dsl(parse("tv[salon].power?"), context);
+    await executeCommand({ kind: "run_program", program: parse("tv[salon].power?") }, context);
     expect(spy.mock.calls[0]![0]!.action.kind).toBe("read_property");
     spy.mockClear();
 
-    await interpret_home_dsl(parse("tv[salon].volume += 10"), context);
+    await executeCommand({ kind: "run_program", program: parse("tv[salon].volume += 10") }, context);
     expect(spy.mock.calls[0]![0]!.action.kind).toBe("increment_property");
     spy.mockClear();
 
-    await interpret_home_dsl(parse("vacuum[salon].start()"), context);
+    await executeCommand({ kind: "run_program", program: parse("vacuum[salon].start()") }, context);
     expect(spy.mock.calls[0]![0]!.action.kind).toBe("invoke_action");
   });
 
@@ -368,7 +368,7 @@ describe("VM with execution policies", () => {
     };
 
     const program = parse("tv[*].power = on");
-    const result = await interpret_home_dsl(program, await ctx(undefined, [skipTvChambre]));
+    const result = await executeCommand({ kind: "run_program", program: program }, await ctx(undefined, [skipTvChambre]));
 
     expect(result.status).toBe("success");
     expect(result.executed).toHaveLength(1);
@@ -391,7 +391,7 @@ describe("VM with execution policies", () => {
     };
 
     const program = parse("tv[*].power = on");
-    const result = await interpret_home_dsl(program, await ctx(undefined, [blockTvChambre]));
+    const result = await executeCommand({ kind: "run_program", program: program }, await ctx(undefined, [blockTvChambre]));
 
     expect(result.status).toBe("error");
   });

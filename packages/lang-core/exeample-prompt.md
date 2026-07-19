@@ -329,7 +329,7 @@ the DSL itself does not specify which TV.
 
 Devices can be pre-resolved before execution:
 - session.resolvedIds stores resolved device choices
-- applyResolution() picks a specific device
+- Resume by calling executeCommand({ kind: 'resume_interaction', response }, context)
 
 ---
 
