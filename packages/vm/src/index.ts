@@ -27,6 +27,7 @@ export type {
 } from "./commands/types.js";
 
 export { interpretProgram } from "./interpreter.js";
+export { validateProgram } from "./validate.js";
 export { createSession, resumeWithResponse, resumeAndContinue } from "./state.js";
 export { resolveDevices, resolveDeviceById } from "./resolver.js";
 export { expandCollection, selectFirst, selectAll } from "./collections.js";

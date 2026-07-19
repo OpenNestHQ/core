@@ -17,6 +17,7 @@ import type { DeviceSelectionContext } from "./interactions/device-selection.js"
 import type { ExecutionPolicy, PlannedAction } from "./policies/types.js";
 import { createSession } from "./state.js";
 import { resolveDevices } from "./resolver.js";
+import { validateProgram } from "./validate.js";
 import { createInteraction } from "./interactions/registry.js";
 import {
   executePlannedAction,
@@ -31,6 +32,21 @@ export async function interpretProgram(
   policies?: ExecutionPolicy[],
 ): Promise<VMResult> {
   const session = existingSession ?? createSession();
+  const isFresh = !existingSession || existingSession.cursor === 0;
+
+  if (isFresh) {
+    const validationErrors = validateProgram(program, devices, session);
+    if (validationErrors.length > 0) {
+      return {
+        status: "error",
+        session,
+        executed: [],
+        interaction: null,
+        errors: validationErrors,
+      };
+    }
+  }
+
   const errors: VMError[] = [];
   let awaiting = false;
   let interactionResult: UserInteraction | null = null;

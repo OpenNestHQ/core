@@ -639,7 +639,7 @@ describe("interpret_home_dsl", () => {
       const result = await interpret_home_dsl(program, await ctx());
 
       expect(result.status).toBe("error");
-      expect(result.errors[0]!.message).toContain("No devices found");
+      expect(result.errors[0]!.message).toContain("No device of type 'camera' found");
     });
 
     it("should error when no devices match the room", async () => {
@@ -1450,7 +1450,7 @@ describe("interpret_home_dsl", () => {
 
       expect(result.status).toBe("error");
       expect(result.errors).toHaveLength(1);
-      expect(result.errors[0]!.message).toContain("@oneof(vacuum)");
+      expect(result.errors[0]!.message).toContain("No device 'vacuum' found in room 'chambre'");
     });
 
     it("should resolve @oneof across multiple programs after ambiguity resolution", async () => {
@@ -1506,7 +1506,7 @@ describe("interpret_home_dsl", () => {
       expect(result.status).toBe("error");
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0]!.message).toContain("@oneof");
-      expect(result.errors[0]!.message).toContain("$var = @oneof(device_type)");
+      expect(result.errors[0]!.message).toContain("Ambiguous device in @if condition");
     });
 
     it("should assign tv power and volume in sequence", async () => {
@@ -1716,7 +1716,7 @@ describe("interpret_home_dsl", () => {
       const result = await interpret_home_dsl(program, ctx);
 
       expect(result.status).toBe("error");
-      expect(result.errors[0]!.message).toContain("No devices found");
+      expect(result.errors[0]!.message).toContain("does not support property 'volume'");
     });
 
     it("should pass devices through when no capabilities are declared in driverConfig", async () => {
@@ -1749,4 +1749,233 @@ describe("interpret_home_dsl", () => {
       expect(stmt.filter).toBeUndefined();
     });
     });
+
+  describe("validateProgram", () => {
+    it("should return no errors for a valid program", async () => {
+      const program = parse("tv[salon].power = on");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(0);
+    });
+
+    it("should error when device type does not exist", async () => {
+      const program = parse("camera[salon].snapshot()");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain("No device of type 'camera' found");
+    });
+
+    it("should error when device type exists but not in the specified room", async () => {
+      const program = parse("tv[cuisine].power = on");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain("No device 'tv' found in room 'cuisine'");
+    });
+
+    it("should collect multiple errors across statements", async () => {
+      const program = parse("camera[salon].snapshot()\ntv[cuisine].power = on\nlight[inconnue].power = off");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(3);
+      expect(errors[0]!.message).toContain("camera");
+      expect(errors[1]!.message).toContain("cuisine");
+      expect(errors[2]!.message).toContain("inconnue");
+    });
+
+    it("should error when variable is not defined", async () => {
+      const program = parse("$foo.power = on");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain("Variable '$foo' is not defined");
+    });
+
+    it("should error when $it is used with no previous device", async () => {
+      const program = parse("$it.power = on");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain("$it is not set");
+    });
+
+    it("should not error on ambiguous (no room) statements", async () => {
+      const program = parse("tv.power = on");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(0);
+    });
+
+    it("should not error on wildcard room selectors", async () => {
+      const program = parse("tv[*].power = on");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(0);
+    });
+
+    it("should validate variable assignment with device_ref", async () => {
+      const program = parse("$salon_tv = tv[salon]");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(0);
+    });
+
+    it("should error on variable assignment to non-existent type", async () => {
+      const program = parse("$cam = camera");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain("No device of type 'camera' found");
+    });
+
+    it("should validate usage of previously defined variable", async () => {
+      const program = parse("$salon_tv = tv[salon]\n$salon_tv.power = on");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(0);
+    });
+
+    it("should error when variable references a type with no matching room", async () => {
+      const program = parse("$tv = tv[cuisine]\n$tv.power = on");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain("cuisine");
+    });
+
+    it("should validate @oneof variable without flagging ambiguity", async () => {
+      const program = parse("$lights = @oneof(light[salon])\n$lights.power = on");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(0);
+    });
+
+    it("should validate @if with unambiguous condition (room specified)", async () => {
+      const program = parse("@if tv[salon].power? == on\ntv[salon].volume = 50\n@endif");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(0);
+    });
+
+    it("should error on @if with ambiguous condition (no room)", async () => {
+      const program = parse("@if light.power? == on\nspeaker[salon].power = on\n@endif");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain("Ambiguous device in @if condition");
+    });
+
+    it("should skip ambiguity check for @oneof variable in @if condition", async () => {
+      // @oneof resolves via interaction at runtime; validation should not flag it
+      const program = parse("$l = @oneof(light)\n@if $l.power? == off\n$l.power = on\n@endif");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(0);
+    });
+
+    it("should error on non-@oneof variable in @if when ambiguous", async () => {
+      // Plain variable reference without room — should be flagged as ambiguous
+      const program = parse("$l = light\n@if $l.power? == off\n$l.power = on\n@endif");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain("Ambiguous device in @if condition");
+    });
+
+    it("should validate both branches of @if/@else", async () => {
+      const program = parse("@if tv[salon].power? == on\ncamera[salon].snapshot()\n@else\ntv[cuisine].power = on\n@endif");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(2);
+      expect(errors[0]!.message).toContain("camera");
+      expect(errors[1]!.message).toContain("cuisine");
+    });
+
+    it("should handle nested @if blocks", async () => {
+      const driver = makeDriver();
+      const { validateProgram } = await import("./index.js");
+      const dev: Device = {
+        id: "tv_1", type: "tv", room: "salon", name: "Salon TV",
+        driver, driverConfig: {},
+      };
+      const program = parse("@if tv[salon].power? == on\ntv[salon].volume = 50\n@endif");
+      const errors = validateProgram(program, [dev]);
+      expect(errors).toHaveLength(0);
+    });
+
+    it("should error on assignment to non-existent room in nested @if", async () => {
+      const program = parse("@if tv[salon].power? == on\ntv[cuisine].power = on\n@endif");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain("cuisine");
+    });
+
+    it("should error on $it not set in @if condition", async () => {
+      const program = parse("@if $it.power? == on\ntv[salon].power = on\n@endif");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain("$it is not set");
+    });
+
+    it("should track $it from @if condition for body validation", async () => {
+      // thermostat has a single instance — unambiguous in @if condition
+      const program = parse("@if thermostat[salon].temperature? == 21\n$it.temperature = 22\n@endif");
+      const { validateProgram } = await import("./index.js");
+      const devs = await devices();
+      const errors = validateProgram(program, devs);
+      expect(errors).toHaveLength(0);
+    });
+
+    it("should use existing session variables for validation", async () => {
+      const program = parse("$salon_tv.power = on");
+      const { validateProgram, createSession } = await import("./index.js");
+      const session = createSession();
+      session.variables["salon_tv"] = {
+        kind: "device_ref",
+        deviceType: "tv",
+        roomSelector: { kind: "room", name: "salon" },
+      };
+      const devs = await devices();
+      const errors = validateProgram(program, devs, session);
+      expect(errors).toHaveLength(0);
+    });
+
+    it("should error when existing session variable references non-existent type", async () => {
+      const program = parse("$cam_v.power = on");
+      const { validateProgram, createSession } = await import("./index.js");
+      const session = createSession();
+      session.variables["cam_v"] = {
+        kind: "device_ref",
+        deviceType: "camera",
+        roomSelector: null,
+      };
+      const devs = await devices();
+      const errors = validateProgram(program, devs, session);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain("camera");
+    });
+  });
 });
