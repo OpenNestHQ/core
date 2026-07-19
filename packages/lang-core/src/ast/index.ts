@@ -26,3 +26,11 @@ export type {
   CompoundOp,
   Program,
 } from "./types.js";
+export {
+  buildAction,
+  buildAssignment,
+  buildQuery,
+  buildIncrement,
+  buildProgram,
+  buildRoomSelector,
+} from "./builders.js";

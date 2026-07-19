@@ -47,6 +47,7 @@ export async function interpretProgram(
         type: result.interaction.type,
         context: result.pendingContext,
       };
+      session._pendingProgram = program;
       session.cursor = i;
       break;
     }
@@ -62,6 +63,7 @@ export async function interpretProgram(
 
   if (!awaiting) {
     session.cursor = 0;
+    delete session._pendingProgram;
   }
 
   if (awaiting) {

@@ -1,6 +1,7 @@
-import type { Session } from "./types.js";
+import type { VMContext, VMResult, Session } from "./types.js";
 import type { UserResponse } from "./interactions/types.js";
 import { processInteractionResponse } from "./interactions/registry.js";
+import { interpretProgram } from "./interpreter.js";
 
 export function createSession(): Session {
   return {
@@ -32,4 +33,28 @@ export function resumeWithResponse(
   processInteractionResponse(pending.type, session, pending.context, response);
   session.pendingInteraction = null;
   return session;
+}
+
+export async function resumeAndContinue(
+  response: UserResponse,
+  context: VMContext,
+): Promise<VMResult> {
+  const session = context.session;
+  if (!session) {
+    throw new Error("Cannot resume: no session in context");
+  }
+
+  const program = session._pendingProgram;
+  if (!program) {
+    throw new Error("Cannot resume: no pending program");
+  }
+
+  resumeWithResponse(session, response);
+
+  return interpretProgram(
+    program,
+    context.devices,
+    session,
+    context.policies,
+  );
 }

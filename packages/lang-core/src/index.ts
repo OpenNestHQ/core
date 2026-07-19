@@ -47,3 +47,11 @@ export type {
   CompoundOp,
   Program,
 } from "./ast/index.js";
+export {
+  buildAction,
+  buildAssignment,
+  buildQuery,
+  buildIncrement,
+  buildProgram,
+  buildRoomSelector,
+} from "./ast/index.js";

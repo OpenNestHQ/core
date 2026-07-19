@@ -1,6 +1,6 @@
 import type { Program } from "@opennest/lang-core";
 import type { VMResult, VMContext } from "./types.js";
-import { interpretProgram } from "./interpreter.js";
+import { executeCommand } from "./commands/dispatch.js";
 import { registerHandler } from "./interactions/registry.js";
 import { deviceSelectionHandler } from "./interactions/device-selection.js";
 import { confirmationHandler } from "./interactions/confirmation.js";
@@ -13,11 +13,21 @@ export async function interpret_home_dsl(
   program: Program,
   context: VMContext,
 ): Promise<VMResult> {
-  return interpretProgram(program, context.devices, context.session, context.policies);
+  return executeCommand({ kind: "run_program", program }, context);
 }
 
+export { executeCommand } from "./commands/dispatch.js";
+export type {
+  VMCommand,
+  RunProgramCommand,
+  ExecuteActionCommand,
+  ExecuteStatementCommand,
+  ResumeInteractionCommand,
+  CancelExecutionCommand,
+} from "./commands/types.js";
+
 export { interpretProgram } from "./interpreter.js";
-export { createSession, resumeWithResponse } from "./state.js";
+export { createSession, resumeWithResponse, resumeAndContinue } from "./state.js";
 export { resolveDevices, resolveDeviceById } from "./resolver.js";
 export { expandCollection, selectFirst, selectAll } from "./collections.js";
 export {

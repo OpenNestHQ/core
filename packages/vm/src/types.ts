@@ -2,6 +2,7 @@ import type {
   Statement,
   DeviceRef,
   CollectionModifier,
+  Program,
 } from "@opennest/lang-core";
 import type { DeviceDriver } from "@opennest/devices";
 import type { UserInteraction, PendingInteraction } from "./interactions/types.js";
@@ -39,6 +40,7 @@ export interface Session {
   variableResolvedIds: Record<string, string>;
   variableModifiers: Record<string, CollectionModifier>;
   pendingInteraction: PendingInteraction | null;
+  _pendingProgram?: Program;
 }
 
 export interface VMError {
