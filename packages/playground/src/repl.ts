@@ -2,8 +2,7 @@ import * as readline from "node:readline";
 import { parseHomeDSL } from "@opennest/lang-core";
 import type { Program } from "@opennest/lang-core";
 import {
-  interpret_home_dsl,
-  resumeWithResponse,
+  executeCommand,
   createSession,
 } from "@opennest/vm";
 import type {
@@ -12,6 +11,8 @@ import type {
   UserInteraction,
   DeviceSelectionInteraction,
   ExecutionPolicy,
+  UserResponse,
+  VMResult,
 } from "@opennest/vm";
 import {
   formatSuccess,
@@ -35,7 +36,6 @@ import type { AttemptCallback } from "./agent.js";
 interface State {
   session: Session;
   devices: Device[];
-  lastProgram: Program | null;
   nlMode: boolean;
   policies: ExecutionPolicy[];
 }
@@ -44,98 +44,126 @@ function createState(devices: Device[], policies: ExecutionPolicy[]): State {
   return {
     session: createSession(),
     devices,
-    lastProgram: null,
     nlMode: false,
     policies,
   };
 }
 
-async function executeProgram(state: State): Promise<UserInteraction | null> {
-  if (!state.lastProgram) return null;
-
-  const prevHistoryLen = state.session.history.length;
-
-  const result = await interpret_home_dsl(state.lastProgram, {
-    devices: state.devices,
-    session: state.session,
-    policies: state.policies,
-  });
-
-  state.session = result.session;
-
-  switch (result.status) {
-    case "success":
-      if (result.executed.length > prevHistoryLen) {
-        process.stdout.write(formatSuccess(result, prevHistoryLen) + "\n");
-      } else {
-        process.stdout.write("  (no-ops)\n\n");
-      }
-      return null;
-    case "awaiting_interaction":
-      if (result.executed.length > prevHistoryLen) {
-        process.stdout.write(formatSuccess(result, prevHistoryLen) + "\n");
-      }
-      process.stdout.write(formatInteraction(result.interaction!) + "\n");
-      if (result.interaction!.type === "device_selection") {
-        const sel = result.interaction as DeviceSelectionInteraction;
-        process.stdout.write(
-          `  \u2192 Choose a device (1-${sel.devices.length}, or :cancel): `,
-        );
-      }
-      if (result.interaction!.type === "confirmation") {
-        process.stdout.write("  \u2192 ");
-      }
-      return result.interaction;
-    case "error":
-      process.stdout.write(formatErrors(result.errors) + "\n");
-      return null;
+function presentResult(
+  result: VMResult,
+  prevHistoryLen: number,
+): UserInteraction | null {
+  if (result.executed.length > prevHistoryLen) {
+    process.stdout.write(formatSuccess(result, prevHistoryLen) + "\n");
+  } else if (result.status === "success") {
+    process.stdout.write("  (no-ops)\n\n");
   }
+
+  if (result.status === "awaiting_interaction") {
+    process.stdout.write(formatInteraction(result.interaction!) + "\n");
+    if (result.interaction!.type === "device_selection") {
+      const sel = result.interaction as DeviceSelectionInteraction;
+      process.stdout.write(
+        `  \u2192 Choose a device (1-${sel.devices.length}, or :cancel): `,
+      );
+    }
+    if (result.interaction!.type === "confirmation") {
+      process.stdout.write("  \u2192 ");
+    }
+    return result.interaction;
+  }
+
+  if (result.status === "error") {
+    process.stdout.write(formatErrors(result.errors) + "\n");
+  }
+
+  return null;
 }
 
-function processResponse(
+async function executeProgram(
+  program: Program,
+  state: State,
+): Promise<UserInteraction | null> {
+  const prevHistoryLen = state.session.history.length;
+
+  const result = await executeCommand(
+    { kind: "run_program", program },
+    {
+      devices: state.devices,
+      session: state.session,
+      policies: state.policies,
+    },
+  );
+
+  state.session = result.session;
+  return presentResult(result, prevHistoryLen);
+}
+
+async function handleInteraction(
   state: State,
   interaction: UserInteraction,
   answer: string,
-): boolean {
+): Promise<UserInteraction | null> {
   const trimmed = answer.trim();
+
   if (trimmed === ":cancel" || trimmed === ":q") {
+    const result = await executeCommand(
+      { kind: "cancel_execution" },
+      {
+        devices: state.devices,
+        session: state.session,
+        policies: state.policies,
+      },
+    );
+    state.session = result.session;
     process.stdout.write("  Cancelled.\n\n");
-    return false;
+    return null;
   }
+
+  let response: UserResponse | null = null;
 
   if (interaction.type === "device_selection") {
     const idx = parseInt(trimmed, 10);
     if (isNaN(idx) || idx < 1 || idx > interaction.devices.length) {
       process.stdout.write("  Invalid choice.\n\n");
-      return false;
+      return null;
     }
-
     const chosen = interaction.devices[idx - 1]!;
-    resumeWithResponse(state.session, {
+    response = {
       interactionId: interaction.id,
       type: "device_selection",
       deviceId: chosen.id,
-    });
-    return true;
-  }
-
-  if (interaction.type === "confirmation") {
+    };
+  } else if (interaction.type === "confirmation") {
     const lower = trimmed.toLowerCase();
     const confirmed = lower === "y" || lower === "yes";
     if (!confirmed && lower !== "n" && lower !== "no") {
       process.stdout.write("  Invalid answer. Type y/n.\n\n");
-      return false;
+      return null;
     }
-    resumeWithResponse(state.session, {
+    response = {
       interactionId: interaction.id,
       type: "confirmation",
       confirmed,
-    });
-    return true;
+    };
+  } else {
+    process.stdout.write("  Unsupported interaction type.\n\n");
+    return null;
   }
 
-  process.stdout.write("  Unsupported interaction type.\n\n");
-  return false;
+  const prevHistoryLen = state.session.history.length;
+
+  const result = await executeCommand(
+    { kind: "resume_interaction", response },
+    {
+      devices: state.devices,
+      session: state.session,
+      policies: state.policies,
+    },
+  );
+
+  state.session = result.session;
+  return presentResult(result, prevHistoryLen);
 }
 
 async function executeSource(state: State, src: string): Promise<UserInteraction | null> {
@@ -147,8 +175,7 @@ async function executeSource(state: State, src: string): Promise<UserInteraction
     return null;
   }
 
-  state.lastProgram = parseResult.program;
-  return executeProgram(state);
+  return executeProgram(parseResult.program, state);
 }
 
 async function executeNlSource(
@@ -172,8 +199,7 @@ async function executeNlSource(
     }
 
     process.stdout.write(formatNlSuccess(result.dsl) + "\n");
-    state.lastProgram = result.program;
-    return executeProgram(state);
+    return executeProgram(result.program, state);
   } catch (err: unknown) {
     process.stdout.write(
       `  ${Rcol}\u2717${
@@ -302,7 +328,6 @@ export async function startRepl(devices: Device[], policies?: ExecutionPolicy[])
   let processing = false;
   const queue: string[] = [];
 
-  // Multi-line input accumulation
   let accumulating = false;
   let buffer: string[] = [];
 
@@ -321,27 +346,21 @@ export async function startRepl(devices: Device[], policies?: ExecutionPolicy[])
   async function processNext(line: string): Promise<void> {
     const trimmed = line.trim();
 
-    // Handle pending interaction
     if (pendingInteraction) {
       const interaction = pendingInteraction;
       pendingInteraction = null;
-      if (processResponse(state, interaction, trimmed)) {
-        pendingInteraction = await executeProgram(state);
-      }
+      pendingInteraction = await handleInteraction(state, interaction, trimmed);
       return;
     }
 
-    // Handle accumulation mode
     if (accumulating) {
       if (trimmed === ":}") {
         accumulating = false;
         if (buffer.length > 0) {
           const src = buffer.join("\n");
-          if (state.nlMode) {
-            pendingInteraction = await executeNlSource(state, src);
-          } else {
-            pendingInteraction = await executeSource(state, src);
-          }
+          pendingInteraction = state.nlMode
+            ? await executeNlSource(state, src)
+            : await executeSource(state, src);
         }
         buffer = [];
         return;
@@ -350,11 +369,9 @@ export async function startRepl(devices: Device[], policies?: ExecutionPolicy[])
         accumulating = false;
         if (buffer.length > 0) {
           const src = buffer.join("\n");
-          if (state.nlMode) {
-            pendingInteraction = await executeNlSource(state, src);
-          } else {
-            pendingInteraction = await executeSource(state, src);
-          }
+          pendingInteraction = state.nlMode
+            ? await executeNlSource(state, src)
+            : await executeSource(state, src);
         }
         buffer = [];
         return;
@@ -363,7 +380,6 @@ export async function startRepl(devices: Device[], policies?: ExecutionPolicy[])
       return;
     }
 
-    // Special commands
     if (trimmed === ":q" || trimmed === ":quit") {
       process.stdout.write("Goodbye!\n");
       rl.close();
@@ -394,8 +410,15 @@ export async function startRepl(devices: Device[], policies?: ExecutionPolicy[])
       return;
     }
     if (trimmed === ":r" || trimmed === ":reset") {
-      state.session = createSession();
-      state.lastProgram = null;
+      const result = await executeCommand(
+        { kind: "cancel_execution" },
+        {
+          devices: state.devices,
+          session: state.session,
+          policies: state.policies,
+        },
+      );
+      state.session = result.session;
       process.stdout.write("Session reset.\n\n");
       return;
     }
@@ -418,12 +441,9 @@ export async function startRepl(devices: Device[], policies?: ExecutionPolicy[])
       return;
     }
 
-    if (state.nlMode) {
-      pendingInteraction = await executeNlSource(state, trimmed);
-      return;
-    }
-
-    pendingInteraction = await executeSource(state, trimmed);
+    pendingInteraction = state.nlMode
+      ? await executeNlSource(state, trimmed)
+      : await executeSource(state, trimmed);
   }
 
   rl.on("line", (rawLine: string) => {
