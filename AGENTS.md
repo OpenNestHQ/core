@@ -12,9 +12,9 @@ No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm w
 
 | Package | npm name | Role | Depends on |
 |---|---|---|---|
-| `packages/lang-core` | `@opennest/lang-core` | Parser (HomeDSL → AST), prompt generator, AST types | *none* |
+| `packages/lang-core` | `@opennest/lang-core` | Parser (HomeDSL → AST), prompt generator, AST builders | *none* |
 | `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers | *none* (only `js-yaml`) |
-| `packages/vm` | `@opennest/vm` | Interpreter: `executeCommand()`, resolver, state, ambiguity | `lang-core`, `devices` |
+| `packages/vm` | `@opennest/vm` | Interpreter: `executeCommand()`, resolution, policies, interactions, validation, tracing | `lang-core`, `devices` |
 | `packages/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `lang-core`, `devices`, `vm` |
 
 Cross-package deps use `"workspace:*"` in package.json, resolved by pnpm.
@@ -110,33 +110,69 @@ Key flags:
 
 ### Entry points
 
-- **VM**: `executeCommand(command: VMCommand, context: VMContext) → Promise<VMResult>` in `packages/vm/src/index.ts`. Delegates to `interpretProgram()` in `interpreter.ts`.
+- **VM**: `executeCommand(command: VMCommand, context: VMContext) → Promise<VMResult>` in `packages/vm/src/commands/dispatch.ts`. Single entry point, delegates to `interpretProgram()` for `run_program`, handles `resume_interaction` and `cancel_execution` directly.
 - **Parser**: `parseHomeDSL(source: string) → ParseResult` in `packages/lang-core/src/parser/parser.ts`.
 - **Prompt**: `generateHomeAgentPrompt(config?: PromptConfig) → string` in `packages/lang-core/src/prompt/generator.ts`.
 - **Registry**: `DeviceRegistry.fromYaml(yaml: string)` in `packages/devices/src/registry.ts`.
+- **AST Builders**: `buildProgram()`, `buildAction()`, `buildAssignment()`, `buildQuery()`, `buildIncrement()`, `buildRoomSelector()` in `packages/lang-core/src/ast/builders.ts`.
+
+### VMCommand layer
+
+`executeCommand` accepts a discriminated union of 5 commands:
+
+| Command | `kind` | Purpose |
+|---|---|---|
+| `RunProgramCommand` | `"run_program"` | Execute a full parsed HomeDSL `Program` |
+| `ExecuteActionCommand` | `"execute_action"` | Execute a single action, optionally scoped to `deviceId` |
+| `ExecuteStatementCommand` | `"execute_statement"` | Execute a single statement, optionally scoped to `deviceId` |
+| `ResumeInteractionCommand` | `"resume_interaction"` | Resume after a user interaction with `UserResponse` |
+| `CancelExecutionCommand` | `"cancel_execution"` | Cancel and reset session to empty |
+
+Commands `execute_action` and `execute_statement` build a `Program` internally via the AST builders from `lang-core`. When a `deviceId` is provided, the context's device list is filtered to that single device (scoped execution).
 
 ### VM context types
 
-- `VMContext = { devices: Device[], session?: Session }`. Devices embed a `DeviceDriver` instance, not a driver name.
+- `VMContext = { devices: Device[], session?: Session, policies?: ExecutionPolicy[], eventBus?: VMEventBus }`. Devices embed a `DeviceDriver` instance, not a driver name.
 - `Device` = `{ id, type, room, name, driver: DeviceDriver, driverConfig }`.
 - `DeviceDriver` (in `packages/devices/src/drivers/interface.ts`) exposes: `name`, `init()`, `getProperty()`, `setProperty()`, `executeAction()`.
-- `Session` carries: `variables`, `it`, `history`, `cursor`, `resolvedIds`, `variableModifiers`.
+- `Session` carries: `variables`, `it`, `history`, `cursor`, `resolvedIds`, `variableResolvedIds`, `variableModifiers`, `pendingInteraction`, `_pendingProgram`.
 
 ### VMResult
 
 ```typescript
-{ status: "success" | "waiting" | "error",
+{ status: "success" | "awaiting_interaction" | "error",
   session: Session,
   executed: ExecutedStatement[],
-  awaiting: AmbiguityInfo | null,
+  interaction: UserInteraction | null,
   errors: VMError[] }
 ```
 
-### Ambiguity handling
+### User interaction system (extensible)
 
-Ambiguity is a first-class concern. When device resolution produces multiple matches, the VM returns `status: "waiting"` with an `AmbiguityInfo` tree — not an error.
+User interactions have replaced the old hardcoded ambiguity system. The VM can suspend for any interaction type and resume generically.
 
-The caller sends a `DeviceSelectionResponse` via `executeCommand({ kind: "resume_interaction", response }, ...)` with the updated session.
+Interaction types (`type` field discriminates):
+
+| Type | Payload | Typical use |
+|---|---|---|
+| `device_selection` | `{ message, devices[] }` | Ambiguous device match |
+| `confirmation` | `{ message }` | Policy requires user approval |
+| `text_input` | `{ message, placeholder? }` | Free-form text input |
+| `number_input` | `{ message, min?, max? }` | Numeric input |
+| `choice` | `{ message, options[] }` | Pick from a list |
+
+Interaction handlers follow the `InteractionHandler` interface:
+```typescript
+interface InteractionHandler<TContext = unknown> {
+  type: string;
+  createInteraction(context: TContext): UserInteraction;
+  processResponse(session: Session, context: TContext, response: UserResponse): void;
+}
+```
+
+Handlers are registered in a global registry (`packages/vm/src/interactions/registry.ts`). Device selection is one handler among many. Adding a new interaction type requires only a new handler + registration — zero VM core changes.
+
+The caller sends a `UserResponse` (discriminated union matching `UserInteraction`) via `executeCommand({ kind: "resume_interaction", response }, ...)` with the updated session.
 
 ### Intent filtering (auto-disambiguation)
 
@@ -145,6 +181,59 @@ When a statement targets a property or action, the resolver filters out devices 
 { candidates: number, matched: number, excluded: ExcludedDevice[] }
 ```
 Excluded devices report `reason: "property_not_supported" | "action_not_supported"`.
+
+### Execution policies
+
+A composable middleware layer between statement resolution and device execution. Each `(device, operation)` PlannedAction passes through an ordered chain of `ExecutionPolicy` instances before dispatch.
+
+**Key types** (`packages/vm/src/policies/types.ts`):
+
+- `PlannedAction` — discriminated union: `set_property | increment_property | read_property | invoke_action`
+- `PolicyDecision` — what the policy wants: `continue | block | skip | pause | replace | expand`
+- `PolicyContext` — the action + session + devices passed to `evaluate()`
+- `PipelineOutcome` — final result after all policies: `execute | blocked | skipped | paused`
+
+The pipeline evaluation/application is split: policies only **evaluate** (return decisions), the VM alone **applies** them. Policies never call device methods.
+
+Built-in policies:
+- `NoopExecutionPolicy` — always returns `continue`, serves as template
+- `ConfirmationPolicy` — pauses for confirmation on matching actions (configurable predicate + message)
+
+`VMContext.policies?: ExecutionPolicy[]` wires policies into execution.
+
+### Pre-execution validation
+
+`validateProgram(program: Program, devices: Device[], existingSession?: Session): VMError[]` in `packages/vm/src/validate.ts`.
+
+Static check that runs before execution, no side effects:
+- Device type and room existence
+- Property/action capability checks via `ResolutionFilter`
+- `$it` is set before use, `$variables` are defined before reference
+- `@if` conditions don't contain ambiguous device references (except `@oneof` vars)
+- Validates both `@if`/`@else` branches
+- Collects ALL errors in one pass
+
+Automatically called at the start of `interpretProgram()` on fresh executions (`cursor === 0`).
+
+### Execution trace
+
+Deterministic execution tracing via an event bus pattern. The VM emits typed `VMEvent` objects (10 event types) during execution; a `Tracer` consumes them and builds an `ExecutionNode` tree.
+
+**Opt-in via `VMContext.eventBus?: VMEventBus`.**
+
+Node kinds captured: `Program`, `Statement`, `Handler`, `Policy`, `Execute`.
+
+Each `ExecutionNode` records: `id`, `parentId`, `kind`, `name`, `status` (Running/Success/Failed/Waiting/Skipped), `startedAt`, `endedAt`, `duration`, `children`, `attributes`.
+
+```typescript
+// Usage
+import { DefaultVMEventBus, DefaultExecutionTracer } from "@opennest/vm";
+const eventBus = new DefaultVMEventBus();
+const tracer = new DefaultExecutionTracer();
+eventBus.on(tracer.consume.bind(tracer));
+const result = await executeCommand(command, { devices, session, eventBus });
+const trace: ExecutionTrace = tracer.getTrace(); // { root: ExecutionNode }
+```
 
 ### Collections & wildcards
 
@@ -193,6 +282,8 @@ packages/
       index.ts           # Re-exports everything
       ast/
         types.ts         # Program, Statement, Expr, Value, etc.
+        builders.ts      # buildProgram(), buildAction(), buildAssignment(), etc.
+        index.ts         # Re-exports types + builders
       parser/
         parser.ts        # parseHomeDSL() + ParseError
       prompt/
@@ -204,21 +295,41 @@ packages/
     homeagent-prompt.md  # Generated output (260 lines)
   vm/
     src/
-      index.ts           # executeCommand() — single entry point
-      types.ts           # VMContext, VMResult, Session, Device, etc.
+      index.ts           # Public API — re-exports everything below
+      types.ts           # VMContext, VMResult, Session, Device, ResolutionFilter, etc.
+      commands/
+        types.ts         # VMCommand discriminated union (5 variants)
+        dispatch.ts      # executeCommand() — single entry point dispatcher
+      interactions/
+        types.ts         # UserInteraction, UserResponse, InteractionHandler, PendingInteraction
+        registry.ts      # Handler registry + createInteraction()/processInteractionResponse()
+        device-selection.ts # DeviceSelectionHandler
+        confirmation.ts  # ConfirmationHandler
+        index.ts         # Re-exports + auto-registration of handlers
+      policies/
+        types.ts         # ExecutionPolicy, PlannedAction, PolicyDecision, PipelineOutcome, etc.
+        pipeline.ts      # runPolicyPipeline() — sequential middleware evaluator
+        noop.ts          # NoopExecutionPolicy
+        confirmation.ts  # ConfirmationPolicy — pause-and-resume user confirmation
+      trace/
+        types.ts         # ExecutionNode, ExecutionTrace, NodeKind, NodeStatus
+        events.ts        # VMEvent discriminated union (10 event types)
+        event-bus.ts     # VMEventBus interface + DefaultVMEventBus
+        tracer.ts        # ExecutionTracer interface + DefaultExecutionTracer
+        index.ts         # Re-exports everything
       interpreter.ts     # interpretProgram() — main execution loop
-      executor.ts        # executeAssignment, executeIncrement, executeQuery, executeAction
-      resolver.ts        # resolveDevices(), resolveDeviceById()
-      state.ts           # createSession()
+      executor.ts        # executeAssignment, executeIncrement, executeQuery, executePlannedAction
+      resolver.ts        # resolveDevices(), resolveDeviceById(), resolveByDeviceId()
+      state.ts           # createSession(), resumeAndContinue()
       collections.ts     # expandCollection(), selectFirst(), selectAll()
-      ambiguity.ts       # buildAmbiguityInfo(), buildAmbiguityTree()
+      validate.ts        # validateProgram() — pre-execution static validation
     __fixtures__/
       inventory.yaml     # Sample YAML inventory (7 devices)
   playground/
     src/
       index.ts           # main(): creates devices, starts REPL
       devices.ts         # createPlaygroundDevices() — 14 mock devices
-      repl.ts            # startRepl() — readline-based interactive loop
+      repl.ts            # startRepl() — readline-based interactive loop (handles 5 interaction types)
       format.ts          # Colored output formatting
 ```
 
