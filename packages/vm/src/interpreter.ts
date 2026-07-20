@@ -64,7 +64,7 @@ export async function interpretProgram(
     tracer?.attribute("index", i);
     tracer?.attribute("kind", statement.kind);
 
-    const result = await interpretStatement(statement, devices, session, policies);
+    const result = await interpretStatement(statement, devices, session, policies, tracer);
 
     if (result.kind === "awaiting_interaction") {
       tracer?.endWaiting();
@@ -145,20 +145,21 @@ async function interpretStatement(
   devices: Device[],
   session: Session,
   policies?: ExecutionPolicy[],
+  tracer?: ExecutionTracer,
 ): Promise<InterpretResult> {
   switch (statement.kind) {
     case "assignment":
-      return interpretAssignment(statement, devices, session, policies);
+      return interpretAssignment(statement, devices, session, policies, tracer);
     case "query":
-      return interpretQuery(statement, devices, session, policies);
+      return interpretQuery(statement, devices, session, policies, tracer);
     case "increment":
-      return interpretIncrement(statement, devices, session, policies);
+      return interpretIncrement(statement, devices, session, policies, tracer);
     case "action":
-      return interpretAction(statement, devices, session, policies);
+      return interpretAction(statement, devices, session, policies, tracer);
     case "variable_assignment":
-      return interpretVariableAssignment(statement, devices, session);
+      return interpretVariableAssignment(statement, devices, session, tracer);
     case "if":
-      return interpretIfStatement(statement, devices, session, policies);
+      return interpretIfStatement(statement, devices, session, policies, tracer);
   }
 }
 
@@ -166,15 +167,24 @@ function awaitDeviceSelection(
   result: ResolutionResult,
   deviceType: string,
   variableName?: string,
+  tracer?: ExecutionTracer,
 ): InterpretResult {
+  tracer?.beginNode(NodeKind.Handler, `handler:device_selection`);
+  tracer?.attribute("interactionType", "device_selection");
+  tracer?.attribute("candidates", result.devices.length);
+
   const ctx: DeviceSelectionContext = {
     devices: result.devices,
     deviceType,
     variableName,
   };
+  const interaction = createInteraction("device_selection", ctx, tracer);
+
+  tracer?.endWaiting();
+
   return {
     kind: "awaiting_interaction",
-    interaction: createInteraction("device_selection", ctx),
+    interaction,
     pendingContext: ctx,
   };
 }
@@ -202,22 +212,40 @@ async function interpretAssignment(
   devices: Device[],
   session: Session,
   policies?: ExecutionPolicy[],
+  tracer?: ExecutionTracer,
 ): Promise<InterpretResult> {
   const property = lastPropertyName(stmt.path);
   const intent: ResolutionIntent = { kind: "property", name: property };
+
+  tracer?.beginNode(NodeKind.ResolveDevice, formatPath(stmt.path));
+  tracer?.attribute("intent", "property");
+  tracer?.attribute("property", property);
+
   const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
 
   if (resolutionResult.ambiguous) {
+    tracer?.attribute("ambiguous", true);
+    tracer?.attribute("matched", resolutionResult.devices.length);
+    tracer?.endWaiting();
     const { deviceType, variableName } = extractDeviceContext(stmt.path, session);
-    return awaitDeviceSelection(resolutionResult, deviceType, variableName);
+    return awaitDeviceSelection(resolutionResult, deviceType, variableName, tracer);
   }
 
   if (resolutionResult.devices.length === 0) {
+    tracer?.attribute("matched", 0);
+    tracer?.endFailed("No devices found");
     return {
       kind: "error",
       errors: [{ statement: stmt, message: `No devices found for path` }],
     };
   }
+
+  tracer?.attribute("matched", resolutionResult.devices.length);
+  if (resolutionResult.filter) {
+    tracer?.attribute("candidates", resolutionResult.filter.candidates);
+    tracer?.attribute("excluded", resolutionResult.filter.excluded.length);
+  }
+  tracer?.endSuccess();
 
   const actions: PlannedAction[] = resolutionResult.devices.map((device) => ({
     kind: "set_property" as const,
@@ -226,7 +254,7 @@ async function interpretAssignment(
     value: stmt.value,
   }));
 
-  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult);
+  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult, tracer);
 }
 
 async function interpretQuery(
@@ -234,22 +262,36 @@ async function interpretQuery(
   devices: Device[],
   session: Session,
   policies?: ExecutionPolicy[],
+  tracer?: ExecutionTracer,
 ): Promise<InterpretResult> {
   const property = lastPropertyName(stmt.path);
   const intent: ResolutionIntent = { kind: "property", name: property };
+
+  tracer?.beginNode(NodeKind.ResolveDevice, formatPath(stmt.path));
+  tracer?.attribute("intent", "property");
+  tracer?.attribute("property", property);
+
   const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
 
   if (resolutionResult.ambiguous) {
+    tracer?.attribute("ambiguous", true);
+    tracer?.attribute("matched", resolutionResult.devices.length);
+    tracer?.endWaiting();
     const { deviceType, variableName } = extractDeviceContext(stmt.path, session);
-    return awaitDeviceSelection(resolutionResult, deviceType, variableName);
+    return awaitDeviceSelection(resolutionResult, deviceType, variableName, tracer);
   }
 
   if (resolutionResult.devices.length === 0) {
+    tracer?.attribute("matched", 0);
+    tracer?.endFailed("No devices found");
     return {
       kind: "error",
       errors: [{ statement: stmt, message: `No devices found for query` }],
     };
   }
+
+  tracer?.attribute("matched", resolutionResult.devices.length);
+  tracer?.endSuccess();
 
   const actions: PlannedAction[] = resolutionResult.devices.map((device) => ({
     kind: "read_property" as const,
@@ -257,7 +299,7 @@ async function interpretQuery(
     property,
   }));
 
-  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult);
+  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult, tracer);
 }
 
 async function interpretIncrement(
@@ -265,22 +307,36 @@ async function interpretIncrement(
   devices: Device[],
   session: Session,
   policies?: ExecutionPolicy[],
+  tracer?: ExecutionTracer,
 ): Promise<InterpretResult> {
   const property = lastPropertyName(stmt.path);
   const intent: ResolutionIntent = { kind: "property", name: property };
+
+  tracer?.beginNode(NodeKind.ResolveDevice, formatPath(stmt.path));
+  tracer?.attribute("intent", "property");
+  tracer?.attribute("property", property);
+
   const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
 
   if (resolutionResult.ambiguous) {
+    tracer?.attribute("ambiguous", true);
+    tracer?.attribute("matched", resolutionResult.devices.length);
+    tracer?.endWaiting();
     const { deviceType, variableName } = extractDeviceContext(stmt.path, session);
-    return awaitDeviceSelection(resolutionResult, deviceType, variableName);
+    return awaitDeviceSelection(resolutionResult, deviceType, variableName, tracer);
   }
 
   if (resolutionResult.devices.length === 0) {
+    tracer?.attribute("matched", 0);
+    tracer?.endFailed("No devices found");
     return {
       kind: "error",
       errors: [{ statement: stmt, message: `No devices found for increment` }],
     };
   }
+
+  tracer?.attribute("matched", resolutionResult.devices.length);
+  tracer?.endSuccess();
 
   const actions: PlannedAction[] = resolutionResult.devices.map((device) => ({
     kind: "increment_property" as const,
@@ -289,7 +345,7 @@ async function interpretIncrement(
     value: stmt.value,
   }));
 
-  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult);
+  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult, tracer);
 }
 
 async function interpretAction(
@@ -297,22 +353,36 @@ async function interpretAction(
   devices: Device[],
   session: Session,
   policies?: ExecutionPolicy[],
+  tracer?: ExecutionTracer,
 ): Promise<InterpretResult> {
   const method = lastPropertyName(stmt.path);
   const intent: ResolutionIntent = { kind: "action", name: method };
+
+  tracer?.beginNode(NodeKind.ResolveDevice, formatPath(stmt.path));
+  tracer?.attribute("intent", "action");
+  tracer?.attribute("method", method);
+
   const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
 
   if (resolutionResult.ambiguous) {
+    tracer?.attribute("ambiguous", true);
+    tracer?.attribute("matched", resolutionResult.devices.length);
+    tracer?.endWaiting();
     const { deviceType, variableName } = extractDeviceContext(stmt.path, session);
-    return awaitDeviceSelection(resolutionResult, deviceType, variableName);
+    return awaitDeviceSelection(resolutionResult, deviceType, variableName, tracer);
   }
 
   if (resolutionResult.devices.length === 0) {
+    tracer?.attribute("matched", 0);
+    tracer?.endFailed("No devices found");
     return {
       kind: "error",
       errors: [{ statement: stmt, message: `No devices found for action` }],
     };
   }
+
+  tracer?.attribute("matched", resolutionResult.devices.length);
+  tracer?.endSuccess();
 
   const actions: PlannedAction[] = resolutionResult.devices.map((device) => ({
     kind: "invoke_action" as const,
@@ -320,7 +390,7 @@ async function interpretAction(
     method,
   }));
 
-  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult);
+  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult, tracer);
 }
 
 async function applyPoliciesAndFinish(
@@ -330,10 +400,11 @@ async function applyPoliciesAndFinish(
   devices: Device[],
   statement: Statement,
   resolutionResult: ResolutionResult,
+  tracer?: ExecutionTracer,
 ): Promise<InterpretResult> {
   if (!policies || policies.length === 0) {
     const changes = await Promise.all(
-      actions.map((action) => executePlannedAction(action)),
+      actions.map((action) => traceAndExecute(action, tracer)),
     );
 
     session.history.push({
@@ -354,7 +425,7 @@ async function applyPoliciesAndFinish(
   const approved: PlannedAction[] = [];
 
   for (const action of actions) {
-    const outcome = await runPolicyPipeline(action, policies, env);
+    const outcome = await runPolicyPipeline(action, policies, env, tracer);
 
     switch (outcome.kind) {
       case "execute":
@@ -374,6 +445,9 @@ async function applyPoliciesAndFinish(
         continue;
 
       case "paused":
+        tracer?.beginNode(NodeKind.Handler, `handler:${outcome.interaction.type}`);
+        tracer?.attribute("interactionType", outcome.interaction.type);
+        tracer?.endWaiting();
         return {
           kind: "awaiting_interaction",
           interaction: outcome.interaction,
@@ -394,7 +468,7 @@ async function applyPoliciesAndFinish(
   }
 
   const changes = await Promise.all(
-    approved.map((action) => executePlannedAction(action)),
+    approved.map((action) => traceAndExecute(action, tracer)),
   );
 
   const resolvedIds = new Set(approved.map((a) => a.device.id));
@@ -414,10 +488,52 @@ async function applyPoliciesAndFinish(
   return { kind: "success" };
 }
 
+async function traceAndExecute(
+  action: PlannedAction,
+  tracer?: ExecutionTracer,
+): Promise<import("./types.js").StateChange> {
+  tracer?.beginNode(NodeKind.Execute, `execute:${action.kind}`);
+  tracer?.attribute("deviceId", action.device.id);
+  tracer?.attribute("deviceName", action.device.name);
+
+  switch (action.kind) {
+    case "set_property":
+    case "read_property":
+    case "increment_property":
+      tracer?.attribute("property", action.property);
+      if (action.kind === "set_property" || action.kind === "increment_property") {
+        tracer?.attribute("value", describeActionValue(action.value));
+      }
+      break;
+    case "invoke_action":
+      tracer?.attribute("method", action.method);
+      break;
+  }
+
+  try {
+    const change = await executePlannedAction(action);
+    tracer?.endSuccess();
+    return change;
+  } catch (err) {
+    tracer?.endFailed(err);
+    throw err;
+  }
+}
+
+function describeActionValue(value: import("@opennest/lang-core").Value): string {
+  switch (value.kind) {
+    case "power": return value.value;
+    case "number": return String(value.value);
+    case "string": return `"${value.value}"`;
+    case "identifier": return value.value;
+  }
+}
+
 async function interpretVariableAssignment(
   stmt: VariableAssignment,
   devices: Device[],
   session: Session,
+  tracer?: ExecutionTracer,
 ): Promise<InterpretResult> {
   if (stmt.value.kind === "device_ref") {
     session.variables[stmt.name] = stmt.value;
@@ -444,17 +560,27 @@ async function interpretVariableAssignment(
           roomSelector: stmt.value.device.roomSelector,
         },
       ];
+
+      tracer?.beginNode(NodeKind.ResolveDevice, `@oneof(${stmt.value.device.deviceType})`);
+      tracer?.attribute("intent", "variable");
+
       const resolutionResult = resolveDevices(pseudoSegments, devices, session);
 
       if (resolutionResult.ambiguous) {
+        tracer?.attribute("ambiguous", true);
+        tracer?.attribute("matched", resolutionResult.devices.length);
+        tracer?.endWaiting();
         return awaitDeviceSelection(
           resolutionResult,
           stmt.value.device.deviceType,
           stmt.name,
+          tracer,
         );
       }
 
       if (resolutionResult.devices.length === 0) {
+        tracer?.attribute("matched", 0);
+        tracer?.endFailed("No devices found");
         return {
           kind: "error",
           errors: [{
@@ -463,6 +589,9 @@ async function interpretVariableAssignment(
           }],
         };
       }
+
+      tracer?.attribute("matched", 1);
+      tracer?.endSuccess();
 
       const device = resolutionResult.devices[0]!;
       session.variables[stmt.name] = deviceRef;
@@ -502,13 +631,25 @@ function lastPropertyName(path: { identifier: string }[]): string {
   return lastSegment.identifier;
 }
 
+function formatPath(path: { identifier: string; roomSelector?: { kind: string; name?: string } | null }[]): string {
+  return path
+    .map((seg) => {
+      const room = seg.roomSelector;
+      if (room && room.kind === "room" && room.name) return `${seg.identifier}[${room.name}]`;
+      if (room && room.kind === "wildcard") return `${seg.identifier}[*]`;
+      return seg.identifier;
+    })
+    .join(".");
+}
+
 async function interpretIfStatement(
   stmt: IfStatement,
   devices: Device[],
   session: Session,
   policies?: ExecutionPolicy[],
+  tracer?: ExecutionTracer,
 ): Promise<InterpretResult> {
-  const evalResult = await evaluateConditionExpr(stmt.condition, devices, session);
+  const evalResult = await evaluateConditionExpr(stmt.condition, devices, session, tracer);
 
   if (evalResult.kind === "error") {
     return {
@@ -522,7 +663,7 @@ async function interpretIfStatement(
   const statementsToExecute = conditionMet ? stmt.body : (stmt.elseBody ?? []);
 
   for (const bodyStmt of statementsToExecute) {
-    const result = await interpretStatement(bodyStmt, devices, session, policies);
+    const result = await interpretStatement(bodyStmt, devices, session, policies, tracer);
     if (result.kind !== "success") {
       return result;
     }
@@ -550,19 +691,20 @@ async function evaluateConditionExpr(
   expr: ConditionExpr,
   devices: Device[],
   session: Session,
+  tracer?: ExecutionTracer,
 ): Promise<ConditionEvalResult> {
   if (expr.kind === "condition") {
-    return evaluateSimpleCondition(expr, devices, session);
+    return evaluateSimpleCondition(expr, devices, session, tracer);
   }
 
   if (expr.kind === "compound_condition") {
-    const left = await evaluateConditionExpr(expr.left, devices, session);
+    const left = await evaluateConditionExpr(expr.left, devices, session, tracer);
     if (left.kind === "error") return left;
 
     if (expr.operator === "&" && !left.value) return { kind: "ok", value: false };
     if (expr.operator === "|" && left.value) return { kind: "ok", value: true };
 
-    const right = await evaluateConditionExpr(expr.right, devices, session);
+    const right = await evaluateConditionExpr(expr.right, devices, session, tracer);
     if (right.kind === "error") return right;
 
     return { kind: "ok", value: right.value };
@@ -575,12 +717,20 @@ async function evaluateSimpleCondition(
   condition: SimpleCondition,
   devices: Device[],
   session: Session,
+  tracer?: ExecutionTracer,
 ): Promise<ConditionEvalResult> {
   const property = lastPropertyName(condition.path);
   const intent: ResolutionIntent = { kind: "property", name: property };
+
+  tracer?.beginNode(NodeKind.ResolveDevice, formatPath(condition.path));
+  tracer?.attribute("intent", "property");
+  tracer?.attribute("property", property);
+
   const resolutionResult = resolveDevices(condition.path, devices, session, intent);
 
   if (resolutionResult.ambiguous) {
+    tracer?.attribute("ambiguous", true);
+    tracer?.endFailed("Ambiguous device in condition");
     return {
       kind: "error",
       message: "Ambiguous device in @if condition — use @oneof to pre-resolve: $var = @oneof(device_type)",
@@ -588,6 +738,8 @@ async function evaluateSimpleCondition(
   }
 
   if (resolutionResult.devices.length === 0) {
+    tracer?.attribute("matched", 0);
+    tracer?.endFailed("No devices found");
     return {
       kind: "error",
       message: "No devices found for @if condition",
@@ -595,11 +747,16 @@ async function evaluateSimpleCondition(
   }
 
   if (resolutionResult.devices.length > 1) {
+    tracer?.attribute("matched", resolutionResult.devices.length);
+    tracer?.endFailed("Multiple devices in condition");
     return {
       kind: "error",
       message: "Multiple devices matched in @if condition — use @oneof to pre-resolve: $var = @oneof(device_type)",
     };
   }
+
+  tracer?.attribute("matched", 1);
+  tracer?.endSuccess();
 
   const device = resolutionResult.devices[0]!;
   const currentValue = await device.driver.getProperty(device.id, property, device.driverConfig);

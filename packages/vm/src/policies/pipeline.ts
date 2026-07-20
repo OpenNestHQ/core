@@ -1,4 +1,6 @@
 import type { Device, Session } from "../types.js";
+import type { ExecutionTracer } from "../trace/types.js";
+import { NodeKind } from "../trace/types.js";
 import type {
   ExecutionPolicy,
   PlannedAction,
@@ -15,8 +17,9 @@ export async function runPolicyPipeline(
   action: PlannedAction,
   policies: readonly ExecutionPolicy[],
   env: PipelineEnvironment,
+  tracer?: ExecutionTracer,
 ): Promise<PipelineOutcome> {
-  return evaluateFrom(action, policies, env, 0);
+  return evaluateFrom(action, policies, env, 0, tracer);
 }
 
 async function evaluateFrom(
@@ -24,6 +27,7 @@ async function evaluateFrom(
   policies: readonly ExecutionPolicy[],
   env: PipelineEnvironment,
   startIndex: number,
+  tracer?: ExecutionTracer,
 ): Promise<PipelineOutcome> {
   let currentAction = action;
 
@@ -34,13 +38,22 @@ async function evaluateFrom(
       session: env.session,
       devices: env.devices,
     };
+
+    tracer?.beginNode(NodeKind.Policy, `policy:${policy.name}`);
+    tracer?.attribute("actionKind", currentAction.kind);
+    tracer?.attribute("deviceId", currentAction.device.id);
+
     const decision = await policy.evaluate(ctx);
+    tracer?.attribute("decision", decision.kind);
 
     switch (decision.kind) {
       case "continue":
+        tracer?.endSuccess();
         break;
 
       case "block":
+        tracer?.attribute("reason", decision.reason);
+        tracer?.endFailed(`Blocked: ${decision.reason}`);
         return {
           kind: "blocked",
           policyName: policy.name,
@@ -48,12 +61,14 @@ async function evaluateFrom(
         };
 
       case "skip":
+        tracer?.endSuccess();
         return {
           kind: "skipped",
           ...(decision.reason !== undefined ? { reason: decision.reason } : {}),
         };
 
       case "pause":
+        tracer?.endWaiting();
         return {
           kind: "paused",
           interaction: decision.interaction,
@@ -63,13 +78,15 @@ async function evaluateFrom(
         };
 
       case "replace":
+        tracer?.endSuccess();
         currentAction = decision.action;
         break;
 
       case "expand": {
+        tracer?.endSuccess();
         const results = await Promise.all(
           decision.actions.map((expanded) =>
-            evaluateFrom(expanded, policies, env, i + 1),
+            evaluateFrom(expanded, policies, env, i + 1, tracer),
           ),
         );
 

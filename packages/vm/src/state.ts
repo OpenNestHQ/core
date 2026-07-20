@@ -1,5 +1,6 @@
 import type { VMContext, VMResult, Session } from "./types.js";
 import type { UserResponse } from "./interactions/types.js";
+import type { ExecutionTracer } from "./trace/types.js";
 import { processInteractionResponse } from "./interactions/registry.js";
 import { interpretProgram } from "./interpreter.js";
 
@@ -19,6 +20,7 @@ export function createSession(): Session {
 export function resumeWithResponse(
   session: Session,
   response: UserResponse,
+  tracer?: ExecutionTracer,
 ): Session {
   const pending = session.pendingInteraction;
   if (!pending) {
@@ -30,7 +32,7 @@ export function resumeWithResponse(
     );
   }
 
-  processInteractionResponse(pending.type, session, pending.context, response);
+  processInteractionResponse(pending.type, session, pending.context, response, tracer);
   session.pendingInteraction = null;
   return session;
 }
@@ -49,7 +51,7 @@ export async function resumeAndContinue(
     throw new Error("Cannot resume: no pending program");
   }
 
-  resumeWithResponse(session, response);
+  resumeWithResponse(session, response, context.tracer);
 
   return interpretProgram(
     program,

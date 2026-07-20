@@ -9,6 +9,10 @@ export enum NodeStatus {
 export enum NodeKind {
   Program = "program",
   Statement = "statement",
+  ResolveDevice = "resolve_device",
+  Policy = "policy",
+  Handler = "handler",
+  Execute = "execute",
   Step = "step",
 }
 
