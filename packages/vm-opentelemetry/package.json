@@ -1,0 +1,21 @@
+{
+  "name": "@opennest/vm-opentelemetry",
+  "version": "1.0.0",
+  "description": "OpenTelemetry trace sink for OpenNest VM — exports execution traces as OTel spans",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0"
+  },
+  "devDependencies": {
+    "@opennest/vm": "workspace:*",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

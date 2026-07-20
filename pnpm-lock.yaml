@@ -77,6 +77,22 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.0)(@types/node@26.1.1)(vite@8.1.4(@types/node@26.1.1))
 
+  packages/vm-opentelemetry:
+    dependencies:
+      '@opentelemetry/api':
+        specifier: ^1.9.0
+        version: 1.9.0
+    devDependencies:
+      '@opennest/vm':
+        specifier: workspace:*
+        version: link:../vm
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.0)(@types/node@26.1.1)(vite@8.1.4(@types/node@26.1.1))
+
 packages:
 
   '@ai-sdk/gateway@2.0.109':
