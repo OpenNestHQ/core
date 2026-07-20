@@ -33,9 +33,6 @@ export type {
   ResolutionResult,
 } from "./types.js";
 
-export { NodeStatus, NodeKind } from "./trace/index.js";
-export type { ExecutionNode, ExecutionTrace, ExecutionTracer } from "./trace/index.js";
-
 export type {
   UserInteraction,
   UserResponse,
@@ -75,3 +72,18 @@ export type {
   SkippedOutcome,
   PausedOutcome,
 } from "./policies/types.js";
+
+export { NodeStatus, NodeKind } from "./trace/index.js";
+export { DefaultExecutionTracer } from "./trace/index.js";
+export { DefaultVMEventBus } from "./trace/index.js";
+export type {
+  ExecutionNode,
+  ExecutionTrace,
+  ExecutionTracer,
+  VMEvent,
+  ProgramBeginEvent,
+  ProgramEndEvent,
+  StatementBeginEvent,
+  StatementEndEvent,
+  VMEventBus,
+} from "./trace/index.js";

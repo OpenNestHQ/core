@@ -1,12 +1,11 @@
 import type { Device, Session } from "../types.js";
-import type { ExecutionTracer } from "../trace/types.js";
-import { NodeKind } from "../trace/types.js";
 import type {
   ExecutionPolicy,
   PlannedAction,
   PolicyContext,
   PipelineOutcome,
 } from "./types.js";
+import type { VMEventBus } from "../trace/event-bus.js";
 
 export interface PipelineEnvironment {
   session: Session;
@@ -17,9 +16,9 @@ export async function runPolicyPipeline(
   action: PlannedAction,
   policies: readonly ExecutionPolicy[],
   env: PipelineEnvironment,
-  tracer?: ExecutionTracer,
+  eventBus?: VMEventBus,
 ): Promise<PipelineOutcome> {
-  return evaluateFrom(action, policies, env, 0, tracer);
+  return evaluateFrom(action, policies, env, 0, eventBus);
 }
 
 async function evaluateFrom(
@@ -27,7 +26,7 @@ async function evaluateFrom(
   policies: readonly ExecutionPolicy[],
   env: PipelineEnvironment,
   startIndex: number,
-  tracer?: ExecutionTracer,
+  eventBus?: VMEventBus,
 ): Promise<PipelineOutcome> {
   let currentAction = action;
 
@@ -39,21 +38,31 @@ async function evaluateFrom(
       devices: env.devices,
     };
 
-    tracer?.beginNode(NodeKind.Policy, `policy:${policy.name}`);
-    tracer?.attribute("actionKind", currentAction.kind);
-    tracer?.attribute("deviceId", currentAction.device.id);
+    eventBus?.emit({
+      kind: "policy:begin",
+      timestamp: Date.now(),
+      name: policy.name,
+      actionKind: currentAction.kind,
+      deviceId: currentAction.device.id,
+    });
 
     const decision = await policy.evaluate(ctx);
-    tracer?.attribute("decision", decision.kind);
+
+    eventBus?.emit({
+      kind: "policy:end",
+      timestamp: Date.now(),
+      status: mapDecisionStatus(decision),
+      decision: decision.kind,
+      ...(decision.kind === "block" && "reason" in decision
+        ? { reason: (decision as { reason: string }).reason }
+        : {}),
+    });
 
     switch (decision.kind) {
       case "continue":
-        tracer?.endSuccess();
         break;
 
       case "block":
-        tracer?.attribute("reason", decision.reason);
-        tracer?.endFailed(`Blocked: ${decision.reason}`);
         return {
           kind: "blocked",
           policyName: policy.name,
@@ -61,14 +70,12 @@ async function evaluateFrom(
         };
 
       case "skip":
-        tracer?.endSuccess();
         return {
           kind: "skipped",
           ...(decision.reason !== undefined ? { reason: decision.reason } : {}),
         };
 
       case "pause":
-        tracer?.endWaiting();
         return {
           kind: "paused",
           interaction: decision.interaction,
@@ -78,15 +85,13 @@ async function evaluateFrom(
         };
 
       case "replace":
-        tracer?.endSuccess();
         currentAction = decision.action;
         break;
 
       case "expand": {
-        tracer?.endSuccess();
         const results = await Promise.all(
           decision.actions.map((expanded) =>
-            evaluateFrom(expanded, policies, env, i + 1, tracer),
+            evaluateFrom(expanded, policies, env, i + 1, eventBus),
           ),
         );
 
@@ -107,4 +112,23 @@ async function evaluateFrom(
   }
 
   return { kind: "execute", actions: [currentAction] };
+}
+
+function mapDecisionStatus(
+  decision: { kind: string },
+): "success" | "failed" | "waiting" | "skipped" {
+  switch (decision.kind) {
+    case "continue":
+    case "replace":
+    case "expand":
+      return "success";
+    case "block":
+      return "failed";
+    case "skip":
+      return "skipped";
+    case "pause":
+      return "waiting";
+    default:
+      return "success";
+  }
 }

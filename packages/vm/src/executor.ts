@@ -1,19 +1,62 @@
 import type { Value, SimpleCondition } from "@opennest/lang-core";
 import type { Device, StateChange } from "./types.js";
 import type { PlannedAction } from "./policies/types.js";
+import type { VMEventBus } from "./trace/event-bus.js";
 
 export async function executePlannedAction(
   action: PlannedAction,
+  eventBus?: VMEventBus,
 ): Promise<StateChange> {
-  switch (action.kind) {
-    case "set_property":
-      return executeAssignment(action.device, action.property, action.value);
-    case "increment_property":
-      return executeIncrement(action.device, action.property, action.value);
-    case "read_property":
-      return executeQuery(action.device, action.property);
-    case "invoke_action":
-      return executeAction(action.device, action.method);
+  eventBus?.emit({
+    kind: "action:begin",
+    timestamp: Date.now(),
+    actionKind: action.kind,
+    deviceId: action.device.id,
+    deviceName: action.device.name,
+    ...(("property" in action && "value" in action) ? { property: action.property, value: action.value } : {}),
+    ...("method" in action ? { method: action.method } : {}),
+  });
+
+  try {
+    let change: StateChange;
+    switch (action.kind) {
+      case "set_property":
+        change = await executeAssignment(
+          action.device,
+          action.property,
+          action.value,
+        );
+        break;
+      case "increment_property":
+        change = await executeIncrement(
+          action.device,
+          action.property,
+          action.value,
+        );
+        break;
+      case "read_property":
+        change = await executeQuery(action.device, action.property);
+        break;
+      case "invoke_action":
+        change = await executeAction(action.device, action.method);
+        break;
+    }
+
+    eventBus?.emit({
+      kind: "action:end",
+      timestamp: Date.now(),
+      status: "success",
+    });
+
+    return change;
+  } catch (err) {
+    eventBus?.emit({
+      kind: "action:end",
+      timestamp: Date.now(),
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   }
 }
 

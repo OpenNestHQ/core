@@ -1,6 +1,5 @@
 import type { Session } from "../types.js";
-import type { ExecutionTracer } from "../trace/types.js";
-import { NodeKind } from "../trace/types.js";
+import type { VMEventBus } from "../trace/event-bus.js";
 import type {
   InteractionHandler,
   UserInteraction,
@@ -16,20 +15,26 @@ export function registerHandler(handler: InteractionHandler): void {
 export function createInteraction(
   type: string,
   context: unknown,
-  tracer?: ExecutionTracer,
+  eventBus?: VMEventBus,
 ): UserInteraction {
   const handler = handlers.get(type);
   if (!handler) {
     throw new Error(`Unknown interaction type: ${type}`);
   }
 
-  tracer?.beginNode(NodeKind.Handler, `handler:${type}.create`);
-  tracer?.attribute("interactionType", type);
+  eventBus?.emit({
+    kind: "handler:begin",
+    timestamp: Date.now(),
+    name: type,
+  });
 
   const interaction = handler.createInteraction(context);
 
-  tracer?.attribute("interactionId", interaction.id);
-  tracer?.endSuccess();
+  eventBus?.emit({
+    kind: "handler:end",
+    timestamp: Date.now(),
+    status: "waiting",
+  });
 
   return interaction;
 }
@@ -39,18 +44,24 @@ export function processInteractionResponse(
   session: Session,
   context: unknown,
   response: UserResponse,
-  tracer?: ExecutionTracer,
+  eventBus?: VMEventBus,
 ): void {
   const handler = handlers.get(type);
   if (!handler) {
     throw new Error(`Unknown interaction type: ${type}`);
   }
 
-  tracer?.beginNode(NodeKind.Handler, `handler:${type}.processResponse`);
-  tracer?.attribute("interactionType", type);
-  tracer?.attribute("interactionId", response.interactionId);
+  eventBus?.emit({
+    kind: "handler:begin",
+    timestamp: Date.now(),
+    name: type,
+  });
 
   handler.processResponse(session, context, response);
 
-  tracer?.endSuccess();
+  eventBus?.emit({
+    kind: "handler:end",
+    timestamp: Date.now(),
+    status: "success",
+  });
 }

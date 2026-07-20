@@ -1,19 +1,18 @@
 export enum NodeStatus {
-  Running = "running",
-  Success = "success",
-  Failed = "failed",
-  Waiting = "waiting",
-  Skipped = "skipped",
+  Running = "Running",
+  Success = "Success",
+  Failed = "Failed",
+  Waiting = "Waiting",
+  Skipped = "Skipped",
 }
 
 export enum NodeKind {
-  Program = "program",
-  Statement = "statement",
-  ResolveDevice = "resolve_device",
-  Policy = "policy",
-  Handler = "handler",
-  Execute = "execute",
-  Step = "step",
+  Program = "Program",
+  Statement = "Statement",
+  Step = "Step",
+  Handler = "Handler",
+  Policy = "Policy",
+  Execute = "Execute",
 }
 
 export interface ExecutionNode {
@@ -31,13 +30,4 @@ export interface ExecutionNode {
 
 export interface ExecutionTrace {
   root: ExecutionNode;
-}
-
-export interface ExecutionTracer {
-  beginNode(kind: NodeKind, name: string): void;
-  endSuccess(): void;
-  endFailed(error?: unknown): void;
-  endWaiting(): void;
-  attribute(key: string, value: unknown): void;
-  getTrace(): ExecutionTrace;
 }
