@@ -4,6 +4,7 @@ import type { ExecutionEvent } from "./events.js";
 export class ExecutionEventNormalizer {
   private stack: string[] = [];
   private idCounter = 0;
+  private policyParentId: string | undefined;
 
   consume(event: VMEvent): ExecutionEvent[] {
     switch (event.kind) {
@@ -29,6 +30,7 @@ export class ExecutionEventNormalizer {
       }
 
       case "statement:begin": {
+        this.policyParentId = undefined;
         const events = this.handleBegin(
           "Statement",
           `statement[${event.index}]`,
@@ -113,6 +115,9 @@ export class ExecutionEventNormalizer {
       case "policy:end": {
         const nodeId = this.stack.pop();
         if (!nodeId) return [];
+        if (event.decision === "continue") {
+          this.policyParentId = nodeId;
+        }
         const attrs: Record<string, unknown> = {};
         attrs["decision"] = event.decision;
         if (event.reason !== undefined) {
@@ -130,10 +135,13 @@ export class ExecutionEventNormalizer {
       }
 
       case "action:begin": {
+        const parentOverride = this.policyParentId;
+        this.policyParentId = undefined;
         const events = this.handleBegin(
           "Execute",
           `execute:${event.actionKind}`,
           event.timestamp,
+          parentOverride,
         );
         const nodeId = this.stack[this.stack.length - 1]!;
         events.push({
@@ -205,9 +213,10 @@ export class ExecutionEventNormalizer {
     kind: string,
     name: string,
     timestamp: number,
+    parentOverride?: string,
   ): ExecutionEvent[] {
     const nodeId = `node_${++this.idCounter}`;
-    const parentNodeId = this.stack[this.stack.length - 1];
+    const parentNodeId = parentOverride ?? this.stack[this.stack.length - 1];
     this.stack.push(nodeId);
     return [
       {

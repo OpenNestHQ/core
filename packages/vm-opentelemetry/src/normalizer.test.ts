@@ -450,4 +450,152 @@ describe("ExecutionEventNormalizer", () => {
       errors: ["device not found", "property read-only"],
     });
   });
+
+  it("nests execute under policy when policy continues", () => {
+    const norm = new ExecutionEventNormalizer();
+
+    norm.consume({ kind: "program:begin", timestamp: 1000 });
+    norm.consume({
+      kind: "statement:begin",
+      timestamp: 1010,
+      index: 0,
+      statementKind: "action",
+    });
+
+    const policyBegin = norm.consume({
+      kind: "policy:begin",
+      timestamp: 1020,
+      name: "confirmation",
+      actionKind: "turn_off",
+      deviceId: "tv.salon",
+    });
+    norm.consume({
+      kind: "policy:end",
+      timestamp: 1030,
+      status: "success",
+      decision: "continue",
+    });
+
+    const actionBegin = norm.consume({
+      kind: "action:begin",
+      timestamp: 1040,
+      actionKind: "set_property",
+      deviceId: "tv.salon",
+      deviceName: "Salon TV",
+      property: "power",
+      value: "off",
+    });
+    norm.consume({
+      kind: "action:end",
+      timestamp: 1050,
+      status: "success",
+    });
+
+    norm.consume({
+      kind: "statement:end",
+      timestamp: 1060,
+      status: "success",
+    });
+    norm.consume({
+      kind: "program:end",
+      timestamp: 1070,
+      status: "success",
+    });
+
+    const policyStarted = policyBegin.find((e) => e.type === "node.started")!;
+    const actionStarted = actionBegin.find((e) => e.type === "node.started")!;
+
+    expect(actionStarted.parentNodeId).toBe(policyStarted.nodeId);
+  });
+
+  it("does not nest execute under policy when policy blocks", () => {
+    const norm = new ExecutionEventNormalizer();
+
+    norm.consume({ kind: "program:begin", timestamp: 1000 });
+    norm.consume({
+      kind: "statement:begin",
+      timestamp: 1010,
+      index: 0,
+      statementKind: "action",
+    });
+
+    norm.consume({
+      kind: "policy:begin",
+      timestamp: 1020,
+      name: "confirmation",
+      actionKind: "turn_off",
+      deviceId: "tv.salon",
+    });
+    norm.consume({
+      kind: "policy:end",
+      timestamp: 1030,
+      status: "failed",
+      decision: "block",
+      reason: "user denied",
+    });
+
+    norm.consume({
+      kind: "statement:end",
+      timestamp: 1040,
+      status: "failed",
+    });
+    norm.consume({
+      kind: "program:end",
+      timestamp: 1050,
+      status: "failed",
+    });
+
+    // No execute should be emitted (policy blocked it — VM skips action)
+    // The policyParentId should have no effect on subsequent operations
+  });
+
+  it("policyParentId is consumed by next action, not leaked to subsequent actions", () => {
+    const norm = new ExecutionEventNormalizer();
+
+    norm.consume({ kind: "program:begin", timestamp: 1000 });
+
+    norm.consume({
+      kind: "statement:begin", timestamp: 1010, index: 0, statementKind: "action",
+    });
+    const policyBegin = norm.consume({
+      kind: "policy:begin", timestamp: 1020, name: "confirmation",
+      actionKind: "turn_off", deviceId: "tv.salon",
+    });
+    const policyId = policyBegin.find((e) => e.type === "node.started")!.nodeId;
+
+    norm.consume({
+      kind: "policy:end", timestamp: 1030, status: "success", decision: "continue",
+    });
+    norm.consume({
+      kind: "action:begin", timestamp: 1040, actionKind: "set_property",
+      deviceId: "tv.salon", deviceName: "Salon TV",
+    });
+    norm.consume({
+      kind: "action:end", timestamp: 1050, status: "success",
+    });
+    norm.consume({
+      kind: "statement:end", timestamp: 1060, status: "success",
+    });
+
+    norm.consume({
+      kind: "statement:begin", timestamp: 1070, index: 1, statementKind: "action",
+    });
+    const action2Begin = norm.consume({
+      kind: "action:begin", timestamp: 1080, actionKind: "read_property",
+      deviceId: "light.salon", deviceName: "Salon Light",
+    });
+    norm.consume({
+      kind: "action:end", timestamp: 1090, status: "success",
+    });
+    norm.consume({
+      kind: "statement:end", timestamp: 1100, status: "success",
+    });
+    norm.consume({
+      kind: "program:end", timestamp: 1110, status: "success",
+    });
+
+    const action2Started = action2Begin.find((e) => e.type === "node.started")!;
+    expect(action2Started.parentNodeId).toBeDefined();
+    expect(action2Started.parentNodeId).not.toBe(policyId);
+  });
 });

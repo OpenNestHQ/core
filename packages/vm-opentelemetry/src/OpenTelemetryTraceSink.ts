@@ -1,10 +1,12 @@
 import { context, trace, SpanStatusCode } from "@opentelemetry/api";
-import type { Attributes, Span, Tracer } from "@opentelemetry/api";
+import type { Attributes, Span, SpanContext, Tracer } from "@opentelemetry/api";
 import type { ExecutionEvent } from "./events.js";
 
 export class OpenTelemetryTraceSink {
   private spans = new Map<string, Span>();
   private tracer: Tracer;
+  private rootSpanContext: SpanContext | undefined;
+  private pendingLink: SpanContext | undefined;
 
   constructor(tracer: Tracer) {
     this.tracer = tracer;
@@ -13,6 +15,8 @@ export class OpenTelemetryTraceSink {
   consume(event: ExecutionEvent): void {
     switch (event.type) {
       case "node.started": {
+        const isRoot = event.parentNodeId === undefined;
+
         const parentSpan = event.parentNodeId
           ? this.spans.get(event.parentNodeId)
           : undefined;
@@ -31,6 +35,14 @@ export class OpenTelemetryTraceSink {
           },
           parentCtx,
         );
+
+        if (isRoot) {
+          this.rootSpanContext = span.spanContext();
+          if (this.pendingLink) {
+            span.addLink({ context: this.pendingLink });
+            this.pendingLink = undefined;
+          }
+        }
 
         this.spans.set(event.nodeId, span);
         break;
@@ -80,5 +92,13 @@ export class OpenTelemetryTraceSink {
         break;
       }
     }
+  }
+
+  getRootSpanContext(): SpanContext | undefined {
+    return this.rootSpanContext;
+  }
+
+  setContinuationLink(context: SpanContext): void {
+    this.pendingLink = context;
   }
 }

@@ -32,21 +32,41 @@ import {
 } from "./format.js";
 import { translateNlToDsl } from "./agent.js";
 import type { AttemptCallback } from "./agent.js";
+import type { TelemetryHandle } from "./telemetry.js";
 
 interface State {
   session: Session;
   devices: Device[];
   nlMode: boolean;
   policies: ExecutionPolicy[];
+  telemetry: TelemetryHandle | undefined;
 }
 
-function createState(devices: Device[], policies: ExecutionPolicy[]): State {
+function createState(devices: Device[], policies: ExecutionPolicy[], telemetry?: TelemetryHandle): State {
   return {
     session: createSession(),
     devices,
     nlMode: false,
     policies,
+    telemetry: telemetry ?? (undefined as never),
   };
+}
+
+function buildVMContext(state: State): {
+  devices: Device[];
+  session: Session;
+  policies: ExecutionPolicy[];
+  eventBus?: import("@opennest/vm").VMEventBus;
+} {
+  const ctx: ReturnType<typeof buildVMContext> = {
+    devices: state.devices,
+    session: state.session,
+    policies: state.policies,
+  };
+  if (state.telemetry !== undefined) {
+    ctx.eventBus = state.telemetry.eventBus;
+  }
+  return ctx;
 }
 
 function presentResult(
@@ -86,15 +106,14 @@ async function executeProgram(
 ): Promise<UserInteraction | null> {
   const prevHistoryLen = state.session.history.length;
 
+  state.telemetry?.beginCycle();
+
   const result = await executeCommand(
     { kind: "run_program", program },
-    {
-      devices: state.devices,
-      session: state.session,
-      policies: state.policies,
-    },
+    buildVMContext(state),
   );
 
+  state.telemetry?.endCycle(result.status === "awaiting_interaction");
   state.session = result.session;
   return presentResult(result, prevHistoryLen);
 }
@@ -107,14 +126,14 @@ async function handleInteraction(
   const trimmed = answer.trim();
 
   if (trimmed === ":cancel" || trimmed === ":q") {
+    state.telemetry?.beginCycle();
+
     const result = await executeCommand(
       { kind: "cancel_execution" },
-      {
-        devices: state.devices,
-        session: state.session,
-        policies: state.policies,
-      },
+      buildVMContext(state),
     );
+
+    state.telemetry?.endCycle(false);
     state.session = result.session;
     process.stdout.write("  Cancelled.\n\n");
     return null;
@@ -153,15 +172,14 @@ async function handleInteraction(
 
   const prevHistoryLen = state.session.history.length;
 
+  state.telemetry?.beginCycle();
+
   const result = await executeCommand(
     { kind: "resume_interaction", response },
-    {
-      devices: state.devices,
-      session: state.session,
-      policies: state.policies,
-    },
+    buildVMContext(state),
   );
 
+  state.telemetry?.endCycle(result.status === "awaiting_interaction");
   state.session = result.session;
   return presentResult(result, prevHistoryLen);
 }
@@ -221,8 +239,8 @@ const COMMANDS = [
   ":nl", ":dsl",
 ];
 
-export async function startRepl(devices: Device[], policies?: ExecutionPolicy[]): Promise<void> {
-  const state = createState(devices, policies ?? []);
+export async function startRepl(devices: Device[], policies?: ExecutionPolicy[], telemetry?: TelemetryHandle): Promise<void> {
+  const state = createState(devices, policies ?? [], telemetry);
 
   function deviceTypes(): string[] {
     return [...new Set(state.devices.map((d) => d.type))];
@@ -410,14 +428,14 @@ export async function startRepl(devices: Device[], policies?: ExecutionPolicy[])
       return;
     }
     if (trimmed === ":r" || trimmed === ":reset") {
+      state.telemetry?.beginCycle();
+
       const result = await executeCommand(
         { kind: "cancel_execution" },
-        {
-          devices: state.devices,
-          session: state.session,
-          policies: state.policies,
-        },
+        buildVMContext(state),
       );
+
+      state.telemetry?.endCycle(false);
       state.session = result.session;
       process.stdout.write("Session reset.\n\n");
       return;

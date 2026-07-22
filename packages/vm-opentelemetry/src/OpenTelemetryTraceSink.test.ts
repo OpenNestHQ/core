@@ -1,8 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SpanStatusCode } from "@opentelemetry/api";
-import type { Tracer, Span } from "@opentelemetry/api";
+import type { Tracer, Span, SpanContext } from "@opentelemetry/api";
 import { OpenTelemetryTraceSink } from "./OpenTelemetryTraceSink.js";
-import type { NodeStartedEvent, NodeCompletedEvent, NodeAttributeEvent, NodeLogEvent } from "./events.js";
+
+function makeSpanContext(): SpanContext {
+  return {
+    traceId: "abc",
+    spanId: "def",
+    traceFlags: 1,
+  };
+}
 
 function makeSpan(): Span {
   return {
@@ -10,6 +17,8 @@ function makeSpan(): Span {
     setStatus: vi.fn(),
     end: vi.fn(),
     addEvent: vi.fn(),
+    addLink: vi.fn(),
+    spanContext: vi.fn(() => makeSpanContext()),
   } as unknown as Span;
 }
 
@@ -319,5 +328,99 @@ describe("OpenTelemetryTraceSink", () => {
     expect(spans[0]!.end).toHaveBeenCalled();
     expect(spans[1]!.end).toHaveBeenCalled();
     expect(spans[2]!.end).toHaveBeenCalled();
+  });
+});
+
+describe("OpenTelemetryTraceSink span links", () => {
+  it("getRootSpanContext returns undefined before any span", () => {
+    const sink = new OpenTelemetryTraceSink(
+      makeTracer([]),
+    );
+    expect(sink.getRootSpanContext()).toBeUndefined();
+  });
+
+  it("getRootSpanContext returns span context after root span starts", () => {
+    const spans: Span[] = [];
+    const sink = new OpenTelemetryTraceSink(makeTracer(spans));
+
+    sink.consume({
+      type: "node.started",
+      nodeId: "1",
+      kind: "Program",
+      name: "program",
+      timestamp: 1000,
+    });
+
+    const ctx = sink.getRootSpanContext();
+    expect(ctx).toBeDefined();
+    expect(spans[0]!.spanContext).toHaveBeenCalled();
+  });
+
+  it("setContinuationLink adds link to next root span", () => {
+    const spans: Span[] = [];
+    const sink = new OpenTelemetryTraceSink(makeTracer(spans));
+    const linkCtx = makeSpanContext();
+
+    sink.setContinuationLink(linkCtx);
+
+    sink.consume({
+      type: "node.started",
+      nodeId: "1",
+      kind: "Program",
+      name: "program",
+      timestamp: 1000,
+    });
+
+    expect(spans[0]!.addLink).toHaveBeenCalledWith({
+      context: linkCtx,
+    });
+  });
+
+  it("continuation link is consumed only once", () => {
+    const spans: Span[] = [];
+    const sink = new OpenTelemetryTraceSink(makeTracer(spans));
+    const linkCtx = makeSpanContext();
+
+    sink.setContinuationLink(linkCtx);
+
+    sink.consume({
+      type: "node.started",
+      nodeId: "1",
+      kind: "Program",
+      name: "program",
+      timestamp: 1000,
+    });
+    sink.consume({
+      type: "node.completed",
+      nodeId: "1",
+      timestamp: 1100,
+      status: "success",
+    });
+
+    sink.consume({
+      type: "node.started",
+      nodeId: "2",
+      kind: "Program",
+      name: "program",
+      timestamp: 2000,
+    });
+
+    expect(spans[0]!.addLink).toHaveBeenCalledTimes(1);
+    expect(spans[1]!.addLink).not.toHaveBeenCalled();
+  });
+
+  it("no link without setContinuationLink", () => {
+    const spans: Span[] = [];
+    const sink = new OpenTelemetryTraceSink(makeTracer(spans));
+
+    sink.consume({
+      type: "node.started",
+      nodeId: "1",
+      kind: "Program",
+      name: "program",
+      timestamp: 1000,
+    });
+
+    expect(spans[0]!.addLink).not.toHaveBeenCalled();
   });
 });
