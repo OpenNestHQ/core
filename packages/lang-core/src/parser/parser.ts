@@ -2,7 +2,7 @@ import type {
   Program,
   Statement,
   Segment,
-  RoomSelector,
+  Selector,
   Value,
   Expr,
   CollectionModifier,
@@ -47,22 +47,45 @@ function parseSegment(raw: string, line: number, col: number): Segment {
     isVariable = true;
   }
 
-  const match = identifier.match(/^([a-zA-Z_]\w*)(?:\[([a-zA-Z_]\w*|\*)\])?$/);
-  if (!match) {
+  const idMatch = identifier.match(/^([a-zA-Z_]\w*)(.*)$/);
+  if (!idMatch) {
     throw new ParseError(`Invalid path segment: "${raw}"`, line, col + raw.indexOf(".") + 1);
   }
 
-  const name = match[1]!;
-  const roomPart = match[2] ?? null;
+  const name = idMatch[1]!;
+  let remaining = idMatch[2]!;
 
-  let roomSelector: RoomSelector | null = null;
-  if (roomPart === "*") {
-    roomSelector = { kind: "wildcard" };
-  } else if (roomPart !== null) {
-    roomSelector = { kind: "room", name: roomPart };
+  const selectors: Selector[] = [];
+  while (remaining) {
+    const bMatch = remaining.match(/^\[([^\]]+)\]/);
+    if (!bMatch) {
+      throw new ParseError(`Invalid path segment: "${raw}"`, line, col);
+    }
+    const content = bMatch[1]!;
+    remaining = remaining.slice(bMatch[0].length);
+
+    if (content === "*") {
+      selectors.push({ kind: "wildcard" });
+    } else if (content.startsWith("owner:")) {
+      const ownerName = content.slice(6);
+      if (!/^[a-zA-Z_]\w*$/.test(ownerName)) {
+        throw new ParseError(`Invalid owner name "${ownerName}" in segment: "${raw}"`, line, col);
+      }
+      selectors.push({ kind: "owner", name: ownerName });
+    } else if (content.startsWith("tag:")) {
+      const tagName = content.slice(4);
+      if (!/^[a-zA-Z_]\w*$/.test(tagName)) {
+        throw new ParseError(`Invalid tag name "${tagName}" in segment: "${raw}"`, line, col);
+      }
+      selectors.push({ kind: "tag", name: tagName });
+    } else if (/^[a-zA-Z_]\w*$/.test(content)) {
+      selectors.push({ kind: "room", name: content });
+    } else {
+      throw new ParseError(`Invalid bracket content "[${content}]" in segment: "${raw}"`, line, col);
+    }
   }
 
-  if (isVariable && roomSelector !== null) {
+  if (isVariable && selectors.length > 0) {
     throw new ParseError(`Variable references cannot have a room selector: "${raw}"`, line, col);
   }
 
@@ -70,7 +93,7 @@ function parseSegment(raw: string, line: number, col: number): Segment {
     throw new ParseError(`Bare "it" is not a device type — use $it for the context reference: "${raw}"`, line, col);
   }
 
-  return { identifier: name, roomSelector, ...(isVariable ? { isVariable: true } : {}) };
+  return { identifier: name, selectors, ...(isVariable ? { isVariable: true } : {}) };
 }
 
 function parsePath(raw: string, line: number): Segment[] {
@@ -100,23 +123,46 @@ function parseValue(raw: string, line: number, col: number): Value {
   throw new ParseError(`Invalid value: "${trimmed}"`, line, col);
 }
 
-function parseDeviceRef(raw: string, line: number, col: number): { deviceType: string; roomSelector: RoomSelector | null } {
-  const match = raw.match(/^([a-zA-Z_]\w*)(?:\[([a-zA-Z_]\w*|\*)\])?$/);
-  if (!match) {
+function parseDeviceRef(raw: string, line: number, col: number): { deviceType: string; selectors: Selector[] } {
+  const idMatch = raw.match(/^([a-zA-Z_]\w*)(.*)$/);
+  if (!idMatch) {
     throw new ParseError(`Invalid device reference: "${raw}"`, line, col);
   }
 
-  const deviceType = match[1]!;
-  const roomPart = match[2] ?? null;
+  const deviceType = idMatch[1]!;
+  let remaining = idMatch[2]!;
 
-  let roomSelector: RoomSelector | null = null;
-  if (roomPart === "*") {
-    roomSelector = { kind: "wildcard" };
-  } else if (roomPart !== null) {
-    roomSelector = { kind: "room", name: roomPart };
+  const selectors: Selector[] = [];
+  while (remaining) {
+    const bMatch = remaining.match(/^\[([^\]]+)\]/);
+    if (!bMatch) {
+      throw new ParseError(`Invalid device reference: "${raw}"`, line, col);
+    }
+    const content = bMatch[1]!;
+    remaining = remaining.slice(bMatch[0].length);
+
+    if (content === "*") {
+      selectors.push({ kind: "wildcard" });
+    } else if (content.startsWith("owner:")) {
+      const ownerName = content.slice(6);
+      if (!/^[a-zA-Z_]\w*$/.test(ownerName)) {
+        throw new ParseError(`Invalid owner name "${ownerName}" in reference: "${raw}"`, line, col);
+      }
+      selectors.push({ kind: "owner", name: ownerName });
+    } else if (content.startsWith("tag:")) {
+      const tagName = content.slice(4);
+      if (!/^[a-zA-Z_]\w*$/.test(tagName)) {
+        throw new ParseError(`Invalid tag name "${tagName}" in reference: "${raw}"`, line, col);
+      }
+      selectors.push({ kind: "tag", name: tagName });
+    } else if (/^[a-zA-Z_]\w*$/.test(content)) {
+      selectors.push({ kind: "room", name: content });
+    } else {
+      throw new ParseError(`Invalid bracket content "[${content}]" in reference: "${raw}"`, line, col);
+    }
   }
 
-  return { deviceType, roomSelector };
+  return { deviceType, selectors };
 }
 
 function parseExpr(raw: string, line: number, col: number): Expr {
@@ -141,16 +187,13 @@ function parseExpr(raw: string, line: number, col: number): Expr {
     return { kind: "string", value: trimmed.slice(1, -1) };
   }
 
-  const deviceMatch = trimmed.match(/^([a-zA-Z_]\w*)(?:\[([a-zA-Z_]\w*|\*)\])?$/);
+  const deviceMatch = trimmed.match(/^([a-zA-Z_]\w*)(.*)$/);
   if (deviceMatch) {
+    const deviceRef = parseDeviceRef(trimmed, line, col);
     return {
       kind: "device_ref",
-      deviceType: deviceMatch[1]!,
-      roomSelector: deviceMatch[2] === "*"
-        ? { kind: "wildcard" }
-        : deviceMatch[2]
-          ? { kind: "room", name: deviceMatch[2] }
-          : null,
+      deviceType: deviceRef.deviceType,
+      selectors: deviceRef.selectors,
     };
   }
 

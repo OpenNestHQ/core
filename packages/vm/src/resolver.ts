@@ -1,4 +1,4 @@
-import type { Segment } from "@opennest/lang-core";
+import type { Segment, Selector } from "@opennest/lang-core";
 import type {
   Device,
   Session,
@@ -32,9 +32,9 @@ export function resolveDevices(
   }
 
   const deviceType = firstSegment.identifier;
-  const roomSelector = firstSegment.roomSelector;
+  const selectors = firstSegment.selectors;
 
-  return resolveByTypeAndRoom(deviceType, roomSelector, devices, intent, session, false);
+  return resolveByTypeAndSelectors(deviceType, selectors, devices, intent, session, false);
 }
 
 function resolveVariableRef(
@@ -66,7 +66,7 @@ function resolveVariableRef(
   const modifier = session.variableModifiers[varName];
   const forceAll = modifier === "@all";
   const forceFirst = modifier === "@first";
-  return resolveByTypeAndRoom(ref.deviceType, ref.roomSelector, devices, intent, session, forceAll, forceFirst);
+  return resolveByTypeAndSelectors(ref.deviceType, ref.selectors, devices, intent, session, forceAll, forceFirst);
 }
 
 function resolveContextRef(
@@ -86,9 +86,9 @@ function resolveContextRef(
   return { devices: [], ambiguous: false };
 }
 
-function resolveByTypeAndRoom(
+function resolveByTypeAndSelectors(
   deviceType: string,
-  roomSelector: { kind: "room"; name: string } | { kind: "wildcard" } | null,
+  selectors: Selector[],
   devices: Device[],
   intent?: ResolutionIntent,
   session?: Session,
@@ -97,9 +97,13 @@ function resolveByTypeAndRoom(
 ): ResolutionResult {
   let matches = devices.filter((d) => d.type === deviceType);
 
-  if (roomSelector) {
-    if (roomSelector.kind === "room") {
-      matches = matches.filter((d) => d.room === roomSelector.name);
+  for (const selector of selectors) {
+    if (selector.kind === "room") {
+      matches = matches.filter((d) => d.room === selector.name);
+    } else if (selector.kind === "owner") {
+      matches = matches.filter((d) => d.owners?.some((owner) => owner.toLowerCase() === selector.name.toLowerCase()));
+    } else if (selector.kind === "tag") {
+      matches = matches.filter((d) => d.tags?.some((tag) => tag.toLowerCase() === selector.name.toLowerCase()));
     }
   }
 
@@ -123,7 +127,8 @@ function resolveByTypeAndRoom(
     return { devices: matches, ambiguous: false, ...(filter ? { filter } : {}) };
   }
 
-  if (roomSelector?.kind === "wildcard") {
+  const hasWildcard = selectors.some((s) => s.kind === "wildcard");
+  if (hasWildcard) {
     return { devices: matches, ambiguous: false, ...(filter ? { filter } : {}) };
   }
 

@@ -10,7 +10,7 @@ export function expandCollection(
   const pseudoSegments: Segment[] = [
     {
       identifier: collection.device.deviceType,
-      roomSelector: collection.device.roomSelector,
+      selectors: collection.device.selectors,
     },
   ];
 

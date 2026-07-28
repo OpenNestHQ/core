@@ -72,6 +72,8 @@ export class DeviceRegistry {
         properties: entry.properties,
         actions: entry.actions,
       },
+      ...(entry.owners ? { owners: entry.owners } : {}),
+      ...(entry.tags ? { tags: entry.tags } : {}),
     };
   }
 }

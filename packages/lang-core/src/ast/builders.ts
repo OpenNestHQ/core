@@ -5,6 +5,7 @@ import type {
   Program,
   Query,
   RoomSelector,
+  Selector,
   Segment,
   Statement,
   Value,
@@ -14,13 +15,21 @@ export function buildRoomSelector(room: string): RoomSelector {
   return room === "*" ? { kind: "wildcard" } : { kind: "room", name: room };
 }
 
+export function buildOwnerSelector(name: string): Selector {
+  return { kind: "owner", name };
+}
+
+export function buildTagSelector(name: string): Selector {
+  return { kind: "tag", name };
+}
+
 function buildPath(deviceType: string, name: string, room?: string): Segment[] {
   return [
     {
       identifier: deviceType,
-      roomSelector: room === undefined ? null : buildRoomSelector(room),
+      selectors: room === undefined ? [] : [buildRoomSelector(room)],
     },
-    { identifier: name, roomSelector: null },
+    { identifier: name, selectors: [] },
   ];
 }
 

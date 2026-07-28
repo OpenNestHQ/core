@@ -2,11 +2,15 @@ export {
   OpenNestPrompt,
   DEFAULT_DEVICES,
   DEFAULT_ROOMS,
+  DEFAULT_OWNERS,
+  DEFAULT_TAGS,
 } from "./prompt/index.js";
 export type {
   PromptOptions,
   DeviceDefinition,
   RoomDefinition,
+  OwnerDefinition,
+  TagDefinition,
   Capability,
   PropertyCapability,
   ActionCapability,
@@ -20,9 +24,12 @@ export type {
   ParseResult,
 } from "./parser/index.js";
 export type {
+  Selector,
   RoomSelector,
   RoomByName,
   RoomWildcard,
+  OwnerByName,
+  TagByName,
   Segment,
   Value,
   NumberValue,
@@ -48,10 +55,13 @@ export type {
   Program,
 } from "./ast/index.js";
 export {
+  getRoomSelector,
   buildAction,
   buildAssignment,
   buildQuery,
   buildIncrement,
   buildProgram,
   buildRoomSelector,
+  buildOwnerSelector,
+  buildTagSelector,
 } from "./ast/index.js";

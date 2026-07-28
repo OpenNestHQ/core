@@ -497,14 +497,14 @@ async function interpretVariableAssignment(
     const deviceRef: DeviceRef = {
       kind: "device_ref",
       deviceType: stmt.value.device.deviceType,
-      roomSelector: stmt.value.device.roomSelector,
+      selectors: stmt.value.device.selectors,
     };
 
     if (stmt.value.modifier === "@oneof") {
       const pseudoSegments = [
         {
           identifier: stmt.value.device.deviceType,
-          roomSelector: stmt.value.device.roomSelector,
+          selectors: stmt.value.device.selectors,
         },
       ];
 

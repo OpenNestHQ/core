@@ -1,5 +1,5 @@
-/** A room selector specifies which room a device is in. */
-export type RoomSelector = RoomByName | RoomWildcard;
+/** Selectors refine which devices a segment matches. */
+export type Selector = RoomByName | RoomWildcard | OwnerByName | TagByName;
 
 export interface RoomByName {
   kind: "room";
@@ -10,11 +10,31 @@ export interface RoomWildcard {
   kind: "wildcard";
 }
 
+export interface OwnerByName {
+  kind: "owner";
+  name: string;
+}
+
+export interface TagByName {
+  kind: "tag";
+  name: string;
+}
+
+/** Backward-compatible alias for room-only selectors. */
+export type RoomSelector = RoomByName | RoomWildcard;
+
 /** A single segment in a dot-separated path. The last segment is the property/method. */
 export interface Segment {
   identifier: string;
-  roomSelector: RoomSelector | null;
+  selectors: Selector[];
   isVariable?: boolean;
+}
+
+export function getRoomSelector(selectors: Selector[]): RoomSelector | null {
+  for (const s of selectors) {
+    if (s.kind === "room" || s.kind === "wildcard") return s;
+  }
+  return null;
 }
 
 /** Values that can appear in property assignments. */
@@ -46,7 +66,7 @@ export type Expr = DeviceRef | CollectionRef | Value;
 export interface DeviceRef {
   kind: "device_ref";
   deviceType: string;
-  roomSelector: RoomSelector | null;
+  selectors: Selector[];
 }
 
 export type CollectionModifier = "@all" | "@first" | "@oneof";
@@ -56,7 +76,7 @@ export interface CollectionRef {
   modifier: CollectionModifier;
   device: {
     deviceType: string;
-    roomSelector: RoomSelector | null;
+    selectors: Selector[];
   };
 }
 

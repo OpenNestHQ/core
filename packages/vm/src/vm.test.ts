@@ -93,10 +93,10 @@ function parse(code: string) {
 
 function seg(identifier: string, room?: string, isVariable?: boolean): Segment {
   const base = room === "*"
-    ? { identifier, roomSelector: { kind: "wildcard" as const } }
+    ? { identifier, selectors: [{ kind: "wildcard" as const }] }
     : room
-      ? { identifier, roomSelector: { kind: "room" as const, name: room } }
-      : { identifier, roomSelector: null };
+      ? { identifier, selectors: [{ kind: "room" as const, name: room }] }
+      : { identifier, selectors: [] as const };
   return isVariable ? { ...base, isVariable: true } : base;
 }
 
@@ -221,7 +221,7 @@ describe("interpret_home_dsl", () => {
       expect(result.session.variables["salon_tv"]).toEqual({
         kind: "device_ref",
         deviceType: "tv",
-        roomSelector: { kind: "room", name: "salon" },
+        selectors: [{ kind: "room", name: "salon" }],
       });
     });
 
@@ -244,7 +244,7 @@ describe("interpret_home_dsl", () => {
       expect(result.session.variables["lights"]).toEqual({
         kind: "device_ref",
         deviceType: "light",
-        roomSelector: { kind: "room", name: "salon" },
+        selectors: [{ kind: "room", name: "salon" }],
       });
     });
   });
@@ -748,7 +748,7 @@ describe("interpret_home_dsl", () => {
       session.variables["salon_tv"] = {
         kind: "device_ref",
         deviceType: "tv",
-        roomSelector: { kind: "room", name: "salon" },
+        selectors: [{ kind: "room", name: "salon" }],
       };
 
       const result = resolveDevices(
@@ -797,7 +797,7 @@ describe("interpret_home_dsl", () => {
           modifier: "@all",
           device: {
             deviceType: "light",
-            roomSelector: { kind: "room", name: "salon" },
+            selectors: [{ kind: "room", name: "salon" }],
           },
         },
         devs,
@@ -815,7 +815,7 @@ describe("interpret_home_dsl", () => {
           modifier: "@first",
           device: {
             deviceType: "light",
-            roomSelector: { kind: "room", name: "salon" },
+            selectors: [{ kind: "room", name: "salon" }],
           },
         },
         devs,
@@ -1564,7 +1564,7 @@ describe("interpret_home_dsl", () => {
       session.variables["foo"] = {
         kind: "device_ref",
         deviceType: "tv",
-        roomSelector: { kind: "room", name: "salon" },
+        selectors: [{ kind: "room", name: "salon" }],
       };
 
       const program = parse("light[salon].power = on");
@@ -1952,7 +1952,7 @@ describe("interpret_home_dsl", () => {
       session.variables["salon_tv"] = {
         kind: "device_ref",
         deviceType: "tv",
-        roomSelector: { kind: "room", name: "salon" },
+        selectors: [{ kind: "room", name: "salon" }],
       };
       const devs = await devices();
       const errors = validateProgram(program, devs, session);
@@ -1966,12 +1966,93 @@ describe("interpret_home_dsl", () => {
       session.variables["cam_v"] = {
         kind: "device_ref",
         deviceType: "camera",
-        roomSelector: null,
+        selectors: [],
       };
       const devs = await devices();
       const errors = validateProgram(program, devs, session);
       expect(errors).toHaveLength(1);
       expect(errors[0]!.message).toContain("camera");
+    });
+  });
+
+  describe("owner selectors", () => {
+    it("should resolve device by owner", async () => {
+      const program = parse("light[owner:Alice].power = on");
+      const devs = await devices([
+        { id: "light_alice", type: "light", room: "salon", name: "Alice's Light", initialState: { power: false } },
+        { id: "light_bob", type: "light", room: "salon", name: "Bob's Light", initialState: { power: false } },
+      ]);
+      devs[0]!.owners = ["Alice"];
+      devs[1]!.owners = ["Bob"];
+      const c = { devices: devs };
+      const result = await executeCommand({ kind: "run_program", program }, c);
+      expect(result.status).toBe("success");
+      expect(result.executed).toHaveLength(1);
+      expect(result.executed[0]!.resolvedDevices).toHaveLength(1);
+      expect(result.executed[0]!.resolvedDevices[0]!.id).toBe("light_alice");
+      expect(await getProperty(devs[0]!, "power")).toBe(true);
+      expect(await getProperty(devs[1]!, "power")).toBe(false);
+    });
+
+    it("should resolve device by room + owner chain", async () => {
+      const program = parse("light[salon][owner:Alice].power = on");
+      const devs = await devices([
+        { id: "light_salon_alice", type: "light", room: "salon", name: "Alice Salon", initialState: { power: false } },
+        { id: "light_salon_bob", type: "light", room: "salon", name: "Bob Salon", initialState: { power: false } },
+        { id: "light_chambre_alice", type: "light", room: "chambre", name: "Alice Chambre", initialState: { power: false } },
+      ]);
+      devs[0]!.owners = ["Alice"];
+      devs[1]!.owners = ["Bob"];
+      devs[2]!.owners = ["Alice"];
+      const c = { devices: devs };
+      const result = await executeCommand({ kind: "run_program", program }, c);
+      expect(result.status).toBe("success");
+      expect(result.executed[0]!.resolvedDevices).toHaveLength(1);
+      expect(result.executed[0]!.resolvedDevices[0]!.id).toBe("light_salon_alice");
+    });
+
+    it("should resolve multi-owner device", async () => {
+      const program = parse("light[owner:Alice].power = on");
+      const devs = await devices([
+        { id: "light_shared", type: "light", room: "salon", name: "Shared Light", initialState: { power: false } },
+      ]);
+      devs[0]!.owners = ["Alice", "Bob"];
+      const c = { devices: devs };
+      const result = await executeCommand({ kind: "run_program", program }, c);
+      expect(result.status).toBe("success");
+      expect(result.executed[0]!.resolvedDevices).toHaveLength(1);
+      expect(result.executed[0]!.resolvedDevices[0]!.id).toBe("light_shared");
+    });
+
+    it("should resolve @all with owner", async () => {
+      const program = parse("$alice = @all(light[owner:Alice])\n$alice.power = on");
+      const devs = await devices([
+        { id: "light_alice_1", type: "light", room: "salon", name: "Alice 1", initialState: { power: false } },
+        { id: "light_alice_2", type: "light", room: "chambre", name: "Alice 2", initialState: { power: false } },
+        { id: "light_bob", type: "light", room: "salon", name: "Bob", initialState: { power: false } },
+      ]);
+      devs[0]!.owners = ["Alice"];
+      devs[1]!.owners = ["Alice"];
+      devs[2]!.owners = ["Bob"];
+      const c = { devices: devs };
+      const result = await executeCommand({ kind: "run_program", program }, c);
+      expect(result.status).toBe("success");
+      expect(result.executed).toHaveLength(2);
+      expect(await getProperty(devs[0]!, "power")).toBe(true);
+      expect(await getProperty(devs[1]!, "power")).toBe(true);
+      expect(await getProperty(devs[2]!, "power")).toBe(false);
+    });
+
+    it("should return empty when owner does not match", async () => {
+      const program = parse("light[owner:Unknown].power = on");
+      const devs = await devices([
+        { id: "light_1", type: "light", room: "salon", name: "Light 1", initialState: {} },
+      ]);
+      devs[0]!.owners = ["Alice"];
+      const c = { devices: devs };
+      const result = await executeCommand({ kind: "run_program", program }, c);
+      expect(result.status).toBe("error");
+      expect(result.errors[0]!.message).toContain("No devices found");
     });
   });
 });

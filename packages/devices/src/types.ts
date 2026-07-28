@@ -11,6 +11,8 @@ export interface DeviceEntry {
   driver: string;
   properties: Record<string, DevicePropertyConfig>;
   actions: string[] | Record<string, unknown>;
+  owners?: string[];
+  tags?: string[];
 }
 
 export interface DriverGlobalConfig {
@@ -31,4 +33,6 @@ export interface Device {
   name: string;
   driver: import("./drivers/interface.js").DeviceDriver;
   driverConfig: Record<string, unknown>;
+  owners?: string[];
+  tags?: string[];
 }

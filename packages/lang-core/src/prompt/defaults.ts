@@ -1,4 +1,4 @@
-import type { DeviceDefinition, RoomDefinition } from "./types.js";
+import type { DeviceDefinition, RoomDefinition, OwnerDefinition, TagDefinition } from "./types.js";
 
 export const DEFAULT_DEVICES = {
   tv: {
@@ -94,3 +94,19 @@ export const DEFAULT_ROOMS = {
   bathroom: {},
   entrance: {},
 } satisfies Record<string, RoomDefinition>;
+
+export const DEFAULT_OWNERS: Record<string, OwnerDefinition> = {
+  alice: { name: "Alice", description: "Alice's personal devices" },
+  bob: { name: "Bob", description: "Bob's personal devices" },
+  kids: { name: "Kids", description: "Devices in the children's rooms" },
+  everybody: { name: "everybody", description: "Shared family devices (default)" },
+} satisfies Record<string, OwnerDefinition>;
+
+export const DEFAULT_TAGS: Record<string, TagDefinition> = {
+  main: { description: "Main/default device in a room" },
+  audio: { description: "Devices with audio capabilities" },
+  video: { description: "Devices with video/display capabilities" },
+  security: { description: "Security-related devices" },
+  outdoor: { description: "Outdoor devices" },
+} satisfies Record<string, TagDefinition>;
+

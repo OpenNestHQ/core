@@ -16,6 +16,8 @@ export interface Device {
   name: string;
   driver: DeviceDriver;
   driverConfig: Record<string, unknown>;
+  owners?: string[];
+  tags?: string[];
 }
 
 export interface StateChange {

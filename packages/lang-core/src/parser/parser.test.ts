@@ -15,15 +15,15 @@ function makeAssignmentValue(v: number | "on" | "off" | string | { kind: string;
 
 function seg(identifier: string, room?: string, isVariable?: boolean): Segment {
   const base = room === "*"
-    ? { identifier, roomSelector: { kind: "wildcard" as const } }
+    ? { identifier, selectors: [{ kind: "wildcard" as const }] }
     : room
-      ? { identifier, roomSelector: { kind: "room" as const, name: room } }
-      : { identifier, roomSelector: null };
+      ? { identifier, selectors: [{ kind: "room" as const, name: room }] }
+      : { identifier, selectors: [] as const };
   return isVariable ? { ...base, isVariable: true } : base;
 }
 
 function vseg(identifier: string): Segment {
-  return { identifier, roomSelector: null, isVariable: true };
+  return { identifier, selectors: [], isVariable: true };
 }
 
 function result(statements: unknown[]) {
@@ -186,7 +186,7 @@ describe("parseHomeDSL", () => {
         value: {
           kind: "device_ref",
           deviceType: "tv",
-          roomSelector: { kind: "room", name: "living_room" },
+          selectors: [{ kind: "room", name: "living_room" }],
         },
       }]));
     });
@@ -200,7 +200,7 @@ describe("parseHomeDSL", () => {
           modifier: "@all",
           device: {
             deviceType: "light",
-            roomSelector: { kind: "room", name: "living_room" },
+            selectors: [{ kind: "room", name: "living_room" }],
           },
         },
       }]));
@@ -215,7 +215,7 @@ describe("parseHomeDSL", () => {
           modifier: "@all",
           device: {
             deviceType: "tv",
-            roomSelector: { kind: "room", name: "living_room" },
+            selectors: [{ kind: "room", name: "living_room" }],
           },
         },
       }]));
@@ -230,7 +230,7 @@ describe("parseHomeDSL", () => {
           modifier: "@first",
           device: {
             deviceType: "light",
-            roomSelector: { kind: "room", name: "bedroom" },
+            selectors: [{ kind: "room", name: "bedroom" }],
           },
         },
       }]));
@@ -245,7 +245,7 @@ describe("parseHomeDSL", () => {
           modifier: "@oneof",
           device: {
             deviceType: "tv",
-            roomSelector: { kind: "room", name: "living_room" },
+            selectors: [{ kind: "room", name: "living_room" }],
           },
         },
       }]));
@@ -260,7 +260,7 @@ describe("parseHomeDSL", () => {
           modifier: "@oneof",
           device: {
             deviceType: "light",
-            roomSelector: null,
+            selectors: [],
           },
         },
       }]));
@@ -275,7 +275,7 @@ describe("parseHomeDSL", () => {
           modifier: "@oneof",
           device: {
             deviceType: "tv",
-            roomSelector: { kind: "wildcard" },
+            selectors: [{ kind: "wildcard" }],
           },
         },
       }]));
@@ -290,7 +290,7 @@ describe("parseHomeDSL", () => {
           modifier: "@all",
           device: {
             deviceType: "light",
-            roomSelector: { kind: "wildcard" },
+            selectors: [{ kind: "wildcard" }],
           },
         },
       }]));
@@ -303,7 +303,7 @@ describe("parseHomeDSL", () => {
         value: {
           kind: "device_ref",
           deviceType: "tv",
-          roomSelector: null,
+          selectors: [],
         },
       }]));
     });
@@ -415,7 +415,7 @@ describe("parseHomeDSL", () => {
         value: {
           kind: "device_ref",
           deviceType: "tv",
-          roomSelector: { kind: "room", name: "living_room" },
+          selectors: [{ kind: "room", name: "living_room" }],
         },
       }]));
     });
@@ -876,6 +876,52 @@ describe("parseHomeDSL", () => {
       expect(r.program.statements[0]!.kind).toBe("assignment");
       expect(r.program.statements[1]!.kind).toBe("action");
       expect(r.program.statements[2]!.kind).toBe("query");
+    });
+  });
+
+  describe("owner selectors", () => {
+    it("should parse light[owner:Alice].power = on", () => {
+      const r = parseHomeDSL("light[owner:Alice].power = on");
+      expect(r.errors).toHaveLength(0);
+      const stmt = r.program.statements[0]!;
+      expect(stmt.kind).toBe("assignment");
+      if (stmt.kind === "assignment") {
+        expect(stmt.path[0]!.selectors).toEqual([{ kind: "owner", name: "Alice" }]);
+      }
+    });
+
+    it("should parse chained room + owner selector", () => {
+      const r = parseHomeDSL("light[salon][owner:Alice].power = on");
+      expect(r.errors).toHaveLength(0);
+      const stmt = r.program.statements[0]!;
+      expect(stmt.kind).toBe("assignment");
+      if (stmt.kind === "assignment") {
+        expect(stmt.path[0]!.selectors).toEqual([
+          { kind: "room", name: "salon" },
+          { kind: "owner", name: "Alice" },
+        ]);
+      }
+    });
+
+    it("should parse collection with owner selector", () => {
+      const r = parseHomeDSL("$alice = @all(light[owner:Alice])");
+      expect(r.errors).toHaveLength(0);
+      const stmt = r.program.statements[0]!;
+      expect(stmt.kind).toBe("variable_assignment");
+      if (stmt.kind === "variable_assignment" && stmt.value.kind === "collection") {
+        expect(stmt.value.device.selectors).toEqual([{ kind: "owner", name: "Alice" }]);
+      }
+    });
+
+    it("should parse owner selector in @if condition", () => {
+      const r = parseHomeDSL(`@if light[owner:Alice].power? == on\nspeaker.power = on\n@endif`);
+      expect(r.errors).toHaveLength(0);
+      expect(r.program.statements[0]!.kind).toBe("if");
+    });
+
+    it("should reject invalid owner name", () => {
+      const r = parseHomeDSL("light[owner:].power = on");
+      expect(r.errors.length).toBeGreaterThanOrEqual(1);
     });
   });
 });

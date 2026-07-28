@@ -1,4 +1,5 @@
-import type { PromptOptions, DeviceDefinition, RoomDefinition, Capability, PropertyCapability, ActionCapability } from "./types.js";
+import type { PromptOptions, DeviceDefinition, RoomDefinition, OwnerDefinition, TagDefinition, Capability, PropertyCapability, ActionCapability } from "./types.js";
+import { DEFAULT_DEVICES, DEFAULT_ROOMS, DEFAULT_OWNERS, DEFAULT_TAGS } from "./defaults.js";
 
 function renderPropertyCapability(cap: PropertyCapability): string {
   const parts: string[] = [cap.name];
@@ -66,6 +67,99 @@ function renderRoomsSection(rooms: Record<string, RoomDefinition>): string {
     "[*] can be combined with @all: @all(light[*]) stores all lights",
     "from every room in a single variable.",
     ""
+  );
+
+  return lines.join("\n");
+}
+
+function renderOwnersSection(owners: Record<string, OwnerDefinition>): string {
+  if (Object.keys(owners).length === 0) return "";
+
+  const lines: string[] = [
+    "# OWNERS",
+    "",
+    "Owners represent people or roles who control specific devices.",
+    "A device can have multiple owners.",
+    "",
+    "Available owners:",
+    "",
+  ];
+
+  for (const [name, owner] of Object.entries(owners)) {
+    const desc = owner.description ? ` — ${owner.description}` : "";
+    lines.push(`- ${owner.name}${desc}`);
+  }
+
+  lines.push(
+    "",
+    "Owner selector syntax:",
+    "",
+    "  device[owner:name] — devices belonging to an owner",
+    "  light[owner:Alice] — Alice's lights",
+    "",
+    "Chaining selectors (room + owner):",
+    "",
+    "  light[salon][owner:Alice] — Alice's lights in the living room",
+    "  door[owner:enfants].lock() — lock the children's doors",
+    "",
+    "Collection usage:",
+    "",
+    "  $alice_lights = @all(light[owner:Alice])",
+    "  $alice_lights.power = off",
+    "",
+    "Heuristics:",
+    "",
+    "- \"my\", \"Alice's\", \"Bob's\", \"the children's\" → use [owner:X]",
+    "- No owner implied → omit (targets all devices regardless of owner)",
+    "- Owner is a device-level concept, independent of room location",
+    "",
+  );
+
+  return lines.join("\n");
+}
+
+function renderTagsSection(tags: Record<string, TagDefinition>): string {
+  if (Object.keys(tags).length === 0) return "";
+
+  const lines: string[] = [
+    "# TAGS",
+    "",
+    "Tags are arbitrary category labels attached to devices.",
+    "Unlike rooms (WHERE) and owners (WHOSE), tags describe",
+    "WHAT a device IS (category, feature, role).",
+    "",
+    "Available tags:",
+    "",
+  ];
+
+  for (const [name, tag] of Object.entries(tags)) {
+    const desc = tag.description ? ` — ${tag.description}` : "";
+    lines.push(`- ${name}${desc}`);
+  }
+
+  lines.push(
+    "",
+    "Tag selector syntax:",
+    "",
+    "  device[tag:name] — devices with a specific tag",
+    "  light[tag:principal] — main lights across all rooms",
+    "  camera[tag:sécurité].snapshot() — snapshot security cameras",
+    "",
+    "Chaining selectors (room + owner + tag):",
+    "",
+    "  light[salon][owner:Alice][tag:principal] — Alice's main salon light",
+    "  speaker[tag:audio].volume = 30 — all audio devices volume",
+    "",
+    "Collection usage:",
+    "",
+    "  $audio = @all(speaker[tag:audio])",
+    "  $audio.volume += 10",
+    "",
+    "When to use tags vs rooms vs owners:",
+    "- Room = WHERE (physical location)",
+    "- Owner = WHOSE (person who owns it)",
+    "- Tag = WHAT (category, feature, role)",
+    "",
   );
 
   return lines.join("\n");
@@ -148,6 +242,16 @@ function renderSyntaxSection(): string {
     "  It persists across statements and across calls within a session.",
     "- Using $it as the first statement of a program has no effect —",
     "  it will not be set yet.",
+    "",
+    "## Owner selector (who owns the device)",
+    "light[owner:Alice].power = on",
+    "",
+    "speaker[salon][owner:Alice].power = on",
+    "",
+    "$alice_devices = @all(light[owner:Alice])",
+    "",
+    "Owner selectors can be chained with room selectors:",
+    "device[room][owner:name] — both conditions must match (AND).",
     "",
     "## Query",
     "tv.power?",
@@ -287,6 +391,8 @@ function renderUsageGuidelinesSection(): string {
     "- Do not use device-specific IDs — keep expressions generic.",
     "- If a property or action might not exist for the target device,",
     "  it is still valid DSL — the runtime handles invalid operations.",
+    "- Owner selectors let you target devices belonging to a specific person.",
+    "  Only use owners listed in the OWNERS section.",
     "",
     "Valid:",
     "tv.power = on",
@@ -406,6 +512,26 @@ function renderExamplesSection(userExamples?: string[]): string {
     "→ vacuum.stop()",
     "camera.snapshot()",
     "",
+    '"Turn off Alice\'s lights"',
+    "→ $alice = @all(light[owner:Alice])",
+    "$alice.power = off",
+    "",
+    '"Dim the children\'s bedroom lights to 20%"',
+    "→ light[bedroom][owner:kids].brightness = 20",
+    "",
+    '"Lock all of Alice\'s doors"',
+    "→ door[owner:Alice].lock()",
+    "",
+    '"Turn off Alice\'s lights"',
+    "→ $alice = @all(light[owner:Alice])",
+    "$alice.power = off",
+    "",
+    '"Dim the children\'s bedroom lights to 20%"',
+    "→ light[bedroom][owner:kids].brightness = 20",
+    "",
+    '"Lock all of Alice\'s doors"',
+    "→ door[owner:Alice].lock()",
+    "",
     '"If the living room light is on, turn on the kitchen light too"',
     "→ $salon = light[living_room]",
     "$cuisine = @oneof(light[kitchen])",
@@ -490,10 +616,14 @@ export type OpenNestRawPrompt<D extends string, R extends string> = string
 export class OpenNestPrompt<D extends string,R extends string> {
   private devices: Record<D, DeviceDefinition>;
   private rooms: Record<R, RoomDefinition>;
+  private owners: Record<string, OwnerDefinition>;
+  private tags: Record<string, TagDefinition>;
 
-  constructor(devices: Record<D, DeviceDefinition>, rooms: Record<R, RoomDefinition>) {
+  constructor(devices: Record<D, DeviceDefinition>, rooms: Record<R, RoomDefinition>,owners: Record<string, OwnerDefinition> = {}, tags: Record<string, TagDefinition> = {}) {
     this.devices = devices;
     this.rooms = rooms;
+    this.owners = owners;
+    this.tags = tags;
   }
 
   prompt(options?: PromptOptions): OpenNestRawPrompt<D, R> {
@@ -515,6 +645,8 @@ export class OpenNestPrompt<D extends string,R extends string> {
       "",
       renderSupportedDevicesSection(this.devices),
       renderRoomsSection(this.rooms),
+      renderOwnersSection(this.owners),
+      renderTagsSection(this.tags),
       renderCapabilitiesSection(this.devices),
       renderSyntaxSection(),
       renderMultipleInstructionsSection(),
@@ -551,4 +683,5 @@ export class OpenNestPrompt<D extends string,R extends string> {
   }
 }
 
-export type { PromptOptions, DeviceDefinition, RoomDefinition, Capability, PropertyCapability, ActionCapability };
+export { DEFAULT_DEVICES, DEFAULT_ROOMS, DEFAULT_OWNERS, DEFAULT_TAGS };
+export type { PromptOptions, DeviceDefinition, RoomDefinition, OwnerDefinition, TagDefinition, Capability, PropertyCapability, ActionCapability };

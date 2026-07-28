@@ -9,9 +9,11 @@ import type {
   IfStatement,
   SimpleCondition,
   ConditionExpr,
+  Selector,
   RoomSelector,
   Segment,
 } from "@opennest/lang-core";
+import { getRoomSelector } from "@opennest/lang-core";
 import type { Device, Session, VMError } from "./types.js";
 import type { ResolutionIntent } from "./types.js";
 import { createSession } from "./state.js";
@@ -20,7 +22,7 @@ import type { CollectionModifier } from "@opennest/lang-core";
 
 interface ShadowVar {
   deviceType: string;
-  roomSelector: RoomSelector | null;
+  selectors: Selector[];
   modifier?: CollectionModifier;
 }
 
@@ -35,7 +37,7 @@ function makeTempSession(
   const variables: Record<string, {
     kind: "device_ref";
     deviceType: string;
-    roomSelector: RoomSelector | null;
+    selectors: Selector[];
   }> = {};
   const variableModifiers: Record<string, CollectionModifier> = {};
 
@@ -43,7 +45,7 @@ function makeTempSession(
     variables[name] = {
       kind: "device_ref",
       deviceType: def.deviceType,
-      roomSelector: def.roomSelector,
+      selectors: def.selectors,
     };
     if (def.modifier) {
       variableModifiers[name] = def.modifier;
@@ -70,32 +72,32 @@ function extractDeviceInfo(
   firstSeg: Segment,
   shadowVars: Map<string, ShadowVar>,
   itRef: Device | null,
-): { deviceType: string; roomSelector: RoomSelector | null } | null {
+): { deviceType: string; selectors: Selector[] } | null {
   if (firstSeg.isVariable) {
     if (firstSeg.identifier === "it") {
       if (!itRef) return null;
       return {
         deviceType: itRef.type,
-        roomSelector: { kind: "room", name: itRef.room },
+        selectors: [{ kind: "room", name: itRef.room }],
       };
     }
     const varDef = shadowVars.get(firstSeg.identifier);
     if (!varDef) return null;
     return {
       deviceType: varDef.deviceType,
-      roomSelector: varDef.roomSelector,
+      selectors: varDef.selectors,
     };
   }
   return {
     deviceType: firstSeg.identifier,
-    roomSelector: firstSeg.roomSelector,
+    selectors: firstSeg.selectors,
   };
 }
 
 function checkDeviceAndRoom(
   stmt: Statement,
   deviceType: string,
-  roomSelector: RoomSelector | null,
+  selectors: Selector[],
   devices: Device[],
 ): VMError | null {
   const allOfType = devices.filter((d) => d.type === deviceType);
@@ -104,6 +106,7 @@ function checkDeviceAndRoom(
     return error(stmt, `No device of type '${deviceType}' found`);
   }
 
+  const roomSelector = getRoomSelector(selectors);
   if (roomSelector?.kind === "room") {
     const inRoom = allOfType.some((d) => d.room === roomSelector.name);
     if (!inRoom) {
@@ -134,11 +137,12 @@ function checkCapability(
 
 function updateItRef(
   deviceType: string,
-  roomSelector: RoomSelector | null,
+  selectors: Selector[],
   devices: Device[],
   itRef: Device | null,
 ): Device | null {
   let candidates = devices.filter((d) => d.type === deviceType);
+  const roomSelector = getRoomSelector(selectors);
   if (roomSelector?.kind === "room") {
     candidates = candidates.filter((d) => d.room === roomSelector.name);
   }
@@ -189,7 +193,7 @@ function validateDevicePath(
     };
   }
 
-  const existenceErr = checkDeviceAndRoom(stmt, info.deviceType, info.roomSelector, devices);
+  const existenceErr = checkDeviceAndRoom(stmt, info.deviceType, info.selectors, devices);
   if (existenceErr) {
     return { errors: [existenceErr], newItRef: itRef };
   }
@@ -202,7 +206,7 @@ function validateDevicePath(
     }
   }
 
-  const newItRef = updateItRef(info.deviceType, info.roomSelector, devices, itRef);
+  const newItRef = updateItRef(info.deviceType, info.selectors, devices, itRef);
   return { errors: [], newItRef };
 }
 
@@ -219,7 +223,7 @@ function validateVariableAssignment(
     }
     shadowVars.set(stmt.name, {
       deviceType: ref.deviceType,
-      roomSelector: ref.roomSelector,
+      selectors: ref.selectors,
     });
     return [];
   }
@@ -232,26 +236,26 @@ function validateVariableAssignment(
       return [error(stmt, `No device of type '${col.device.deviceType}' found`)];
     }
 
-    if (col.device.roomSelector?.kind === "room") {
-      const room = col.device.roomSelector;
-      const inRoom = devicesOfType.some((d) => d.room === room.name);
+    const roomSelector = getRoomSelector(col.device.selectors);
+    if (roomSelector?.kind === "room") {
+      const inRoom = devicesOfType.some((d) => d.room === roomSelector.name);
       if (!inRoom) {
         return [error(
           stmt,
-          `No device '${col.device.deviceType}' found in room '${room.name}'`,
+          `No device '${col.device.deviceType}' found in room '${roomSelector.name}'`,
         )];
       }
     }
 
     shadowVars.set(stmt.name, {
       deviceType: col.device.deviceType,
-      roomSelector: col.device.roomSelector,
+      selectors: col.device.selectors,
       modifier: col.modifier,
     });
     return [];
   }
 
-  shadowVars.set(stmt.name, { deviceType: "unknown", roomSelector: null });
+  shadowVars.set(stmt.name, { deviceType: "unknown", selectors: [] });
   return [];
 }
 
@@ -280,7 +284,7 @@ function validateSimpleCondition(
     return { errors: [error(parentStmt, "$it is not set — no previous device referenced in @if condition")], newItRef: itRef };
   }
 
-  const existenceErr = checkDeviceAndRoom(parentStmt, info.deviceType, info.roomSelector, devices);
+  const existenceErr = checkDeviceAndRoom(parentStmt, info.deviceType, info.selectors, devices);
   if (existenceErr) {
     return { errors: [existenceErr], newItRef: itRef };
   }
@@ -293,7 +297,7 @@ function validateSimpleCondition(
 
   if (!isOneof) {
     const matches = devices.filter((d) => d.type === info.deviceType);
-    const roomSelector = info.roomSelector;
+    const roomSelector = getRoomSelector(info.selectors);
     if (roomSelector?.kind === "room") {
       const inRoom = matches.filter((d) => d.room === roomSelector.name);
       if (inRoom.length > 1) {
@@ -310,7 +314,7 @@ function validateSimpleCondition(
     }
   }
 
-  const newItRef = updateItRef(info.deviceType, info.roomSelector, devices, itRef);
+  const newItRef = updateItRef(info.deviceType, info.selectors, devices, itRef);
   return { errors: [], newItRef };
 }
 
@@ -399,7 +403,7 @@ export function validateProgram(
       const modifier = existingSession.variableModifiers[name];
       const entry: ShadowVar = {
         deviceType: ref.deviceType,
-        roomSelector: ref.roomSelector,
+        selectors: ref.selectors,
       };
       if (modifier) {
         entry.modifier = modifier;

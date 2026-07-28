@@ -31,6 +31,15 @@ export interface RoomDefinition {
   description?: string;
 }
 
+export interface OwnerDefinition {
+  name: string;
+  description?: string;
+}
+
+export interface TagDefinition {
+  description?: string;
+}
+
 export interface PromptOptions {
   preamble?: string;
   examples?: string[];

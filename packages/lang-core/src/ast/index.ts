@@ -1,7 +1,10 @@
 export type {
+  Selector,
   RoomSelector,
   RoomByName,
   RoomWildcard,
+  OwnerByName,
+  TagByName,
   Segment,
   Value,
   NumberValue,
@@ -27,10 +30,15 @@ export type {
   Program,
 } from "./types.js";
 export {
+  getRoomSelector,
+} from "./types.js";
+export {
   buildAction,
   buildAssignment,
   buildQuery,
   buildIncrement,
   buildProgram,
   buildRoomSelector,
+  buildOwnerSelector,
+  buildTagSelector,
 } from "./builders.js";
