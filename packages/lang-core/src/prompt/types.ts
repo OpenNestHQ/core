@@ -23,13 +23,11 @@ export interface ActionCapability {
 export type Capability = PropertyCapability | ActionCapability;
 
 export interface DeviceDefinition {
-  type: string;
   description?: string;
   capabilities: Capability[];
 }
 
 export interface RoomDefinition {
-  name: string;
   description?: string;
 }
 

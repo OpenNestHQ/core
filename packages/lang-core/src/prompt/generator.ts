@@ -1,5 +1,4 @@
 import type { PromptOptions, DeviceDefinition, RoomDefinition, Capability, PropertyCapability, ActionCapability } from "./types.js";
-import { DEFAULT_DEVICES, DEFAULT_ROOMS } from "./defaults.js";
 
 function renderPropertyCapability(cap: PropertyCapability): string {
   const parts: string[] = [cap.name];
@@ -28,19 +27,19 @@ function renderCapability(cap: Capability): string {
   return renderActionCapability(cap);
 }
 
-function renderSupportedDevicesSection(devices: DeviceDefinition[]): string {
+function renderSupportedDevicesSection(devices: Record<string, DeviceDefinition>): string {
   const lines: string[] = ["# SUPPORTED DEVICES", "", "Supported device types:", ""];
 
-  for (const device of devices) {
+  for (const [type, device] of Object.entries(devices)) {
     const desc = device.description ? ` — ${device.description}` : "";
-    lines.push(`- ${device.type}${desc}`);
+    lines.push(`- ${type}${desc}`);
   }
 
   lines.push("", "Do not invent new device types.", "");
   return lines.join("\n");
 }
 
-function renderRoomsSection(rooms: RoomDefinition[]): string {
+function renderRoomsSection(rooms: Record<string, RoomDefinition>): string {
   const lines: string[] = [
     "# ROOMS",
     "",
@@ -48,8 +47,8 @@ function renderRoomsSection(rooms: RoomDefinition[]): string {
     "",
   ];
 
-  for (const room of rooms) {
-    lines.push(`- ${room.name}`);
+  for (const name of Object.keys(rooms)) {
+    lines.push(`- ${name}`);
   }
 
   lines.push("", "Room selector syntax:", "");
@@ -72,11 +71,11 @@ function renderRoomsSection(rooms: RoomDefinition[]): string {
   return lines.join("\n");
 }
 
-function renderCapabilitiesSection(devices: DeviceDefinition[]): string {
+function renderCapabilitiesSection(devices: Record<string, DeviceDefinition>): string {
   const lines: string[] = ["# CAPABILITIES", "", "Each device supports a subset of capabilities:", ""];
 
-  for (const device of devices) {
-    lines.push(`## ${device.type.toUpperCase()}`);
+  for (const [type, device] of Object.entries(devices)) {
+    lines.push(`## ${type.toUpperCase()}`);
 
     const properties = device.capabilities.filter((c) => c.kind === "property");
     const actions = device.capabilities.filter((c) => c.kind === "action");
@@ -96,7 +95,7 @@ function renderCapabilitiesSection(devices: DeviceDefinition[]): string {
       }
     }
 
-    if (device.type === "nightstand") {
+    if (type === "nightstand") {
       lines.push("");
       lines.push("Note: `light.power` is a single property name (not a nested path).");
     }
@@ -112,14 +111,14 @@ function renderSyntaxSection(): string {
     "# SYNTAX",
     "",
     "## State assignment",
-    "tv[salon].power = on",
+    "tv[living_room].power = on",
     "",
-    "light[chambre].brightness = 50",
+    "light[bedroom].brightness = 50",
     "",
     "## Variable assignment",
-    "$tv = tv[salon]",
+    "$tv = tv[living_room]",
     "",
-    "$lights = @all(light[salon])",
+    "$lights = @all(light[living_room])",
     "$firstTv = @first(tv) (selects the first matching device)",
     "$tv = @oneof(tv) (resolves immediately, triggers ambiguity if multiple)",
     "",
@@ -140,11 +139,11 @@ function renderSyntaxSection(): string {
     "",
     "Variable constraints:",
     "- Room selectors on variables are invalid:",
-    "  $tv[salon].power = on → INVALID",
+    "  $tv[living_room].power = on → INVALID",
     "- $it is read-only (auto-managed at runtime):",
-    "  $it = tv[salon] → INVALID",
+    "  $it = tv[living_room] → INVALID",
     "- Variables remember their collection modifier.",
-    "  $lights = @all(light[salon]) keeps @all semantics.",
+    "  $lights = @all(light[living_room]) keeps @all semantics.",
     "- $it is auto-set after every successful device resolution.",
     "  It persists across statements and across calls within a session.",
     "- Using $it as the first statement of a program has no effect —",
@@ -202,12 +201,12 @@ function renderConditionsSection(): string {
     "",
     "## @if / @else / @endif",
     "",
-    "$light_salon = light[salon]",
-    "$light_cuisine = @oneof(light[cuisine])",
+    "$light_salon = light[living_room]",
+    "$light_cuisine = @oneof(light[kitchen])",
     "",
     '@if $light_salon.power? == "on"',
     "    $light_cuisine.power = on",
-    "    speaker[cuisine].play()",
+    "    speaker[kitchen].play()",
     "@else",
     "    $light_cuisine.power = off",
     "@endif",
@@ -220,9 +219,9 @@ function renderConditionsSection(): string {
     "",
     "Always pre-resolve condition variables with `@oneof`:",
     "",
-    "$tv = @oneof(tv[salon])",
+    "$tv = @oneof(tv[living_room])",
     '@if $tv.power? == "on"',
-    "    speaker[salon].power = on",
+    "    speaker[living_room].power = on",
     "@endif",
     "",
     "Without @oneof, an ambiguous variable in a condition triggers an error.",
@@ -304,8 +303,8 @@ function renderInvalidPatternsSection(): string {
     "",
     "The following patterns are not valid HomeDSL:",
     "",
-    "$tv[salon].power = on     — room selector on variable",
-    "$it = tv[salon]             — reassigning read-only $it",
+    "$tv[living_room].power = on     — room selector on variable",
+    "$it = tv[living_room]             — reassigning read-only $it",
     "$it.power = on              — $it used before being set",
     "tv.brightness = 50          — TV has no brightness property",
     "                              (still valid syntax, runtime handles)",
@@ -369,7 +368,7 @@ function renderExamplesSection(userExamples?: string[]): string {
     "# EXAMPLES",
     "",
     '"Turn on the living room TV"',
-    "→ tv[salon].power = on",
+    "→ tv[living_room].power = on",
     "",
     '"Turn on the TV"',
     "→ tv.power = on",
@@ -391,58 +390,58 @@ function renderExamplesSection(userExamples?: string[]): string {
     "$tv.power = on",
     "",
     '"Turn off all office lights"',
-    "→ $officeLights = @all(light[bureau])",
+    "→ $officeLights = @all(light[office])",
     "$officeLights.power = off",
     "",
     '"What\'s the living room temperature?"',
-    "→ thermostat[salon].temperature?",
+    "→ thermostat[living_room].temperature?",
     "",
     '"Lock the front door"',
-    "→ door[entrée].lock()",
+    "→ door[entrance].lock()",
     "",
     '"Dim the bedroom light to 20%"',
-    "→ light[chambre].brightness = 20",
+    "→ light[bedroom].brightness = 20",
     "",
     '"Stop the vacuum and turn on the camera"',
     "→ vacuum.stop()",
     "camera.snapshot()",
     "",
-    '"If the salon light is on, turn on the kitchen light too"',
-    "→ $salon = light[salon]",
-    "$cuisine = @oneof(light[cuisine])",
+    '"If the living room light is on, turn on the kitchen light too"',
+    "→ $salon = light[living_room]",
+    "$cuisine = @oneof(light[kitchen])",
     '@if $salon.power? == "on"',
     "$cuisine.power = on",
     "@endif",
     "",
     '"If the temperature is above 25, turn on the fan, otherwise turn it off"',
-    "→ $therm = thermostat[salon]",
-    "$fan = @oneof(fan[salon])",
+    "→ $therm = thermostat[living_room]",
+    "$fan = @oneof(fan[living_room])",
     "@if $therm.temperature? == 25",
     "    $fan.power = on",
     "@else",
     "    $fan.power = off",
     "@endif",
     "",
-    '"If the salon light AND the TV are both on, turn on the speaker"',
-    "→ $salon = light[salon]",
-    "$salon_tv = @oneof(tv[salon])",
+    '"If the living room light AND the TV are both on, turn on the speaker"',
+    "→ $salon = light[living_room]",
+    "$salon_tv = @oneof(tv[living_room])",
     "@if $salon.power? == on & $salon_tv.power? == on",
-    "speaker[salon].power = on",
+    "speaker[living_room].power = on",
     "@endif",
     "",
-    '"If the salon light OR the kitchen light is on, close the blinds"',
-    "→ $salon = light[salon]",
-    "$cuisine = @oneof(light[cuisine])",
+    '"If the living room light OR the kitchen light is on, close the blinds"',
+    "→ $salon = light[living_room]",
+    "$cuisine = @oneof(light[kitchen])",
     "@if $salon.power? == on | $cuisine.power? == on",
-    "blind[salon].position = 0",
+    "blind[living_room].position = 0",
     "@endif",
     "",
     '"If the TV is off AND (it is hot OR the fan is on), turn on the AC"',
-    "→ $tv = @oneof(tv[salon])",
-    "$therm = thermostat[salon]",
-    "$fan = @oneof(fan[salon])",
+    "→ $tv = @oneof(tv[living_room])",
+    "$therm = thermostat[living_room]",
+    "$fan = @oneof(fan[living_room])",
     "@if $tv.power? != on & ($therm.temperature? == 25 | $fan.power? == on)",
-    "thermostat[salon].temperature = 20",
+    "thermostat[living_room].temperature = 20",
     "@endif",
     "",
   ];
@@ -486,16 +485,18 @@ function renderCustomInstructionSection(instruction: string): string {
   return `\n---\n\n# CUSTOM INSTRUCTIONS\n\n${instruction}\n`;
 }
 
-export class OpenNestPrompt {
-  private devices: DeviceDefinition[];
-  private rooms: RoomDefinition[];
+export type OpenNestRawPrompt<D extends string, R extends string> = string
 
-  constructor(devices?: DeviceDefinition[], rooms?: RoomDefinition[]) {
-    this.devices = devices ?? DEFAULT_DEVICES;
-    this.rooms = rooms ?? DEFAULT_ROOMS;
+export class OpenNestPrompt<D extends string,R extends string> {
+  private devices: Record<D, DeviceDefinition>;
+  private rooms: Record<R, RoomDefinition>;
+
+  constructor(devices: Record<D, DeviceDefinition>, rooms: Record<R, RoomDefinition>) {
+    this.devices = devices;
+    this.rooms = rooms;
   }
 
-  prompt(options?: PromptOptions): string {
+  prompt(options?: PromptOptions): OpenNestRawPrompt<D, R> {
     const preamble = options?.preamble;
     const userExamples = options?.examples;
     const additionalRules = options?.additionalRules;
@@ -550,5 +551,4 @@ export class OpenNestPrompt {
   }
 }
 
-export { DEFAULT_DEVICES, DEFAULT_ROOMS };
 export type { PromptOptions, DeviceDefinition, RoomDefinition, Capability, PropertyCapability, ActionCapability };

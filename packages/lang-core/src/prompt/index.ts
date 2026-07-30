@@ -1,4 +1,5 @@
-export { OpenNestPrompt, DEFAULT_DEVICES, DEFAULT_ROOMS } from "./generator.js";
+export { OpenNestPrompt } from "./generator.js";
+export { DEFAULT_DEVICES, DEFAULT_ROOMS } from "./defaults.js";
 export type {
   PromptOptions,
   DeviceDefinition,

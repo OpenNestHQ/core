@@ -1,4 +1,4 @@
-import { OpenNestPrompt } from "@opennest/lang-core";
+import { OpenNestPrompt, DEFAULT_DEVICES, DEFAULT_ROOMS } from "@opennest/lang-core";
 import { parseHomeDSL } from "@opennest/lang-core";
 import type { Program } from "@opennest/lang-core";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -6,8 +6,8 @@ import { generateText } from "ai";
 
 const MAX_RETRIES = 5;
 
-function createSystemPrompt(): string {
-  return new OpenNestPrompt().prompt({
+function createSystemPrompt() {
+  return new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt({
     preamble: `# YOUR ROLE
 You are a HomeDSL translator. Convert natural language smart home commands into valid HomeDSL code only.`,
     customInstruction:  `CRITICAL RULES:

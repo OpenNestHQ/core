@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { OpenNestPrompt, DEFAULT_DEVICES, DEFAULT_ROOMS } from "./generator.js";
+import { OpenNestPrompt } from "./generator.js";
+import { DEFAULT_DEVICES, DEFAULT_ROOMS } from "./defaults.js";
 import type { DeviceDefinition, RoomDefinition, PropertyCapability, ActionCapability } from "./types.js";
 
-function makeDevice(type: string, capabilities: Array<PropertyCapability | ActionCapability>): DeviceDefinition {
-  return { type, capabilities };
+function makeDevice(capabilities: Array<PropertyCapability | ActionCapability>): DeviceDefinition {
+  return { capabilities };
 }
 
 function makeProp(name: string, type: PropertyCapability["type"], range?: [number, number], values?: string[]): PropertyCapability {
@@ -19,8 +20,8 @@ function makeAction(name: string): ActionCapability {
 
 describe("DEFAULT_DEVICES", () => {
   it("should contain all 11 default device types", () => {
-    expect(DEFAULT_DEVICES).toHaveLength(11);
-    const types = DEFAULT_DEVICES.map((d) => d.type);
+    const types = Object.keys(DEFAULT_DEVICES);
+    expect(types).toHaveLength(11);
     expect(types).toEqual([
       "tv", "light", "speaker", "thermostat", "fan",
       "blind", "camera", "vacuum", "nightstand", "door", "switch",
@@ -28,15 +29,15 @@ describe("DEFAULT_DEVICES", () => {
   });
 
   it("should have capabilities for every device", () => {
-    for (const device of DEFAULT_DEVICES) {
+    for (const device of Object.values(DEFAULT_DEVICES)) {
       expect(device.capabilities.length).toBeGreaterThan(0);
     }
   });
 
   it("should have tv with power, volume, source, channel, play, pause", () => {
-    const tv = DEFAULT_DEVICES.find((d) => d.type === "tv");
+    const tv = DEFAULT_DEVICES["tv"];
     expect(tv).toBeDefined();
-    const names = tv!.capabilities.map((c) => c.name);
+    const names = tv.capabilities.map((c) => c.name);
     expect(names).toContain("power");
     expect(names).toContain("volume");
     expect(names).toContain("source");
@@ -48,10 +49,10 @@ describe("DEFAULT_DEVICES", () => {
 
 describe("DEFAULT_ROOMS", () => {
   it("should contain 6 default rooms", () => {
-    expect(DEFAULT_ROOMS).toHaveLength(6);
-    const names = DEFAULT_ROOMS.map((r) => r.name);
+    const names = Object.keys(DEFAULT_ROOMS);
+    expect(names).toHaveLength(6);
     expect(names).toEqual([
-      "salon", "chambre", "cuisine", "bureau", "salle_de_bain", "entrée",
+      "living_room", "bedroom", "kitchen", "office", "bathroom", "entrance",
     ]);
   });
 });
@@ -59,7 +60,7 @@ describe("DEFAULT_ROOMS", () => {
 describe("OpenNestPrompt", () => {
 
   describe("with default config", () => {
-    const prompt = new OpenNestPrompt().prompt();
+    const prompt = new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt();
 
     it("should start with the header", () => {
       expect(prompt).toContain("# HomeDSL Language Reference");
@@ -73,16 +74,16 @@ describe("OpenNestPrompt", () => {
 
     it("should list all supported devices", () => {
       expect(prompt).toContain("# SUPPORTED DEVICES");
-      for (const device of DEFAULT_DEVICES) {
-        expect(prompt).toContain(`- ${device.type}`);
+      for (const type of Object.keys(DEFAULT_DEVICES)) {
+        expect(prompt).toContain(`- ${type}`);
       }
       expect(prompt).toContain("Do not invent new device types.");
     });
 
     it("should contain the rooms section", () => {
       expect(prompt).toContain("# ROOMS");
-      for (const room of DEFAULT_ROOMS) {
-        expect(prompt).toContain(`- ${room.name}`);
+      for (const name of Object.keys(DEFAULT_ROOMS)) {
+        expect(prompt).toContain(`- ${name}`);
       }
       expect(prompt).toContain("Rooms are logical labels");
     });
@@ -141,7 +142,7 @@ describe("OpenNestPrompt", () => {
     });
 
     it("should contain example DSL patterns", () => {
-      expect(prompt).toContain("tv[salon].power = on");
+      expect(prompt).toContain("tv[living_room].power = on");
       expect(prompt).toContain("tv.power = on");
       expect(prompt).toContain("$it.power = off");
       expect(prompt).toContain("thermostat.temperature = 21");
@@ -161,12 +162,12 @@ describe("OpenNestPrompt", () => {
   // --- Custom devices ---
 
   describe("with custom devices", () => {
-    const customDevices: DeviceDefinition[] = [
-      makeDevice("tv", [makeProp("power", "power"), makeAction("play")]),
-      makeDevice("light", [makeProp("power", "power"), makeProp("brightness", "number", [0, 100])]),
-    ];
+    const customDevices: Record<string, DeviceDefinition> = {
+      tv: makeDevice([makeProp("power", "power"), makeAction("play")]),
+      light: makeDevice([makeProp("power", "power"), makeProp("brightness", "number", [0, 100])]),
+    };
 
-    const prompt = new OpenNestPrompt(customDevices).prompt();
+    const prompt = new OpenNestPrompt(customDevices, DEFAULT_ROOMS).prompt();
 
     it("should only list the provided devices", () => {
       expect(prompt).toContain("- tv");
@@ -194,18 +195,18 @@ describe("OpenNestPrompt", () => {
   // --- Custom rooms ---
 
   describe("with custom rooms", () => {
-    const customRooms: RoomDefinition[] = [
-      { name: "garage" },
-      { name: "jardin" },
-    ];
+    const customRooms: Record<string, RoomDefinition> = {
+      garage: {},
+      jardin: {},
+    };
 
-    const prompt = new OpenNestPrompt(undefined, customRooms).prompt();
+    const prompt = new OpenNestPrompt(DEFAULT_DEVICES, customRooms).prompt();
 
     it("should only list the provided rooms", () => {
       expect(prompt).toContain("- garage");
       expect(prompt).toContain("- jardin");
-      expect(prompt).not.toContain("- salon");
-      expect(prompt).not.toContain("- chambre");
+      expect(prompt).not.toContain("- living_room");
+      expect(prompt).not.toContain("- bedroom");
     });
 
     it("should still contain room selector examples", () => {
@@ -218,7 +219,7 @@ describe("OpenNestPrompt", () => {
 
   describe("with custom instruction", () => {
     const instruction = "Always prefer salon when no room is specified.";
-    const prompt = new OpenNestPrompt().prompt({ customInstruction: instruction });
+    const prompt = new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt({ customInstruction: instruction });
 
     it("should append the custom instruction section", () => {
       expect(prompt).toContain("# CUSTOM INSTRUCTIONS");
@@ -236,7 +237,7 @@ describe("OpenNestPrompt", () => {
 
   describe("with preamble", () => {
     const preamble = "You are a HomeDSL compiler agent. Always output raw DSL.";
-    const prompt = new OpenNestPrompt().prompt({ preamble });
+    const prompt = new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt({ preamble });
 
     it("should place preamble before the header", () => {
       const preambleIndex = prompt.indexOf("You are a HomeDSL compiler agent.");
@@ -250,7 +251,7 @@ describe("OpenNestPrompt", () => {
 
   describe("with additional rules", () => {
     const rules = ["Always prefer salon when no room is specified.", "Never output explanations."];
-    const prompt = new OpenNestPrompt().prompt({ additionalRules: rules });
+    const prompt = new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt({ additionalRules: rules });
 
     it("should contain the additional rules section", () => {
       expect(prompt).toContain("# ADDITIONAL RULES");
@@ -270,22 +271,22 @@ describe("OpenNestPrompt", () => {
   describe("with user examples", () => {
     const userExamples = [
       `"Play a movie"\n→ tv.play()`,
-      `"Goodnight"\n→ light[*].power = off\ndoor[entrée].lock()`,
+      `"Goodnight"\n→ light[*].power = off\ndoor[entrance].lock()`,
     ];
-    const prompt = new OpenNestPrompt().prompt({ examples: userExamples });
+    const prompt = new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt({ examples: userExamples });
 
     it("should append user examples after default examples", () => {
       expect(prompt).toContain(`"Play a movie"`);
       expect(prompt).toContain("→ tv.play()");
       expect(prompt).toContain(`"Goodnight"`);
-      expect(prompt).toContain("door[entrée].lock()");
+      expect(prompt).toContain("door[entrance].lock()");
     });
   });
 
   // --- Combined options ---
 
   describe("with combined options", () => {
-    const prompt = new OpenNestPrompt().prompt({
+    const prompt = new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt({
       preamble: "Preamble text",
       examples: [`"Example"\n→ dsl.rule()`],
       additionalRules: ["Rule 1"],
@@ -316,7 +317,7 @@ describe("OpenNestPrompt", () => {
   // --- Empty configs ---
 
   describe("with empty devices array", () => {
-    const prompt = new OpenNestPrompt([]).prompt();
+    const prompt = new OpenNestPrompt({}, DEFAULT_ROOMS).prompt();
 
     it("should still produce a valid prompt", () => {
       expect(prompt).toContain("# HomeDSL Language Reference");
@@ -335,7 +336,7 @@ describe("OpenNestPrompt", () => {
   });
 
   describe("with empty rooms array", () => {
-    const prompt = new OpenNestPrompt(undefined, []).prompt();
+    const prompt = new OpenNestPrompt(DEFAULT_DEVICES, {}).prompt();
 
     it("should still produce a valid rooms section", () => {
       expect(prompt).toContain("# ROOMS");
@@ -346,7 +347,7 @@ describe("OpenNestPrompt", () => {
         prompt.indexOf("# ROOMS"),
         prompt.indexOf("# CAPABILITIES"),
       );
-      expect(roomsText).not.toContain("- salon");
+      expect(roomsText).not.toContain("- living_room");
     });
   });
 
@@ -354,55 +355,56 @@ describe("OpenNestPrompt", () => {
 
   describe("edge cases", () => {
     it("should not throw with undefined constructor args", () => {
-      expect(() => new OpenNestPrompt().prompt()).not.toThrow();
+      expect(() => new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt()).not.toThrow();
     });
 
     it("should not throw with null-like empty prompt options", () => {
-      expect(() => new OpenNestPrompt().prompt({})).not.toThrow();
+      expect(() => new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt({})).not.toThrow();
     });
 
     it("should produce the same result for no args and empty object", () => {
-      const a = new OpenNestPrompt().prompt();
-      const b = new OpenNestPrompt().prompt({});
+      const a = new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt();
+      const b = new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt({});
       expect(a).toBe(b);
     });
 
     it("should render device with no capabilities", () => {
-      const prompt = new OpenNestPrompt([
-        makeDevice("sensor", []),
-      ], []).prompt();
+      const prompt = new OpenNestPrompt({
+        sensor: makeDevice([]),
+      }, {}).prompt();
       expect(prompt).toContain("## SENSOR");
       expect(prompt).toContain("- sensor");
     });
 
     it("should render property without range and without values", () => {
-      const prompt = new OpenNestPrompt([
-        makeDevice("test", [makeProp("mode", "string")]),
-      ], []).prompt();
+      const prompt = new OpenNestPrompt({
+        test: makeDevice([makeProp("mode", "string")]),
+      }, {}).prompt();
       expect(prompt).toContain("- mode (optional)");
     });
 
     it("should NOT render range for number when no range provided", () => {
-      const prompt = new OpenNestPrompt([
-        makeDevice("test", [makeProp("count", "number")]),
-      ], []).prompt();
+      const prompt = new OpenNestPrompt({
+        test: makeDevice([makeProp("count", "number")]),
+      }, {}).prompt();
       expect(prompt).toContain("- count");
       expect(prompt).not.toContain("count (");
     });
 
     it("should NOT render (optional) for power type", () => {
-      const prompt = new OpenNestPrompt([
-        makeDevice("test", [makeProp("power", "power")]),
-      ], []).prompt();
+      const prompt = new OpenNestPrompt({
+        test: makeDevice([makeProp("power", "power")]),
+      }, {}).prompt();
       expect(prompt).toContain("- power (on/off)");
       expect(prompt).not.toContain("power (optional)");
     });
 
     it("should list all rooms when more than 4 are provided", () => {
-      const rooms: RoomDefinition[] = Array.from({ length: 10 }, (_, i) => ({
-        name: `room_${i}`,
-      }));
-      const prompt = new OpenNestPrompt(undefined, rooms).prompt();
+      const rooms: Record<string, RoomDefinition> = {};
+      for (let i = 0; i < 10; i++) {
+        rooms[`room_${i}`] = {};
+      }
+      const prompt = new OpenNestPrompt(DEFAULT_DEVICES, rooms).prompt();
       expect(prompt).toContain("- room_0");
       expect(prompt).toContain("- room_4");
       expect(prompt).toContain("- room_9");
@@ -412,46 +414,46 @@ describe("OpenNestPrompt", () => {
 
 describe("capability rendering", () => {
   it("should render power properties as name (on/off)", () => {
-    const prompt = new OpenNestPrompt([
-      makeDevice("plug", [makeProp("power", "power")]),
-    ], []).prompt();
+    const prompt = new OpenNestPrompt({
+      plug: makeDevice([makeProp("power", "power")]),
+    }, {}).prompt();
     expect(prompt).toContain("- power (on/off)");
   });
 
   it("should render number properties with range as name (min–max)", () => {
-    const prompt = new OpenNestPrompt([
-      makeDevice("dimmer", [makeProp("level", "number", [1, 10])]),
-    ], []).prompt();
+    const prompt = new OpenNestPrompt({
+      dimmer: makeDevice([makeProp("level", "number", [1, 10])]),
+    }, {}).prompt();
     expect(prompt).toContain("- level (1–10)");
   });
 
   it("should render enum properties with values", () => {
-    const prompt = new OpenNestPrompt([
-      makeDevice("media", [
+    const prompt = new OpenNestPrompt({
+      media: makeDevice([
         makeProp("input", "enum", undefined, ["hdmi", "usb", "bluetooth"]),
       ]),
-    ], []).prompt();
+    }, {}).prompt();
     expect(prompt).toContain("- input (hdmi, usb, bluetooth)");
   });
 
   it("should render string properties as name (optional)", () => {
-    const prompt = new OpenNestPrompt([
-      makeDevice("display", [makeProp("label", "string")]),
-    ], []).prompt();
+    const prompt = new OpenNestPrompt({
+      display: makeDevice([makeProp("label", "string")]),
+    }, {}).prompt();
     expect(prompt).toContain("- label (optional)");
   });
 
   it("should render actions as name()", () => {
-    const prompt = new OpenNestPrompt([
-      makeDevice("robot", [makeAction("start"), makeAction("stop")]),
-    ], []).prompt();
+    const prompt = new OpenNestPrompt({
+      robot: makeDevice([makeAction("start"), makeAction("stop")]),
+    }, {}).prompt();
     expect(prompt).toContain("- start()");
     expect(prompt).toContain("- stop()");
   });
 });
 
 describe("section ordering", () => {
-  const prompt = new OpenNestPrompt().prompt();
+  const prompt = new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt();
 
   function sectionOrder(sections: string[]) {
     const indices = sections.map((s) => prompt.indexOf(s));
