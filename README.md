@@ -34,7 +34,7 @@ pnpm run start          # Launch the playground REPL
 
 ## HomeDSL at a Glance
 
-**11 device types**: `tv`, `light`, `speaker`, `thermostat`, `fan`, `blind`, `camera`, `vacuum`, `nightstand`, `door`, `switch`
+**11 device types**: `tv`, `light`, `speaker`, `thermostat`, `fan`, `blind`, `camera`, `vacuum`, `nightstand`, `door`, `switch` — each can have optional `owners` and `tags`
 
 ### Syntax
 
@@ -65,6 +65,21 @@ $lights.power = on
 # Wildcard rooms
 light[*].power = off
 
+# Owner selectors (who owns the device)
+light[owner:Alice].power = on
+speaker[owner:Bob].volume = 30
+
+# Tag selectors (category/role of the device)
+light[tag:principal].power = off
+camera[tag:sécurité].snapshot()
+
+# Chained selectors (room + owner + tag — all must match, AND logic)
+light[salon][owner:Alice][tag:principal].brightness = 80
+
+# Variables with selectors
+$alice_lights = @all(light[owner:Alice])
+$alice_lights.power = off
+
 # Conditions
 $tv = @oneof(tv)
 @if $tv.power? == on
@@ -87,6 +102,19 @@ $tv = @oneof(tv)
 | `@first(type[room])` | Selects the first match |
 | `@oneof(type[room])` | Resolves immediately to one device, ambiguity if multiple |
 | `[*]` | Wildcard room — matches all rooms |
+
+### Selectors (room, owner, tag)
+
+Devices can be targeted by three selector types, chainable as `[room][owner:name][tag:name]` (AND logic):
+
+| Selector | Syntax | What it filters |
+|---|---|---|
+| Room | `type[room_name]` | Physical location (where) |
+| Owner | `type[owner:name]` | Person who owns the device (whose) |
+| Tag | `type[tag:name]` | Category / feature / role (what) |
+| Wildcard | `[*]` | All rooms |
+
+Owners and tags are optional fields on each device. If a device has no `owners`/`tags`, it will match only queries without `owner:`/`tag:` selectors.
 
 ---
 
