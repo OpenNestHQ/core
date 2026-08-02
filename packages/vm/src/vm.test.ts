@@ -2052,7 +2052,83 @@ describe("interpret_home_dsl", () => {
       const c = { devices: devs };
       const result = await executeCommand({ kind: "run_program", program }, c);
       expect(result.status).toBe("error");
-      expect(result.errors[0]!.message).toContain("No devices found");
+      expect(result.errors[0]!.message).toBe("No 'light' devices with owner 'Unknown'");
+    });
+
+    it("should return empty when room+owner does not match", async () => {
+      const program = parse("light[salon][owner:Bob].power = on");
+      const devs = await devices([
+        { id: "light_1", type: "light", room: "salon", name: "Light 1", initialState: {} },
+      ]);
+      devs[0]!.owners = ["Alice"];
+      const c = { devices: devs };
+      const result = await executeCommand({ kind: "run_program", program }, c);
+      expect(result.status).toBe("error");
+      expect(result.errors[0]!.message).toBe("No 'light' devices in room 'salon' with owner 'Bob'");
+    });
+  });
+
+  describe("tag selectors", () => {
+    it("should resolve device by tag", async () => {
+      const program = parse("light[tag:main].power = on");
+      const devs = await devices([
+        { id: "light_main", type: "light", room: "salon", name: "Main Light", initialState: { power: false } },
+        { id: "light_aux", type: "light", room: "salon", name: "Aux Light", initialState: { power: false } },
+      ]);
+      devs[0]!.tags = ["main"];
+      devs[1]!.tags = ["secondary"];
+      const c = { devices: devs };
+      const result = await executeCommand({ kind: "run_program", program }, c);
+      expect(result.status).toBe("success");
+      expect(result.executed[0]!.resolvedDevices[0]!.id).toBe("light_main");
+      expect(await getProperty(devs[0]!, "power")).toBe(true);
+      expect(await getProperty(devs[1]!, "power")).toBe(false);
+    });
+
+    it("should resolve device by room + tag chain", async () => {
+      const program = parse("light[salon][tag:audio].power = on");
+      const devs = await devices([
+        { id: "light_salon_audio", type: "light", room: "salon", name: "Salon Audio", initialState: { power: false } },
+        { id: "light_salon_other", type: "light", room: "salon", name: "Salon Other", initialState: { power: false } },
+        { id: "light_chambre_audio", type: "light", room: "chambre", name: "Chambre Audio", initialState: { power: false } },
+      ]);
+      devs[0]!.tags = ["audio"];
+      devs[1]!.tags = ["video"];
+      devs[2]!.tags = ["audio"];
+      const c = { devices: devs };
+      const result = await executeCommand({ kind: "run_program", program }, c);
+      expect(result.status).toBe("success");
+      expect(result.executed[0]!.resolvedDevices[0]!.id).toBe("light_salon_audio");
+    });
+
+    it("should resolve @all with tag", async () => {
+      const program = parse("$audio = @all(light[tag:audio])\n$audio.power = on");
+      const devs = await devices([
+        { id: "light_audio_1", type: "light", room: "salon", name: "Audio 1", initialState: { power: false } },
+        { id: "light_audio_2", type: "light", room: "chambre", name: "Audio 2", initialState: { power: false } },
+        { id: "light_video", type: "light", room: "salon", name: "Video", initialState: { power: false } },
+      ]);
+      devs[0]!.tags = ["audio"];
+      devs[1]!.tags = ["audio"];
+      devs[2]!.tags = ["video"];
+      const c = { devices: devs };
+      const result = await executeCommand({ kind: "run_program", program }, c);
+      expect(result.status).toBe("success");
+      expect(await getProperty(devs[0]!, "power")).toBe(true);
+      expect(await getProperty(devs[1]!, "power")).toBe(true);
+      expect(await getProperty(devs[2]!, "power")).toBe(false);
+    });
+
+    it("should return detailed error when tag does not match", async () => {
+      const program = parse("light[tag:outdoor].power = on");
+      const devs = await devices([
+        { id: "light_1", type: "light", room: "salon", name: "Light 1", initialState: {} },
+      ]);
+      devs[0]!.tags = ["indoor"];
+      const c = { devices: devs };
+      const result = await executeCommand({ kind: "run_program", program }, c);
+      expect(result.status).toBe("error");
+      expect(result.errors[0]!.message).toBe("No 'light' devices with tag 'outdoor'");
     });
   });
 });

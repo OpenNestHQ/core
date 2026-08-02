@@ -90,4 +90,5 @@ export interface ResolutionResult {
   devices: Device[];
   ambiguous: boolean;
   filter?: ResolutionFilter;
+  noMatchDescription?: string;
 }

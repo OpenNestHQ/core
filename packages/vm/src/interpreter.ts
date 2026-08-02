@@ -263,7 +263,7 @@ async function interpretAssignment(
   if (resolutionResult.devices.length === 0) {
     return {
       kind: "error",
-      errors: [{ statement: stmt, message: `No devices found for path` }],
+      errors: [{ statement: stmt, message: resolutionResult.noMatchDescription ?? `No devices found for path` }],
     };
   }
 
@@ -296,7 +296,7 @@ async function interpretQuery(
   if (resolutionResult.devices.length === 0) {
     return {
       kind: "error",
-      errors: [{ statement: stmt, message: `No devices found for query` }],
+      errors: [{ statement: stmt, message: resolutionResult.noMatchDescription ?? `No devices found for query` }],
     };
   }
 
@@ -328,7 +328,7 @@ async function interpretIncrement(
   if (resolutionResult.devices.length === 0) {
     return {
       kind: "error",
-      errors: [{ statement: stmt, message: `No devices found for increment` }],
+      errors: [{ statement: stmt, message: resolutionResult.noMatchDescription ?? `No devices found for increment` }],
     };
   }
 
@@ -361,7 +361,7 @@ async function interpretAction(
   if (resolutionResult.devices.length === 0) {
     return {
       kind: "error",
-      errors: [{ statement: stmt, message: `No devices found for action` }],
+      errors: [{ statement: stmt, message: resolutionResult.noMatchDescription ?? `No devices found for action` }],
     };
   }
 
@@ -524,7 +524,7 @@ async function interpretVariableAssignment(
           kind: "error",
           errors: [{
             statement: stmt,
-            message: `No devices found for @oneof(${stmt.value.device.deviceType})`,
+            message: resolutionResult.noMatchDescription ?? `No devices found for @oneof(${stmt.value.device.deviceType})`,
           }],
         };
       }
@@ -696,7 +696,7 @@ async function evaluateSimpleCondition(
   if (resolutionResult.devices.length === 0) {
     return {
       kind: "error",
-      message: "No devices found for @if condition",
+      message: resolutionResult.noMatchDescription ?? "No devices found for @if condition",
     };
   }
 

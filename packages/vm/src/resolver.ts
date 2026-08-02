@@ -86,6 +86,18 @@ function resolveContextRef(
   return { devices: [], ambiguous: false };
 }
 
+function formatNoMatchDescription(deviceType: string, selectors: Selector[]): string {
+  const parts: string[] = [];
+  for (const s of selectors) {
+    if (s.kind === "room") parts.push(`in room '${s.name}'`);
+    else if (s.kind === "owner") parts.push(`with owner '${s.name}'`);
+    else if (s.kind === "tag") parts.push(`with tag '${s.name}'`);
+  }
+  return parts.length > 0
+    ? `No '${deviceType}' devices ${parts.join(" ")}`
+    : `No device of type '${deviceType}' found`;
+}
+
 function resolveByTypeAndSelectors(
   deviceType: string,
   selectors: Selector[],
@@ -120,7 +132,12 @@ function resolveByTypeAndSelectors(
   }
 
   if (matches.length === 0) {
-    return { devices: [], ambiguous: false, ...(filter ? { filter } : {}) };
+    return {
+      devices: [],
+      ambiguous: false,
+      noMatchDescription: formatNoMatchDescription(deviceType, selectors),
+      ...(filter ? { filter } : {}),
+    };
   }
 
   if (matches.length === 1) {
