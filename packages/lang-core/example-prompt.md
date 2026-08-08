@@ -53,6 +53,8 @@ turns off lights in every room without requiring resolution.
 [*] can be combined with @all: @all(light[*]) stores all lights
 from every room in a single variable.
 
+
+
 # CAPABILITIES
 
 Each device supports a subset of capabilities:
@@ -166,6 +168,16 @@ Variable constraints:
   It persists across statements and across calls within a session.
 - Using $it as the first statement of a program has no effect —
   it will not be set yet.
+
+## Owner selector (who owns the device)
+light[owner:Alice].power = on
+
+speaker[living_room][owner:Alice].power = on
+
+$alice_devices = @all(light[owner:Alice])
+
+Owner selectors can be chained with room selectors:
+device[room][owner:name] — both conditions must match (AND).
 
 ## Query
 tv.power?
@@ -292,6 +304,8 @@ Compound conditions:
 - Do not use device-specific IDs — keep expressions generic.
 - If a property or action might not exist for the target device,
   it is still valid DSL — the runtime handles invalid operations.
+- Owner selectors let you target devices belonging to a specific person.
+  Only use owners listed in the OWNERS section.
 
 Valid:
 tv.power = on
@@ -395,6 +409,26 @@ $officeLights.power = off
 "Stop the vacuum and turn on the camera"
 → vacuum.stop()
 camera.snapshot()
+
+"Turn off Alice's lights"
+→ $alice = @all(light[owner:Alice])
+$alice.power = off
+
+"Dim the children's bedroom lights to 20%"
+→ light[bedroom][owner:kids].brightness = 20
+
+"Lock all of Alice's doors"
+→ door[owner:Alice].lock()
+
+"Turn off Alice's lights"
+→ $alice = @all(light[owner:Alice])
+$alice.power = off
+
+"Dim the children's bedroom lights to 20%"
+→ light[bedroom][owner:kids].brightness = 20
+
+"Lock all of Alice's doors"
+→ door[owner:Alice].lock()
 
 "If the living room light is on, turn on the kitchen light too"
 → $salon = light[living_room]

@@ -70,11 +70,11 @@ light[owner:Alice].power = on
 speaker[owner:Bob].volume = 30
 
 # Tag selectors (category/role of the device)
-light[tag:principal].power = off
-camera[tag:sécurité].snapshot()
+light[tag:main].power = off
+camera[tag:security].snapshot()
 
 # Chained selectors (room + owner + tag — all must match, AND logic)
-light[salon][owner:Alice][tag:principal].brightness = 80
+light[salon][owner:Alice][tag:main].brightness = 80
 
 # Variables with selectors
 $alice_lights = @all(light[owner:Alice])
