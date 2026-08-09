@@ -11,7 +11,7 @@ export enum NodeKind {
   Statement = "Statement",
   Step = "Step",
   Handler = "Handler",
-  Policy = "Policy",
+  Middleware = "Middleware",
   Execute = "Execute",
 }
 

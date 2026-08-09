@@ -6,7 +6,7 @@ import type {
 } from "@opennest/lang-core";
 import type { DeviceDriver } from "@opennest/devices";
 import type { UserInteraction, PendingInteraction } from "./interactions/types.js";
-import type { ExecutionPolicy } from "./policies/types.js";
+import type { Middleware } from "./middleware/types.js";
 import type { VMEventBus } from "./trace/event-bus.js";
 
 export interface Device {
@@ -64,7 +64,7 @@ export interface VMResult {
 export interface VMContext {
   devices: Device[];
   session?: Session;
-  policies?: ExecutionPolicy[];
+  middleware?: Middleware[];
   eventBus?: VMEventBus;
 }
 

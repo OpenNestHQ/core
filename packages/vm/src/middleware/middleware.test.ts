@@ -2,15 +2,15 @@ import { describe, it, expect, vi } from "vitest";
 import { parseHomeDSL } from "@opennest/lang-core";
 import { MockDriver } from "@opennest/devices";
 import { executeCommand, createSession } from "../index.js";
-import { runPolicyPipeline } from "../policies/pipeline.js";
-import { NoopExecutionPolicy } from "../policies/noop.js";
+import { runMiddlewarePipeline } from "../middleware/pipeline.js";
+import { noopMiddleware } from "../middleware/noop.js";
+import { BlockSignal, SkipSignal, PauseSignal, ExpandSignal } from "../middleware/types.js";
 import type {
   Device,
   VMContext,
   Session,
-  ExecutionPolicy,
-  PolicyContext,
-  PolicyDecision,
+  Middleware,
+  MiddlewareContext,
   PlannedAction,
   PipelineOutcome,
 } from "../index.js";
@@ -36,8 +36,8 @@ async function devices(): Promise<Device[]> {
   ];
 }
 
-async function ctx(session?: Session, policies?: ExecutionPolicy[]): Promise<VMContext> {
-  return { devices: await devices(), session, policies };
+async function ctx(session?: Session, middleware?: Middleware[]): Promise<VMContext> {
+  return { devices: await devices(), session, middleware };
 }
 
 function parse(code: string) {
@@ -60,12 +60,12 @@ function makeAction(overrides?: Partial<PlannedAction>): PlannedAction {
 
 // ──── Pipeline unit tests ────
 
-describe("runPolicyPipeline", () => {
+describe("runMiddlewarePipeline", () => {
   const session = createSession();
 
-  it("empty policies → execute with original action", async () => {
+  it("empty middleware → execute with original action", async () => {
     const action = makeAction();
-    const result = await runPolicyPipeline(action, [], { session, devices: [] });
+    const result = await runMiddlewarePipeline(action, [], { session, devices: [] });
 
     expect(result.kind).toBe("execute");
     if (result.kind === "execute") {
@@ -74,9 +74,9 @@ describe("runPolicyPipeline", () => {
     }
   });
 
-  it("noop policy only → execute with original action", async () => {
+  it("noop middleware only → execute with original action", async () => {
     const action = makeAction();
-    const result = await runPolicyPipeline(action, [new NoopExecutionPolicy()], {
+    const result = await runMiddlewarePipeline(action, [noopMiddleware], {
       session,
       devices: [],
     });
@@ -87,42 +87,39 @@ describe("runPolicyPipeline", () => {
     }
   });
 
-  it("multiple noop policies → all pass, execute", async () => {
+  it("multiple noop middleware → all pass, execute", async () => {
     const action = makeAction();
-    const result = await runPolicyPipeline(
+    const result = await runMiddlewarePipeline(
       action,
-      [new NoopExecutionPolicy(), new NoopExecutionPolicy(), new NoopExecutionPolicy()],
+      [noopMiddleware, noopMiddleware, noopMiddleware],
       { session, devices: [] },
     );
 
     expect(result.kind).toBe("execute");
   });
 
-  it("block → blocked outcome with policy name", async () => {
-    const blockPolicy: ExecutionPolicy = {
-      name: "blocker",
-      evaluate: () => ({ kind: "block", reason: "not allowed" }),
+  it("block → blocked outcome", async () => {
+    const blockMw: Middleware = async () => {
+      throw new BlockSignal("not allowed");
     };
 
-    const result = await runPolicyPipeline(makeAction(), [blockPolicy], {
+    const result = await runMiddlewarePipeline(makeAction(), [blockMw], {
       session,
       devices: [],
     });
 
     expect(result.kind).toBe("blocked");
     if (result.kind === "blocked") {
-      expect(result.policyName).toBe("blocker");
       expect(result.reason).toBe("not allowed");
     }
   });
 
   it("skip → skipped outcome", async () => {
-    const skipPolicy: ExecutionPolicy = {
-      name: "skipper",
-      evaluate: () => ({ kind: "skip", reason: "irrelevant" }),
+    const skipMw: Middleware = async () => {
+      throw new SkipSignal("irrelevant");
     };
 
-    const result = await runPolicyPipeline(makeAction(), [skipPolicy], {
+    const result = await runMiddlewarePipeline(makeAction(), [skipMw], {
       session,
       devices: [],
     });
@@ -131,20 +128,18 @@ describe("runPolicyPipeline", () => {
   });
 
   it("pause → paused outcome with interaction", async () => {
-    const pausePolicy: ExecutionPolicy = {
-      name: "pauser",
-      evaluate: () => ({
-        kind: "pause",
-        interaction: {
+    const pauseMw: Middleware = async () => {
+      throw new PauseSignal(
+        {
           id: "test-1",
           type: "confirmation",
           message: "Are you sure?",
         },
-        context: { actionId: "42" },
-      }),
+        { actionId: "42" },
+      );
     };
 
-    const result = await runPolicyPipeline(makeAction(), [pausePolicy], {
+    const result = await runMiddlewarePipeline(makeAction(), [pauseMw], {
       session,
       devices: [],
     });
@@ -156,40 +151,33 @@ describe("runPolicyPipeline", () => {
     }
   });
 
-  it("policy order matters — first blocking wins", async () => {
-    const blockFirst: ExecutionPolicy = {
-      name: "blocker",
-      evaluate: () => ({ kind: "block", reason: "no" }),
+  it("middleware order matters — first blocking wins", async () => {
+    const blockFirst: Middleware = async () => {
+      throw new BlockSignal("no");
     };
-    const neverCalled: ExecutionPolicy = {
-      name: "never",
-      evaluate: vi.fn(() => ({ kind: "continue" })),
-    };
+    const neverCalled = vi.fn(async (ctx: MiddlewareContext, next) => next());
 
-    const result = await runPolicyPipeline(makeAction(), [blockFirst, neverCalled], {
+    const result = await runMiddlewarePipeline(makeAction(), [blockFirst, neverCalled], {
       session,
       devices: [],
     });
 
     expect(result.kind).toBe("blocked");
-    expect(neverCalled.evaluate).not.toHaveBeenCalled();
+    expect(neverCalled).not.toHaveBeenCalled();
   });
 
-  it("replace → next policies see replaced action", async () => {
+  it("replace → next middleware see replaced action (via ctx mutation)", async () => {
     const replacedAction = makeAction({ kind: "read_property" as const, property: "brightness" });
-    const replacer: ExecutionPolicy = {
-      name: "replacer",
-      evaluate: () => ({ kind: "replace", action: replacedAction }),
+    const replacer: Middleware = async (ctx, next) => {
+      ctx.action = replacedAction;
+      return next();
     };
-    const verifier: ExecutionPolicy = {
-      name: "verifier",
-      evaluate: (ctx: PolicyContext) => {
-        expect(ctx.action.kind).toBe("read_property");
-        return { kind: "continue" };
-      },
+    const verifier: Middleware = async (ctx, next) => {
+      expect(ctx.action.kind).toBe("read_property");
+      return next();
     };
 
-    const result = await runPolicyPipeline(makeAction(), [replacer, verifier], {
+    const result = await runMiddlewarePipeline(makeAction(), [replacer, verifier], {
       session,
       devices: [],
     });
@@ -203,12 +191,11 @@ describe("runPolicyPipeline", () => {
   it("expand → flattened execute", async () => {
     const exp1 = makeAction({ kind: "set_property" as const, property: "p1" });
     const exp2 = makeAction({ kind: "set_property" as const, property: "p2" });
-    const expander: ExecutionPolicy = {
-      name: "expander",
-      evaluate: () => ({ kind: "expand", actions: [exp1, exp2] }),
+    const expander: Middleware = async () => {
+      throw new ExpandSignal([exp1, exp2]);
     };
 
-    const result = await runPolicyPipeline(makeAction(), [expander], {
+    const result = await runMiddlewarePipeline(makeAction(), [expander], {
       session,
       devices: [],
     });
@@ -225,33 +212,64 @@ describe("runPolicyPipeline", () => {
     }
   });
 
-  it("async policy evaluation", async () => {
-    const asyncPolicy: ExecutionPolicy = {
-      name: "async",
-      evaluate: async () => {
-        await Promise.resolve();
-        return { kind: "continue" };
-      },
+  it("async middleware evaluation — await next()", async () => {
+    const asyncMw: Middleware = async (ctx, next) => {
+      await Promise.resolve();
+      return next();
     };
 
-    const result = await runPolicyPipeline(makeAction(), [asyncPolicy], {
+    const result = await runMiddlewarePipeline(makeAction(), [asyncMw], {
       session,
       devices: [],
     });
 
     expect(result.kind).toBe("execute");
   });
+
+  it("middleware can short-circuit without calling next()", async () => {
+    const shortCircuitMw: Middleware = async () => {
+      return { kind: "execute", actions: [] };
+    };
+    const neverCalled = vi.fn(async (ctx: MiddlewareContext, next) => next());
+
+    const result = await runMiddlewarePipeline(makeAction(), [shortCircuitMw, neverCalled], {
+      session,
+      devices: [],
+    });
+
+    expect(result.kind).toBe("execute");
+    expect(neverCalled).not.toHaveBeenCalled();
+  });
+
+  it("middleware can wrap next() for pre/post hooks", async () => {
+    const before: string[] = [];
+
+    const wrapMw: Middleware = async (ctx, next) => {
+      before.push("pre");
+      const result = await next();
+      before.push("post");
+      return result;
+    };
+
+    const result = await runMiddlewarePipeline(makeAction(), [wrapMw], {
+      session,
+      devices: [],
+    });
+
+    expect(result.kind).toBe("execute");
+    expect(before).toEqual(["pre", "post"]);
+  });
 });
 
 // ──── VM integration tests ────
 
-describe("VM with execution policies", () => {
-  it("VM with NoopExecutionPolicy behaves identically to VM without policies", async () => {
+describe("VM with middleware", () => {
+  it("VM with noopMiddleware behaves identically to VM without middleware", async () => {
     const program = parse("tv[salon].power = on");
-    const noPolicies = await ctx();
-    const withNoop = await ctx(undefined, [new NoopExecutionPolicy()]);
+    const noMiddleware = await ctx();
+    const withNoop = await ctx(undefined, [noopMiddleware]);
 
-    const resultNoPolicies = await executeCommand({ kind: "run_program", program: program }, noPolicies);
+    const resultNoMiddleware = await executeCommand({ kind: "run_program", program: program }, noMiddleware);
     const resultWithNoop = await executeCommand({ kind: "run_program", program: program }, withNoop);
 
     expect(resultWithNoop.status).toBe("success");
@@ -262,14 +280,13 @@ describe("VM with execution policies", () => {
     expect(resultWithNoop.executed[0]!.resolvedDevices).toHaveLength(1);
     expect(resultWithNoop.executed[0]!.resolvedDevices[0]!.id).toBe("tv_salon");
 
-    expect(resultWithNoop.status).toBe(resultNoPolicies.status);
-    expect(resultWithNoop.executed.length).toBe(resultNoPolicies.executed.length);
+    expect(resultWithNoop.status).toBe(resultNoMiddleware.status);
+    expect(resultWithNoop.executed.length).toBe(resultNoMiddleware.executed.length);
   });
 
-  it("blocking policy → VM returns error", async () => {
-    const blocker: ExecutionPolicy = {
-      name: "safety_blocker",
-      evaluate: () => ({ kind: "block", reason: "safety check failed" }),
+  it("blocking middleware → VM returns error", async () => {
+    const blocker: Middleware = async () => {
+      throw new BlockSignal("safety check failed");
     };
 
     const program = parse("tv[salon].power = on");
@@ -277,14 +294,12 @@ describe("VM with execution policies", () => {
 
     expect(result.status).toBe("error");
     expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]!.message).toContain("safety_blocker");
     expect(result.errors[0]!.message).toContain("safety check failed");
   });
 
-  it("skipping policy → action not executed", async () => {
-    const skipper: ExecutionPolicy = {
-      name: "skipper",
-      evaluate: () => ({ kind: "skip" }),
+  it("skipping middleware → action not executed", async () => {
+    const skipper: Middleware = async () => {
+      throw new SkipSignal();
     };
 
     const program = parse("tv[salon].power = on");
@@ -295,17 +310,13 @@ describe("VM with execution policies", () => {
     expect(result.executed[0]!.changes).toHaveLength(0);
   });
 
-  it("pausing policy → VM returns awaiting_interaction", async () => {
-    const pauser: ExecutionPolicy = {
-      name: "pauser",
-      evaluate: () => ({
-        kind: "pause",
-        interaction: {
-          id: "confirm-1",
-          type: "confirmation",
-          message: "Proceed?",
-        },
-      }),
+  it("pausing middleware → VM returns awaiting_interaction", async () => {
+    const pauser: Middleware = async () => {
+      throw new PauseSignal({
+        id: "confirm-1",
+        type: "confirmation",
+        message: "Proceed?",
+      });
     };
 
     const program = parse("tv[salon].power = on");
@@ -316,27 +327,25 @@ describe("VM with execution policies", () => {
     expect(result.interaction!.type).toBe("confirmation");
   });
 
-  it("policy receives session context", async () => {
+  it("middleware receives session context", async () => {
     const session = createSession();
-    const spy = vi.fn(() => ({ kind: "continue" as const }));
+    const spy = vi.fn(async (ctx: MiddlewareContext, next) => next());
 
-    const inspectorPolicy: ExecutionPolicy = {
-      name: "inspector",
-      evaluate: spy,
-    };
+    const inspectorMw: Middleware = spy;
+    Object.defineProperty(inspectorMw, "name", { value: "inspector" });
 
     const program = parse("tv[salon].power = on");
-    await executeCommand({ kind: "run_program", program: program }, await ctx(session, [inspectorPolicy]));
+    await executeCommand({ kind: "run_program", program: program }, await ctx(session, [inspectorMw]));
 
     expect(spy).toHaveBeenCalled();
-    const ctxArg: PolicyContext = spy.mock.calls[0]![0]!;
+    const ctxArg: MiddlewareContext = spy.mock.calls[0]![0]!;
     expect(ctxArg.action.kind).toBe("set_property");
     expect(ctxArg.session).toBe(session);
   });
 
-  it("policy receives proper action kind for each DSL statement type", async () => {
-    const spy = vi.fn(() => ({ kind: "continue" as const }));
-    const inspector: ExecutionPolicy = { name: "inspector", evaluate: spy };
+  it("middleware receives proper action kind for each DSL statement type", async () => {
+    const spy = vi.fn(async (ctx: MiddlewareContext, next) => next());
+    const inspector: Middleware = spy;
 
     const context = await ctx(undefined, [inspector]);
 
@@ -357,14 +366,11 @@ describe("VM with execution policies", () => {
   });
 
   it("skip one device in a batch → other devices still execute", async () => {
-    const skipTvChambre: ExecutionPolicy = {
-      name: "skip_chambre",
-      evaluate: (ctx: PolicyContext) => {
-        if (ctx.action.device.id === "tv_chambre") {
-          return { kind: "skip" as const, reason: "skip chambre tv" };
-        }
-        return { kind: "continue" as const };
-      },
+    const skipTvChambre: Middleware = async (ctx, next) => {
+      if (ctx.action.device.id === "tv_chambre") {
+        throw new SkipSignal("skip chambre tv");
+      }
+      return next();
     };
 
     const program = parse("tv[*].power = on");
@@ -380,14 +386,11 @@ describe("VM with execution policies", () => {
   });
 
   it("block one device in a batch → whole statement fails", async () => {
-    const blockTvChambre: ExecutionPolicy = {
-      name: "blocker",
-      evaluate: (ctx: PolicyContext) => {
-        if (ctx.action.device.id === "tv_chambre") {
-          return { kind: "block" as const, reason: "not safe" };
-        }
-        return { kind: "continue" as const };
-      },
+    const blockTvChambre: Middleware = async (ctx, next) => {
+      if (ctx.action.device.id === "tv_chambre") {
+        throw new BlockSignal("not safe");
+      }
+      return next();
     };
 
     const program = parse("tv[*].power = on");

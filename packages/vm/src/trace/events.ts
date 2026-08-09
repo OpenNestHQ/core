@@ -41,19 +41,19 @@ export interface HandlerEndEvent {
   status: "success" | "failed" | "waiting";
 }
 
-export interface PolicyBeginEvent {
-  kind: "policy:begin";
+export interface MiddlewareBeginEvent {
+  kind: "middleware:begin";
   timestamp: number;
   name: string;
   actionKind: string;
   deviceId: string;
 }
 
-export interface PolicyEndEvent {
-  kind: "policy:end";
+export interface MiddlewareEndEvent {
+  kind: "middleware:end";
   timestamp: number;
   status: "success" | "failed" | "waiting" | "skipped";
-  decision: "continue" | "block" | "skip" | "pause" | "replace" | "expand";
+  decision: "execute" | "blocked" | "skipped" | "paused" | "block" | "skip" | "pause" | "expand";
   reason?: string;
 }
 
@@ -84,7 +84,7 @@ export type VMEvent =
   | StatementEndEvent
   | HandlerBeginEvent
   | HandlerEndEvent
-  | PolicyBeginEvent
-  | PolicyEndEvent
+  | MiddlewareBeginEvent
+  | MiddlewareEndEvent
   | ActionBeginEvent
   | ActionEndEvent;

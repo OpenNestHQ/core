@@ -9,8 +9,8 @@ export type {
   StatementEndEvent,
   HandlerBeginEvent,
   HandlerEndEvent,
-  PolicyBeginEvent,
-  PolicyEndEvent,
+  MiddlewareBeginEvent,
+  MiddlewareEndEvent,
   ActionBeginEvent,
   ActionEndEvent,
 } from "./events.js";

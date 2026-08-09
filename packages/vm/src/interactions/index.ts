@@ -7,7 +7,7 @@ export {
 export { deviceSelectionHandler } from "./device-selection.js";
 export type { DeviceSelectionContext } from "./device-selection.js";
 export { confirmationHandler } from "./confirmation.js";
-export type { ConfirmationContext } from "./confirmation.js";
+export type { ConfirmationResumeContext } from "./confirmation.js";
 
 export type {
   UserInteraction,

@@ -185,7 +185,7 @@ describe("ExecutionEventNormalizer", () => {
     expect(progEnd).toHaveLength(0);
   });
 
-  it("maps policy events", () => {
+  it("maps middleware events", () => {
     const norm = new ExecutionEventNormalizer();
 
     norm.consume({ kind: "program:begin", timestamp: 1000 });
@@ -196,18 +196,18 @@ describe("ExecutionEventNormalizer", () => {
       statementKind: "action",
     });
 
-    const policyBegin = norm.consume({
-      kind: "policy:begin",
+    const mwBegin = norm.consume({
+      kind: "middleware:begin",
       timestamp: 1020,
       name: "confirmation",
       actionKind: "turn_off",
       deviceId: "tv.salon",
     });
-    const policyEnd = norm.consume({
-      kind: "policy:end",
+    const mwEnd = norm.consume({
+      kind: "middleware:end",
       timestamp: 1030,
       status: "success",
-      decision: "continue",
+      decision: "execute",
     });
     norm.consume({
       kind: "statement:end",
@@ -220,19 +220,19 @@ describe("ExecutionEventNormalizer", () => {
       status: "success",
     });
 
-    const started = policyBegin.find((e) => e.type === "node.started")!;
-    expect(started.kind).toBe("Policy");
-    expect(started.name).toBe("policy:confirmation");
+    const started = mwBegin.find((e) => e.type === "node.started")!;
+    expect(started.kind).toBe("Middleware");
+    expect(started.name).toBe("middleware:confirmation");
 
-    const attrs = policyBegin.filter((e) => e.type === "node.attribute");
+    const attrs = mwBegin.filter((e) => e.type === "node.attribute");
     expect(attrs).toHaveLength(2);
 
-    const completed = policyEnd.find((e) => e.type === "node.completed")!;
+    const completed = mwEnd.find((e) => e.type === "node.completed")!;
     expect(completed.status).toBe("success");
-    expect(completed.attributes).toEqual({ decision: "continue" });
+    expect(completed.attributes).toEqual({ decision: "execute" });
   });
 
-  it("maps policy blocked with reason", () => {
+  it("maps middleware blocked with reason", () => {
     const norm = new ExecutionEventNormalizer();
 
     norm.consume({ kind: "program:begin", timestamp: 1000 });
@@ -243,14 +243,14 @@ describe("ExecutionEventNormalizer", () => {
       statementKind: "action",
     });
     norm.consume({
-      kind: "policy:begin",
+      kind: "middleware:begin",
       timestamp: 1020,
       name: "confirmation",
       actionKind: "turn_off",
       deviceId: "tv.salon",
     });
-    const policyEnd = norm.consume({
-      kind: "policy:end",
+    const mwEnd = norm.consume({
+      kind: "middleware:end",
       timestamp: 1030,
       status: "failed",
       decision: "block",
@@ -267,7 +267,7 @@ describe("ExecutionEventNormalizer", () => {
       status: "failed",
     });
 
-    const completed = policyEnd.find((e) => e.type === "node.completed")!;
+    const completed = mwEnd.find((e) => e.type === "node.completed")!;
     expect(completed.status).toBe("failed");
     expect(completed.attributes).toEqual({
       decision: "block",
@@ -316,7 +316,7 @@ describe("ExecutionEventNormalizer", () => {
     expect(completed.nodeId).toBe(started.nodeId);
   });
 
-  it("maps skipped policy status to cancelled", () => {
+  it("maps skipped middleware status to cancelled", () => {
     const norm = new ExecutionEventNormalizer();
 
     norm.consume({ kind: "program:begin", timestamp: 1000 });
@@ -327,14 +327,14 @@ describe("ExecutionEventNormalizer", () => {
       statementKind: "action",
     });
     norm.consume({
-      kind: "policy:begin",
+      kind: "middleware:begin",
       timestamp: 1020,
       name: "noop",
       actionKind: "read",
       deviceId: "switch.entree",
     });
-    const policyEnd = norm.consume({
-      kind: "policy:end",
+    const mwEnd = norm.consume({
+      kind: "middleware:end",
       timestamp: 1030,
       status: "skipped",
       decision: "skip",
@@ -350,7 +350,7 @@ describe("ExecutionEventNormalizer", () => {
       status: "success",
     });
 
-    const completed = policyEnd.find((e) => e.type === "node.completed")!;
+    const completed = mwEnd.find((e) => e.type === "node.completed")!;
     expect(completed.status).toBe("cancelled");
   });
 
@@ -451,7 +451,7 @@ describe("ExecutionEventNormalizer", () => {
     });
   });
 
-  it("nests execute under policy when policy continues", () => {
+  it("nests execute under middleware when middleware continues", () => {
     const norm = new ExecutionEventNormalizer();
 
     norm.consume({ kind: "program:begin", timestamp: 1000 });
@@ -462,18 +462,18 @@ describe("ExecutionEventNormalizer", () => {
       statementKind: "action",
     });
 
-    const policyBegin = norm.consume({
-      kind: "policy:begin",
+    const mwBegin = norm.consume({
+      kind: "middleware:begin",
       timestamp: 1020,
       name: "confirmation",
       actionKind: "turn_off",
       deviceId: "tv.salon",
     });
     norm.consume({
-      kind: "policy:end",
+      kind: "middleware:end",
       timestamp: 1030,
       status: "success",
-      decision: "continue",
+      decision: "execute",
     });
 
     const actionBegin = norm.consume({
@@ -502,13 +502,13 @@ describe("ExecutionEventNormalizer", () => {
       status: "success",
     });
 
-    const policyStarted = policyBegin.find((e) => e.type === "node.started")!;
+    const middlewareStarted = mwBegin.find((e) => e.type === "node.started")!;
     const actionStarted = actionBegin.find((e) => e.type === "node.started")!;
 
-    expect(actionStarted.parentNodeId).toBe(policyStarted.nodeId);
+    expect(actionStarted.parentNodeId).toBe(middlewareStarted.nodeId);
   });
 
-  it("does not nest execute under policy when policy blocks", () => {
+  it("does not nest execute under middleware when middleware blocks", () => {
     const norm = new ExecutionEventNormalizer();
 
     norm.consume({ kind: "program:begin", timestamp: 1000 });
@@ -520,14 +520,14 @@ describe("ExecutionEventNormalizer", () => {
     });
 
     norm.consume({
-      kind: "policy:begin",
+      kind: "middleware:begin",
       timestamp: 1020,
       name: "confirmation",
       actionKind: "turn_off",
       deviceId: "tv.salon",
     });
     norm.consume({
-      kind: "policy:end",
+      kind: "middleware:end",
       timestamp: 1030,
       status: "failed",
       decision: "block",
@@ -545,11 +545,11 @@ describe("ExecutionEventNormalizer", () => {
       status: "failed",
     });
 
-    // No execute should be emitted (policy blocked it — VM skips action)
-    // The policyParentId should have no effect on subsequent operations
+    // No execute should be emitted (middleware blocked it — VM skips action)
+    // The middlewareParentId should have no effect on subsequent operations
   });
 
-  it("policyParentId is consumed by next action, not leaked to subsequent actions", () => {
+  it("middlewareParentId is consumed by next action, not leaked to subsequent actions", () => {
     const norm = new ExecutionEventNormalizer();
 
     norm.consume({ kind: "program:begin", timestamp: 1000 });
@@ -557,14 +557,14 @@ describe("ExecutionEventNormalizer", () => {
     norm.consume({
       kind: "statement:begin", timestamp: 1010, index: 0, statementKind: "action",
     });
-    const policyBegin = norm.consume({
-      kind: "policy:begin", timestamp: 1020, name: "confirmation",
+    const mwBegin = norm.consume({
+      kind: "middleware:begin", timestamp: 1020, name: "confirmation",
       actionKind: "turn_off", deviceId: "tv.salon",
     });
-    const policyId = policyBegin.find((e) => e.type === "node.started")!.nodeId;
+    const middlewareId = mwBegin.find((e) => e.type === "node.started")!.nodeId;
 
     norm.consume({
-      kind: "policy:end", timestamp: 1030, status: "success", decision: "continue",
+      kind: "middleware:end", timestamp: 1030, status: "success", decision: "execute",
     });
     norm.consume({
       kind: "action:begin", timestamp: 1040, actionKind: "set_property",
@@ -596,6 +596,6 @@ describe("ExecutionEventNormalizer", () => {
 
     const action2Started = action2Begin.find((e) => e.type === "node.started")!;
     expect(action2Started.parentNodeId).toBeDefined();
-    expect(action2Started.parentNodeId).not.toBe(policyId);
+    expect(action2Started.parentNodeId).not.toBe(middlewareId);
   });
 });

@@ -2,6 +2,8 @@ import type { Value } from "@opennest/lang-core";
 import type { Device, Session } from "../types.js";
 import type { UserInteraction } from "../interactions/types.js";
 
+// ── PlannedAction (unchanged) ──
+
 export type PlannedAction =
   | SetPropertyAction
   | IncrementPropertyAction
@@ -34,54 +36,53 @@ export interface InvokeActionAction {
   method: string;
 }
 
-export type PolicyDecision =
-  | ContinueDecision
-  | BlockDecision
-  | SkipDecision
-  | PauseDecision
-  | ReplaceDecision
-  | ExpandDecision;
+// ── Signals (throw-based flow control) ──
 
-export interface ContinueDecision {
-  kind: "continue";
+export class BlockSignal extends Error {
+  constructor(public reason: string) {
+    super(reason);
+    this.name = "BlockSignal";
+  }
 }
 
-export interface BlockDecision {
-  kind: "block";
-  reason: string;
+export class SkipSignal extends Error {
+  constructor(public reason?: string) {
+    super(reason ?? "skipped");
+    this.name = "SkipSignal";
+  }
 }
 
-export interface SkipDecision {
-  kind: "skip";
-  reason?: string;
+export class PauseSignal extends Error {
+  constructor(
+    public interaction: UserInteraction,
+    public context?: unknown,
+  ) {
+    super("paused");
+    this.name = "PauseSignal";
+  }
 }
 
-export interface PauseDecision {
-  kind: "pause";
-  interaction: UserInteraction;
-  context?: unknown;
+export class ExpandSignal extends Error {
+  constructor(public actions: PlannedAction[]) {
+    super("expanded");
+    this.name = "ExpandSignal";
+  }
 }
 
-export interface ReplaceDecision {
-  kind: "replace";
-  action: PlannedAction;
-}
+// ── Middleware context and type ──
 
-export interface ExpandDecision {
-  kind: "expand";
-  actions: PlannedAction[];
-}
-
-export interface PolicyContext {
+export interface MiddlewareContext {
   action: PlannedAction;
   session: Session;
   devices: Device[];
 }
 
-export interface ExecutionPolicy {
-  readonly name: string;
-  evaluate(ctx: PolicyContext): PolicyDecision | Promise<PolicyDecision>;
-}
+export type Middleware = (
+  ctx: MiddlewareContext,
+  next: () => Promise<PipelineOutcome>,
+) => Promise<PipelineOutcome>;
+
+// ── PipelineOutcome (unchanged) ──
 
 export type PipelineOutcome =
   | ExecuteOutcome

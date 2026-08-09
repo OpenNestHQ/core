@@ -12,7 +12,7 @@ import { MockDriver } from "@opennest/devices";
 import {
   executeCommand,
   createSession,
-  ConfirmationPolicy,
+  createConfirmationMiddleware,
 } from "../index.js";
 import type { Device, Session, VMCommand } from "../index.js";
 import { resumeWithResponse } from "../state.js";
@@ -160,12 +160,12 @@ describe("executeCommand", () => {
       ]);
     });
 
-    it("should go through the policy pipeline and pause on confirmation", async () => {
-      const policy = new ConfirmationPolicy({
+    it("should go through the middleware pipeline and pause on confirmation", async () => {
+      const mw = createConfirmationMiddleware({
         requireConfirmation: (action) => action.kind === "invoke_action",
       });
       const session = createSession();
-      const ctx = { devices: await devices(), session, policies: [policy] };
+      const ctx = { devices: await devices(), session, middleware: [mw] };
       const command: VMCommand = {
         kind: "execute_action",
         action: buildAction("vacuum", "start", "salon"),
@@ -185,7 +185,7 @@ describe("executeCommand", () => {
       const second = await executeCommand(command, {
         devices: ctx.devices,
         session: first.session,
-        policies: [policy],
+        middleware: [mw],
       });
 
       expect(second.status).toBe("success");
@@ -194,11 +194,11 @@ describe("executeCommand", () => {
     });
 
     it("should report an error when the confirmation is denied", async () => {
-      const policy = new ConfirmationPolicy({
+      const mw = createConfirmationMiddleware({
         requireConfirmation: (action) => action.kind === "invoke_action",
       });
       const session = createSession();
-      const ctx = { devices: await devices(), session, policies: [policy] };
+      const ctx = { devices: await devices(), session, middleware: [mw] };
       const command: VMCommand = {
         kind: "execute_action",
         action: buildAction("vacuum", "start", "salon"),
@@ -216,7 +216,7 @@ describe("executeCommand", () => {
       const second = await executeCommand(command, {
         devices: ctx.devices,
         session: first.session,
-        policies: [policy],
+        middleware: [mw],
       });
 
       expect(second.status).toBe("error");
@@ -366,12 +366,12 @@ describe("executeCommand", () => {
       expect(exec.resolvedDevices[0]!.id).toBe("tv_chambre");
     });
 
-    it("should go through the policy pipeline for set_property", async () => {
-      const policy = new ConfirmationPolicy({
+    it("should go through the middleware pipeline for set_property", async () => {
+      const mw = createConfirmationMiddleware({
         requireConfirmation: (action) => action.kind === "set_property",
       });
       const session = createSession();
-      const ctx = { devices: await devices(), session, policies: [policy] };
+      const ctx = { devices: await devices(), session, middleware: [mw] };
       const command: VMCommand = {
         kind: "execute_statement",
         statement: buildAssignment("light", "power", on(), "salon"),
@@ -391,7 +391,7 @@ describe("executeCommand", () => {
       const second = await executeCommand(command, {
         devices: ctx.devices,
         session: first.session,
-        policies: [policy],
+        middleware: [mw],
       });
 
       expect(second.status).toBe("success");
@@ -463,14 +463,14 @@ describe("executeCommand", () => {
       expect(result.status).toBe("error");
     });
 
-    it("should still trigger policies when targeting by deviceId", async () => {
-      const policy = new ConfirmationPolicy({
+    it("should still trigger middleware when targeting by deviceId", async () => {
+      const mw = createConfirmationMiddleware({
         requireConfirmation: (action) => action.kind === "set_property",
       });
       const ctx = {
         devices: await devicesWithTwoLights(),
         session: createSession(),
-        policies: [policy],
+        middleware: [mw],
       };
 
       const result = await executeCommand(
@@ -489,11 +489,11 @@ describe("executeCommand", () => {
 
   describe("resume_interaction", () => {
     it("should pause and resume execution through the VM command", async () => {
-      const policy = new ConfirmationPolicy({
+      const mw = createConfirmationMiddleware({
         requireConfirmation: (action) => action.kind === "invoke_action",
       });
       const session = createSession();
-      const ctx = { devices: await devices(), session, policies: [policy] };
+      const ctx = { devices: await devices(), session, middleware: [mw] };
 
       // Start execution — pauses for confirmation
       const first = await executeCommand(
@@ -513,7 +513,7 @@ describe("executeCommand", () => {
             confirmed: true,
           },
         },
-        { devices: ctx.devices, session: first.session, policies: ctx.policies },
+        { devices: ctx.devices, session: first.session, middleware: ctx.middleware },
       );
 
       expect(second.status).toBe("success");

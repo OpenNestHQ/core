@@ -14,7 +14,7 @@ import type {
 import type { Device, Session, VMResult, VMError, ResolutionIntent, ResolutionResult } from "./types.js";
 import type { UserInteraction } from "./interactions/types.js";
 import type { DeviceSelectionContext } from "./interactions/device-selection.js";
-import type { ExecutionPolicy, PlannedAction } from "./policies/types.js";
+import type { Middleware, PlannedAction } from "./middleware/types.js";
 import type { VMEventBus } from "./trace/event-bus.js";
 import { createSession } from "./state.js";
 import { resolveDevices } from "./resolver.js";
@@ -24,13 +24,13 @@ import {
   executePlannedAction,
   evaluateCondition,
 } from "./executor.js";
-import { runPolicyPipeline } from "./policies/pipeline.js";
+import { runMiddlewarePipeline } from "./middleware/pipeline.js";
 
 export async function interpretProgram(
   program: Program,
   devices: Device[],
   existingSession?: Session,
-  policies?: ExecutionPolicy[],
+  middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<VMResult> {
   const session = existingSession ?? createSession();
@@ -82,7 +82,7 @@ export async function interpretProgram(
       statement,
       devices,
       session,
-      policies,
+      middleware,
       eventBus,
     );
 
@@ -189,22 +189,22 @@ async function interpretStatement(
   statement: Statement,
   devices: Device[],
   session: Session,
-  policies?: ExecutionPolicy[],
+  middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
   switch (statement.kind) {
     case "assignment":
-      return interpretAssignment(statement, devices, session, policies, eventBus);
+      return interpretAssignment(statement, devices, session, middleware, eventBus);
     case "query":
-      return interpretQuery(statement, devices, session, policies, eventBus);
+      return interpretQuery(statement, devices, session, middleware, eventBus);
     case "increment":
-      return interpretIncrement(statement, devices, session, policies, eventBus);
+      return interpretIncrement(statement, devices, session, middleware, eventBus);
     case "action":
-      return interpretAction(statement, devices, session, policies, eventBus);
+      return interpretAction(statement, devices, session, middleware, eventBus);
     case "variable_assignment":
       return interpretVariableAssignment(statement, devices, session, eventBus);
     case "if":
-      return interpretIfStatement(statement, devices, session, policies, eventBus);
+      return interpretIfStatement(statement, devices, session, middleware, eventBus);
   }
 }
 
@@ -248,7 +248,7 @@ async function interpretAssignment(
   stmt: Assignment,
   devices: Device[],
   session: Session,
-  policies?: ExecutionPolicy[],
+  middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
   const property = lastPropertyName(stmt.path);
@@ -274,14 +274,14 @@ async function interpretAssignment(
     value: stmt.value,
   }));
 
-  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult, eventBus);
+  return applyMiddlewareAndFinish(actions, middleware, session, devices, stmt, resolutionResult, eventBus);
 }
 
 async function interpretQuery(
   stmt: Query,
   devices: Device[],
   session: Session,
-  policies?: ExecutionPolicy[],
+  middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
   const property = lastPropertyName(stmt.path);
@@ -306,14 +306,14 @@ async function interpretQuery(
     property,
   }));
 
-  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult, eventBus);
+  return applyMiddlewareAndFinish(actions, middleware, session, devices, stmt, resolutionResult, eventBus);
 }
 
 async function interpretIncrement(
   stmt: Increment,
   devices: Device[],
   session: Session,
-  policies?: ExecutionPolicy[],
+  middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
   const property = lastPropertyName(stmt.path);
@@ -339,14 +339,14 @@ async function interpretIncrement(
     value: stmt.value,
   }));
 
-  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult, eventBus);
+  return applyMiddlewareAndFinish(actions, middleware, session, devices, stmt, resolutionResult, eventBus);
 }
 
 async function interpretAction(
   stmt: Action,
   devices: Device[],
   session: Session,
-  policies?: ExecutionPolicy[],
+  middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
   const method = lastPropertyName(stmt.path);
@@ -371,19 +371,19 @@ async function interpretAction(
     method,
   }));
 
-  return applyPoliciesAndFinish(actions, policies, session, devices, stmt, resolutionResult, eventBus);
+  return applyMiddlewareAndFinish(actions, middleware, session, devices, stmt, resolutionResult, eventBus);
 }
 
-async function applyPoliciesAndFinish(
+async function applyMiddlewareAndFinish(
   actions: PlannedAction[],
-  policies: ExecutionPolicy[] | undefined,
+  middleware: Middleware[] | undefined,
   session: Session,
   devices: Device[],
   statement: Statement,
   resolutionResult: ResolutionResult,
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
-  if (!policies || policies.length === 0) {
+  if (!middleware || middleware.length === 0) {
     const changes = await Promise.all(
       actions.map((action) => executePlannedAction(action, eventBus)),
     );
@@ -406,7 +406,7 @@ async function applyPoliciesAndFinish(
   const approved: PlannedAction[] = [];
 
   for (const action of actions) {
-    const outcome = await runPolicyPipeline(action, policies, env, eventBus);
+    const outcome = await runMiddlewarePipeline(action, middleware, env, eventBus);
 
     switch (outcome.kind) {
       case "execute":
@@ -418,7 +418,7 @@ async function applyPoliciesAndFinish(
           kind: "error",
           errors: [{
             statement,
-            message: `Blocked by policy "${outcome.policyName}": ${outcome.reason}`,
+            message: `Blocked by middleware "${outcome.policyName}": ${outcome.reason}`,
           }],
         };
 
@@ -571,7 +571,7 @@ async function interpretIfStatement(
   stmt: IfStatement,
   devices: Device[],
   session: Session,
-  policies?: ExecutionPolicy[],
+  middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
   const evalResult = await evaluateConditionExpr(stmt.condition, devices, session, eventBus);
@@ -599,7 +599,7 @@ async function interpretIfStatement(
       statementKind: bodyStmt.kind,
     });
 
-    const result = await interpretStatement(bodyStmt, devices, session, policies, eventBus);
+    const result = await interpretStatement(bodyStmt, devices, session, middleware, eventBus);
 
     if (result.kind === "awaiting_interaction") {
       eventBus?.emit({

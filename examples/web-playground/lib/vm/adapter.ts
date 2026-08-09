@@ -2,14 +2,14 @@ import { parseHomeDSL } from "@opennest/lang-core";
 import {
   executeCommand,
   createSession,
-  ConfirmationPolicy,
+  createConfirmationMiddleware,
   DefaultVMEventBus,
 } from "@opennest/vm";
 import type {
   VMCommand,
   Session,
   Device,
-  ExecutionPolicy,
+  Middleware,
   UserInteraction,
   UserResponse,
   VMResult,
@@ -26,11 +26,10 @@ import type {
   PolicyInfo,
 } from "./types";
 
-// ── Policies ──
+// ── Middleware ──
 
-function createDemoPolicies(): ExecutionPolicy[] {
-  // Require confirmation for any light power change
-  const confirmLights = new ConfirmationPolicy({
+function createDemoMiddleware(): Middleware[] {
+  const confirmLights = createConfirmationMiddleware({
     requireConfirmation(action: PlannedAction) {
       return (
         action.device.type === "light" &&
@@ -40,8 +39,7 @@ function createDemoPolicies(): ExecutionPolicy[] {
     },
   });
 
-  // Require confirmation for thermostat temperature changes
-  const confirmThermostat = new ConfirmationPolicy({
+  const confirmThermostat = createConfirmationMiddleware({
     requireConfirmation(action: PlannedAction) {
       return (
         action.device.type === "thermostat" &&
@@ -58,7 +56,7 @@ function createDemoPolicies(): ExecutionPolicy[] {
 
 export class VMAdapter {
   private session: Session;
-  private policies: ExecutionPolicy[];
+  private middlewareList: Middleware[];
   private eventBus!: VMEventBus;
   private devices: Device[];
   private eventIdCounter = 0;
@@ -73,7 +71,7 @@ export class VMAdapter {
     const fixture = createPlaygroundDevices();
     this.devices = fixture.devices;
     this.session = createSession();
-    this.policies = createDemoPolicies();
+    this.middlewareList = createDemoMiddleware();
     this.onEvent = onEvent;
     this.onSessionUpdate = onSessionUpdate;
     this.setupEventBus();
@@ -97,12 +95,13 @@ export class VMAdapter {
 
   getPolicies(): PolicyInfo[] {
     const seen = new Map<string, number>();
-    return this.policies.map((p) => {
-      const count = seen.get(p.name) ?? 0;
-      seen.set(p.name, count + 1);
+    return this.middlewareList.map((mw) => {
+      const name = (mw as { name?: string }).name ?? "anonymous";
+      const count = seen.get(name) ?? 0;
+      seen.set(name, count + 1);
       return {
-        name: count > 0 ? `${p.name}_${count + 1}` : p.name,
-        description: getPolicyDescription(p.name),
+        name: count > 0 ? `${name}_${count + 1}` : name,
+        description: getPolicyDescription(name),
         active: true,
       };
     });
@@ -158,7 +157,7 @@ export class VMAdapter {
   resetSession(): void {
     this.eventIdCounter = 0;
     this.session = createSession();
-    this.policies = createDemoPolicies();
+    this.middlewareList = createDemoMiddleware();
     this.setupEventBus();
     this.onSessionUpdate(this.session);
   }
@@ -167,7 +166,7 @@ export class VMAdapter {
     return executeCommand(command, {
       devices: this.devices,
       session: this.session,
-      policies: this.policies,
+      middleware: this.middlewareList,
       eventBus: this.eventBus,
     });
   }

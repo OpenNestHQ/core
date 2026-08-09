@@ -56,16 +56,16 @@ export class DefaultExecutionTracer implements ExecutionTracer {
       case "handler:end":
         this.endNode(mapEndStatus(event.status), event.timestamp);
         break;
-      case "policy:begin":
+      case "middleware:begin":
         this.beginNode(
-          NodeKind.Policy,
-          `policy:${event.name}`,
+          NodeKind.Middleware,
+          `middleware:${event.name}`,
           event.timestamp,
         );
         this.setAttribute("actionKind", event.actionKind);
         this.setAttribute("deviceId", event.deviceId);
         break;
-      case "policy:end":
+      case "middleware:end":
         this.setAttribute("decision", event.decision);
         if (event.reason !== undefined) {
           this.setAttribute("reason", event.reason);

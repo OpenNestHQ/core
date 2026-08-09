@@ -4,7 +4,7 @@ import type { ExecutionEvent } from "./events.js";
 export class ExecutionEventNormalizer {
   private stack: string[] = [];
   private idCounter = 0;
-  private policyParentId: string | undefined;
+  private middlewareParentId: string | undefined;
 
   consume(event: VMEvent): ExecutionEvent[] {
     switch (event.kind) {
@@ -30,7 +30,7 @@ export class ExecutionEventNormalizer {
       }
 
       case "statement:begin": {
-        this.policyParentId = undefined;
+        this.middlewareParentId = undefined;
         const events = this.handleBegin(
           "Statement",
           `statement[${event.index}]`,
@@ -90,10 +90,10 @@ export class ExecutionEventNormalizer {
         ];
       }
 
-      case "policy:begin": {
+      case "middleware:begin": {
         const events = this.handleBegin(
-          "Policy",
-          `policy:${event.name}`,
+          "Middleware",
+          `middleware:${event.name}`,
           event.timestamp,
         );
         const nodeId = this.stack[this.stack.length - 1]!;
@@ -112,11 +112,11 @@ export class ExecutionEventNormalizer {
         return events;
       }
 
-      case "policy:end": {
+      case "middleware:end": {
         const nodeId = this.stack.pop();
         if (!nodeId) return [];
-        if (event.decision === "continue") {
-          this.policyParentId = nodeId;
+        if (event.decision === "execute") {
+          this.middlewareParentId = nodeId;
         }
         const attrs: Record<string, unknown> = {};
         attrs["decision"] = event.decision;
@@ -135,8 +135,8 @@ export class ExecutionEventNormalizer {
       }
 
       case "action:begin": {
-        const parentOverride = this.policyParentId;
-        this.policyParentId = undefined;
+        const parentOverride = this.middlewareParentId;
+        this.middlewareParentId = undefined;
         const events = this.handleBegin(
           "Execute",
           `execute:${event.actionKind}`,

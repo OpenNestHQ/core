@@ -49,7 +49,7 @@ async function runProgram(
       ? context.devices.filter((d) => d.id === deviceId)
       : context.devices,
     context.session,
-    context.policies,
+    context.middleware,
     context.eventBus,
   );
 }

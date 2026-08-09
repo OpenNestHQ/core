@@ -49,18 +49,18 @@ export type {
   ChoiceResponse,
 } from "./interactions/types.js";
 
-export { NoopExecutionPolicy } from "./policies/noop.js";
-export { ConfirmationPolicy } from "./policies/confirmation.js";
+export { noopMiddleware } from "./middleware/noop.js";
+export { createConfirmationMiddleware } from "./middleware/confirmation.js";
+export type { ConfirmationMiddlewareConfig } from "./middleware/confirmation.js";
+export {
+  BlockSignal,
+  SkipSignal,
+  PauseSignal,
+  ExpandSignal,
+} from "./middleware/types.js";
 export type {
-  ExecutionPolicy,
-  PolicyContext,
-  PolicyDecision,
-  ContinueDecision,
-  BlockDecision,
-  SkipDecision,
-  PauseDecision,
-  ReplaceDecision,
-  ExpandDecision,
+  Middleware,
+  MiddlewareContext,
   PlannedAction,
   SetPropertyAction,
   IncrementPropertyAction,
@@ -71,7 +71,7 @@ export type {
   BlockedOutcome,
   SkippedOutcome,
   PausedOutcome,
-} from "./policies/types.js";
+} from "./middleware/types.js";
 
 export { NodeStatus, NodeKind } from "./trace/index.js";
 export { DefaultExecutionTracer } from "./trace/index.js";
@@ -85,5 +85,7 @@ export type {
   ProgramEndEvent,
   StatementBeginEvent,
   StatementEndEvent,
+  MiddlewareBeginEvent,
+  MiddlewareEndEvent,
   VMEventBus,
 } from "./trace/index.js";

@@ -139,7 +139,7 @@ export function VMProvider({ children }: { children: ReactNode }) {
       type: "ADD_MESSAGE",
       message: buildChatMessage(
         "system",
-        "**Policies actives :** " +
+        "**Middleware actifs :** " +
           adapterRef.current.getPolicies().map((p) => p.name).join(", "),
       ),
     });

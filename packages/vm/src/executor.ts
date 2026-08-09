@@ -1,6 +1,6 @@
 import type { Value, SimpleCondition } from "@opennest/lang-core";
 import type { Device, StateChange } from "./types.js";
-import type { PlannedAction } from "./policies/types.js";
+import type { PlannedAction } from "./middleware/types.js";
 import type { VMEventBus } from "./trace/event-bus.js";
 
 export async function executePlannedAction(

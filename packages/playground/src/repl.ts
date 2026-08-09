@@ -10,7 +10,7 @@ import type {
   Device,
   UserInteraction,
   DeviceSelectionInteraction,
-  ExecutionPolicy,
+  Middleware,
   UserResponse,
   VMResult,
 } from "@opennest/vm";
@@ -38,16 +38,16 @@ interface State {
   session: Session;
   devices: Device[];
   nlMode: boolean;
-  policies: ExecutionPolicy[];
+  middleware: Middleware[];
   telemetry: TelemetryHandle | undefined;
 }
 
-function createState(devices: Device[], policies: ExecutionPolicy[], telemetry?: TelemetryHandle): State {
+function createState(devices: Device[], middleware: Middleware[], telemetry?: TelemetryHandle): State {
   return {
     session: createSession(),
     devices,
     nlMode: false,
-    policies,
+    middleware,
     telemetry: telemetry ?? (undefined as never),
   };
 }
@@ -55,13 +55,13 @@ function createState(devices: Device[], policies: ExecutionPolicy[], telemetry?:
 function buildVMContext(state: State): {
   devices: Device[];
   session: Session;
-  policies: ExecutionPolicy[];
+  middleware: Middleware[];
   eventBus?: import("@opennest/vm").VMEventBus;
 } {
   const ctx: ReturnType<typeof buildVMContext> = {
     devices: state.devices,
     session: state.session,
-    policies: state.policies,
+    middleware: state.middleware,
   };
   if (state.telemetry !== undefined) {
     ctx.eventBus = state.telemetry.eventBus;
@@ -239,8 +239,8 @@ const COMMANDS = [
   ":nl", ":dsl",
 ];
 
-export async function startRepl(devices: Device[], policies?: ExecutionPolicy[], telemetry?: TelemetryHandle): Promise<void> {
-  const state = createState(devices, policies ?? [], telemetry);
+export async function startRepl(devices: Device[], middleware?: Middleware[], telemetry?: TelemetryHandle): Promise<void> {
+  const state = createState(devices, middleware ?? [], telemetry);
 
   function deviceTypes(): string[] {
     return [...new Set(state.devices.map((d) => d.type))];

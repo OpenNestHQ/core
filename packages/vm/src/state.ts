@@ -62,7 +62,7 @@ export async function resumeAndContinue(
     program,
     context.devices,
     session,
-    context.policies,
+    context.middleware,
     context.eventBus,
   );
 }

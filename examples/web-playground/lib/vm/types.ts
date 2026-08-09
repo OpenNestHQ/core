@@ -4,7 +4,6 @@ import type {
   ExecutedStatement,
   VMError,
   UserInteraction,
-  ExecutionPolicy,
   VMEvent,
 } from "@opennest/vm";
 

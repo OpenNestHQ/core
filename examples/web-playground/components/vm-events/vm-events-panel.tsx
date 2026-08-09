@@ -14,8 +14,8 @@ const EVENT_COLORS: Record<string, string> = {
   "statement:end": "text-purple-400",
   "handler:begin": "text-yellow-400",
   "handler:end": "text-yellow-400",
-  "policy:begin": "text-orange-400",
-  "policy:end": "text-orange-400",
+  "middleware:begin": "text-orange-400",
+  "middleware:end": "text-orange-400",
   "action:begin": "text-green-400",
   "action:end": "text-green-400",
 };
@@ -34,14 +34,16 @@ function formatEvent(event: VMEvent): string {
       return `▶ Handler: ${event.name}`;
     case "handler:end":
       return `■ Handler ${event.status}`;
-    case "policy:begin":
-      return `▶ Policy: ${event.name} · ${event.actionKind} on ${event.deviceId}`;
-    case "policy:end":
-      return `■ Policy ${event.status}: ${event.decision}${event.reason ? ` · ${event.reason}` : ""}`;
+    case "middleware:begin":
+      return `▶ Middleware: ${event.name} · ${event.actionKind} on ${event.deviceId}`;
+    case "middleware:end":
+      return `■ Middleware ${event.status}: ${event.decision}${event.reason ? ` · ${event.reason}` : ""}`;
     case "action:begin":
       return `▶ Action: ${event.actionKind} on ${event.deviceName}${event.property ? `.${event.property}` : ""}`;
     case "action:end":
       return `■ Action ${event.status}${event.error ? ` · ${event.error}` : ""}`;
+    default:
+      return `Unknown event`;
   }
 }
 

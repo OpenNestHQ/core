@@ -4,28 +4,25 @@ import type {
   ConfirmationInteraction,
   UserResponse,
 } from "./types.js";
-import type { ConfirmationPolicy } from "../policies/confirmation.js";
+import type { ConfirmationResumeContext } from "../middleware/confirmation.js";
 
-export interface ConfirmationContext {
-  fingerprint: string;
-  policy: ConfirmationPolicy;
-}
+export type { ConfirmationResumeContext };
 
-export const confirmationHandler: InteractionHandler<ConfirmationContext> = {
+export const confirmationHandler: InteractionHandler<ConfirmationResumeContext> = {
   type: "confirmation",
 
-  createInteraction(_context: ConfirmationContext): ConfirmationInteraction {
+  createInteraction(_context: ConfirmationResumeContext): ConfirmationInteraction {
     throw new Error(
-      "Confirmation interactions are created by policies, not via createInteraction()",
+      "Confirmation interactions are created by middleware, not via createInteraction()",
     );
   },
 
   processResponse(
     _session: Session,
-    context: ConfirmationContext,
+    context: ConfirmationResumeContext,
     response: UserResponse,
   ): void {
     if (response.type !== "confirmation") return;
-    context.policy.resolve(context.fingerprint, response.confirmed);
+    context.decisions.set(context.fingerprint, response.confirmed);
   },
 };

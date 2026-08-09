@@ -7,7 +7,7 @@ import {
   DefaultVMEventBus,
   NodeStatus,
   NodeKind,
-  ConfirmationPolicy,
+  createConfirmationMiddleware,
 } from "../index.js";
 import type {
   Device,
@@ -239,23 +239,23 @@ describe("DefaultExecutionTracer", () => {
     expect(handler.parentId).toBe(trace.root.id);
   });
 
-  it("handles policy:begin/policy:end events", () => {
+  it("handles middleware:begin/middleware:end events", () => {
     const tracer = new DefaultExecutionTracer();
 
     tracer.consume({ kind: "program:begin", timestamp: 1000 });
 
     tracer.consume({
-      kind: "policy:begin",
+      kind: "middleware:begin",
       timestamp: 1010,
       name: "confirmation",
       actionKind: "set_property",
       deviceId: "tv_salon",
     });
     tracer.consume({
-      kind: "policy:end",
+      kind: "middleware:end",
       timestamp: 1020,
       status: "success",
-      decision: "continue",
+      decision: "execute",
     });
 
     tracer.consume({
@@ -265,30 +265,30 @@ describe("DefaultExecutionTracer", () => {
     });
 
     const trace = tracer.getTrace();
-    const policy = trace.root.children[0]!;
-    expect(policy.kind).toBe(NodeKind.Policy);
-    expect(policy.name).toBe("policy:confirmation");
-    expect(policy.status).toBe(NodeStatus.Success);
-    expect(policy.attributes).toMatchObject({
+    const mwNode = trace.root.children[0]!;
+    expect(mwNode.kind).toBe(NodeKind.Middleware);
+    expect(mwNode.name).toBe("middleware:confirmation");
+    expect(mwNode.status).toBe(NodeStatus.Success);
+    expect(mwNode.attributes).toMatchObject({
       actionKind: "set_property",
       deviceId: "tv_salon",
-      decision: "continue",
+      decision: "execute",
     });
   });
 
-  it("handles policy:end with skipped status", () => {
+  it("handles middleware:end with skipped status", () => {
     const tracer = new DefaultExecutionTracer();
 
     tracer.consume({ kind: "program:begin", timestamp: 1000 });
     tracer.consume({
-      kind: "policy:begin",
+      kind: "middleware:begin",
       timestamp: 1010,
-      name: "some_policy",
+      name: "some_middleware",
       actionKind: "invoke_action",
       deviceId: "dev_1",
     });
     tracer.consume({
-      kind: "policy:end",
+      kind: "middleware:end",
       timestamp: 1020,
       status: "skipped",
       decision: "skip",
@@ -300,24 +300,24 @@ describe("DefaultExecutionTracer", () => {
     });
 
     const trace = tracer.getTrace();
-    const policy = trace.root.children[0]!;
-    expect(policy.status).toBe(NodeStatus.Skipped);
-    expect(policy.attributes.decision).toBe("skip");
+    const mwNode = trace.root.children[0]!;
+    expect(mwNode.status).toBe(NodeStatus.Skipped);
+    expect(mwNode.attributes.decision).toBe("skip");
   });
 
-  it("handles policy:end with block reason", () => {
+  it("handles middleware:end with block reason", () => {
     const tracer = new DefaultExecutionTracer();
 
     tracer.consume({ kind: "program:begin", timestamp: 1000 });
     tracer.consume({
-      kind: "policy:begin",
+      kind: "middleware:begin",
       timestamp: 1010,
       name: "guard",
       actionKind: "set_property",
       deviceId: "tv_1",
     });
     tracer.consume({
-      kind: "policy:end",
+      kind: "middleware:end",
       timestamp: 1020,
       status: "failed",
       decision: "block",
@@ -330,10 +330,10 @@ describe("DefaultExecutionTracer", () => {
     });
 
     const trace = tracer.getTrace();
-    const policy = trace.root.children[0]!;
-    expect(policy.status).toBe(NodeStatus.Failed);
-    expect(policy.attributes.decision).toBe("block");
-    expect(policy.attributes.reason).toBe("Not allowed");
+    const mwNode = trace.root.children[0]!;
+    expect(mwNode.status).toBe(NodeStatus.Failed);
+    expect(mwNode.attributes.decision).toBe("block");
+    expect(mwNode.attributes.reason).toBe("Not allowed");
   });
 
   it("handles action:begin/action:end events", () => {
@@ -740,7 +740,7 @@ describe("VM with event bus", () => {
     expect(s1.duration).toBeGreaterThanOrEqual(0);
   });
 
-  it("traces policy evaluations when ConfirmationPolicy is active", async () => {
+  it("traces middleware evaluations when createConfirmationMiddleware is active", async () => {
     const driver = makeDriver();
     const tv = await makeDevice("tv_salon", "tv", "salon", "TV", driver, {
       power: false,
@@ -749,7 +749,7 @@ describe("VM with event bus", () => {
     const tracer = new DefaultExecutionTracer();
     const bus = new DefaultVMEventBus(tracer);
 
-    const policy = new ConfirmationPolicy({
+    const mw = createConfirmationMiddleware({
       requireConfirmation: () => false,
     });
 
@@ -757,16 +757,16 @@ describe("VM with event bus", () => {
 
     await executeCommand(
       { kind: "run_program", program },
-      { devices: [tv], policies: [policy], eventBus: bus },
+      { devices: [tv], middleware: [mw], eventBus: bus },
     );
 
     const trace = tracer.getTrace();
     const stmt = trace.root.children[0]!;
-    const policyNode = stmt.children.find((c) => c.kind === NodeKind.Policy)!;
-    expect(policyNode).toBeDefined();
-    expect(policyNode.name).toBe("policy:confirmation");
-    expect(policyNode.status).toBe(NodeStatus.Success);
-    expect(policyNode.attributes.decision).toBe("continue");
+    const mwNode = stmt.children.find((c) => c.kind === NodeKind.Middleware)!;
+    expect(mwNode).toBeDefined();
+    expect(mwNode.name).toBe("middleware:confirmation");
+    expect(mwNode.status).toBe(NodeStatus.Success);
+    expect(mwNode.attributes.decision).toBe("execute");
   });
 
   it("traces handler for device_selection ambiguity", async () => {
@@ -797,7 +797,7 @@ describe("VM with event bus", () => {
     expect(stmt.children[0]!.status).toBe(NodeStatus.Waiting);
   });
 
-  it("traces policy and handler when ConfirmationPolicy pauses", async () => {
+  it("traces middleware and handler when createConfirmationMiddleware pauses", async () => {
     const driver = makeDriver();
     const tv = await makeDevice("tv_salon", "tv", "salon", "TV", driver, {
       power: false,
@@ -806,7 +806,7 @@ describe("VM with event bus", () => {
     const tracer = new DefaultExecutionTracer();
     const bus = new DefaultVMEventBus(tracer);
 
-    const policy = new ConfirmationPolicy({
+    const mw = createConfirmationMiddleware({
       requireConfirmation: () => true,
     });
 
@@ -814,7 +814,7 @@ describe("VM with event bus", () => {
 
     const result = await executeCommand(
       { kind: "run_program", program },
-      { devices: [tv], policies: [policy], eventBus: bus },
+      { devices: [tv], middleware: [mw], eventBus: bus },
     );
 
     expect(result.status).toBe("awaiting_interaction");
@@ -823,10 +823,10 @@ describe("VM with event bus", () => {
     const stmt = trace.root.children[0]!;
     expect(stmt.status).toBe(NodeStatus.Waiting);
 
-    const policyNode = stmt.children.find((c) => c.kind === NodeKind.Policy)!;
-    expect(policyNode).toBeDefined();
-    expect(policyNode.status).toBe(NodeStatus.Waiting);
-    expect(policyNode.attributes.decision).toBe("pause");
+    const mwNode = stmt.children.find((c) => c.kind === NodeKind.Middleware)!;
+    expect(mwNode).toBeDefined();
+    expect(mwNode.status).toBe(NodeStatus.Waiting);
+    expect(mwNode.attributes.decision).toBe("pause");
 
     const handlerNode = stmt.children.find((c) => c.kind === NodeKind.Handler)!;
     expect(handlerNode).toBeDefined();
@@ -878,7 +878,7 @@ describe("VM with event bus", () => {
     expect(stmt.children[1]!.attributes.statementKind).toBe("assignment");
   });
 
-  it("policy events include deviceId and actionKind attributes", async () => {
+  it("middleware events include deviceId and actionKind attributes", async () => {
     const driver = makeDriver();
     const vacuum = await makeDevice(
       "vacuum_salon",
@@ -892,7 +892,7 @@ describe("VM with event bus", () => {
     const tracer = new DefaultExecutionTracer();
     const bus = new DefaultVMEventBus(tracer);
 
-    const policy = new ConfirmationPolicy({
+    const mw = createConfirmationMiddleware({
       requireConfirmation: () => false,
     });
 
@@ -900,13 +900,13 @@ describe("VM with event bus", () => {
 
     await executeCommand(
       { kind: "run_program", program },
-      { devices: [vacuum], policies: [policy], eventBus: bus },
+      { devices: [vacuum], middleware: [mw], eventBus: bus },
     );
 
     const trace = tracer.getTrace();
-    const policyNode = trace.root.children[0]!.children[0]!;
-    expect(policyNode.attributes.actionKind).toBe("invoke_action");
-    expect(policyNode.attributes.deviceId).toBe("vacuum_salon");
+    const mwNode = trace.root.children[0]!.children[0]!;
+    expect(mwNode.attributes.actionKind).toBe("invoke_action");
+    expect(mwNode.attributes.deviceId).toBe("vacuum_salon");
   });
 
   it("traces Execute nodes for each PlannedAction", async () => {
@@ -935,7 +935,7 @@ describe("VM with event bus", () => {
     expect(execNodes[0]!.attributes.property).toBe("power");
   });
 
-  it("traces Execute nodes after Policy nodes under the same Statement", async () => {
+  it("traces Execute nodes after Middleware nodes under the same Statement", async () => {
     const driver = makeDriver();
     const tv = await makeDevice("tv_salon", "tv", "salon", "TV", driver, {
       power: false,
@@ -944,7 +944,7 @@ describe("VM with event bus", () => {
     const tracer = new DefaultExecutionTracer();
     const bus = new DefaultVMEventBus(tracer);
 
-    const policy = new ConfirmationPolicy({
+    const mw = createConfirmationMiddleware({
       requireConfirmation: () => false,
     });
 
@@ -952,19 +952,19 @@ describe("VM with event bus", () => {
 
     await executeCommand(
       { kind: "run_program", program },
-      { devices: [tv], policies: [policy], eventBus: bus },
+      { devices: [tv], middleware: [mw], eventBus: bus },
     );
 
     const trace = tracer.getTrace();
     const stmt = trace.root.children[0]!;
 
     const kinds = stmt.children.map((c) => c.kind);
-    expect(kinds).toContain(NodeKind.Policy);
+    expect(kinds).toContain(NodeKind.Middleware);
     expect(kinds).toContain(NodeKind.Execute);
 
-    const policyNode = stmt.children.find((c) => c.kind === NodeKind.Policy)!;
-    expect(policyNode.name).toBe("policy:confirmation");
-    expect(policyNode.attributes.decision).toBe("continue");
+    const mwNode = stmt.children.find((c) => c.kind === NodeKind.Middleware)!;
+    expect(mwNode.name).toBe("middleware:confirmation");
+    expect(mwNode.attributes.decision).toBe("execute");
 
     const execNode = stmt.children.find((c) => c.kind === NodeKind.Execute)!;
     expect(execNode.name).toBe("execute:set_property");
@@ -999,7 +999,7 @@ describe("VM with event bus", () => {
     expect(execNode.attributes.method).toBe("start");
   });
 
-  it("full trace tree with policies, handlers, and execute nodes", async () => {
+  it("full trace tree with middleware, handlers, and execute nodes", async () => {
     const driver = makeDriver();
     const tv1 = await makeDevice("tv_1", "tv", "salon", "TV 1", driver, {
       power: false,
