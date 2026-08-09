@@ -14,7 +14,7 @@ No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm w
 |---|---|---|---|
 | `packages/lang-core` | `@opennest/lang-core` | Parser (HomeDSL → AST), prompt generator, AST builders | *none* |
 | `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers | *none* (only `js-yaml`) |
-| `packages/vm` | `@opennest/vm` | Interpreter: `executeCommand()`, resolution, policies, interactions, validation, tracing | `lang-core`, `devices` |
+| `packages/vm` | `@opennest/vm` | interpreter: `executeCommand()`, resolution, middleware, interactions, validation, tracing | `lang-core`, `devices` |
 | `packages/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `lang-core`, `devices`, `vm` |
 
 Cross-package deps use `"workspace:*"` in package.json, resolved by pnpm.
@@ -132,7 +132,7 @@ Commands `execute_action` and `execute_statement` build a `Program` internally v
 
 ### VM context types
 
-- `VMContext = { devices: Device[], session?: Session, policies?: ExecutionPolicy[], eventBus?: VMEventBus }`. Devices embed a `DeviceDriver` instance, not a driver name.
+- `VMContext = { devices: Device[], session?: Session, middleware?: Middleware[], eventBus?: VMEventBus }`. Devices embed a `DeviceDriver` instance, not a driver name.
 - `Device` = `{ id, type, room, name, driver: DeviceDriver, driverConfig }`.
 - `DeviceDriver` (in `packages/devices/src/drivers/interface.ts`) exposes: `name`, `init()`, `getProperty()`, `setProperty()`, `executeAction()`.
 - `Session` carries: `variables`, `it`, `history`, `cursor`, `resolvedIds`, `variableResolvedIds`, `variableModifiers`, `pendingInteraction`, `_pendingProgram`.
@@ -156,7 +156,7 @@ Interaction types (`type` field discriminates):
 | Type | Payload | Typical use |
 |---|---|---|
 | `device_selection` | `{ message, devices[] }` | Ambiguous device match |
-| `confirmation` | `{ message }` | Policy requires user approval |
+| `confirmation` | `{ message }` | Middleware requires user approval |
 | `text_input` | `{ message, placeholder? }` | Free-form text input |
 | `number_input` | `{ message, min?, max? }` | Numeric input |
 | `choice` | `{ message, options[] }` | Pick from a list |
@@ -182,24 +182,28 @@ When a statement targets a property or action, the resolver filters out devices 
 ```
 Excluded devices report `reason: "property_not_supported" | "action_not_supported"`.
 
-### Execution policies
+### Middleware
 
-A composable middleware layer between statement resolution and device execution. Each `(device, operation)` PlannedAction passes through an ordered chain of `ExecutionPolicy` instances before dispatch.
+A composable middleware layer between statement resolution and device execution. Each `(device, operation)` PlannedAction passes through an ordered chain of `Middleware` functions before dispatch.
 
-**Key types** (`packages/vm/src/policies/types.ts`):
+**Key types** (`packages/vm/src/middleware/types.ts`):
 
-- `PlannedAction` — discriminated union: `set_property | increment_property | read_property | invoke_action`
-- `PolicyDecision` — what the policy wants: `continue | block | skip | pause | replace | expand`
-- `PolicyContext` — the action + session + devices passed to `evaluate()`
-- `PipelineOutcome` — final result after all policies: `execute | blocked | skipped | paused`
+- `Middleware = (ctx: MiddlewareContext, next: () => Promise<PipelineOutcome>) => Promise<PipelineOutcome>` — Koa-style chain
+- `MiddlewareContext` — the action (mutable) + session + devices passed to each middleware
+- `PipelineOutcome` — final result after all middleware: `execute | blocked | skipped | paused`
 
-The pipeline evaluation/application is split: policies only **evaluate** (return decisions), the VM alone **applies** them. Policies never call device methods.
+Flow control via signals (throw-based):
+- `BlockSignal(reason)` — reject the action
+- `SkipSignal(reason?)` — skip silently
+- `PauseSignal(interaction, context?)` — suspend for user interaction
+- `ExpandSignal(actions[])` — split into multiple actions
+- `replace` is done by mutating `ctx.action` and calling `await next()`
 
-Built-in policies:
-- `NoopExecutionPolicy` — always returns `continue`, serves as template
-- `ConfirmationPolicy` — pauses for confirmation on matching actions (configurable predicate + message)
+Built-in middleware:
+- `noopMiddleware` — always calls `next()`, serves as template
+- `createConfirmationMiddleware(opts)` — pauses for confirmation on matching actions (configurable predicate + message)
 
-`VMContext.policies?: ExecutionPolicy[]` wires policies into execution.
+`VMContext.middleware?: Middleware[]` wires middleware into execution.
 
 ### Pre-execution validation
 
@@ -221,7 +225,7 @@ Deterministic execution tracing via an event bus pattern. The VM emits typed `VM
 
 **Opt-in via `VMContext.eventBus?: VMEventBus`.**
 
-Node kinds captured: `Program`, `Statement`, `Handler`, `Policy`, `Execute`.
+Node kinds captured: `Program`, `Statement`, `Handler`, `Middleware`, `Execute`.
 
 Each `ExecutionNode` records: `id`, `parentId`, `kind`, `name`, `status` (Running/Success/Failed/Waiting/Skipped), `startedAt`, `endedAt`, `duration`, `children`, `attributes`.
 
@@ -306,11 +310,11 @@ packages/
         device-selection.ts # DeviceSelectionHandler
         confirmation.ts  # ConfirmationHandler
         index.ts         # Re-exports + auto-registration of handlers
-      policies/
-        types.ts         # ExecutionPolicy, PlannedAction, PolicyDecision, PipelineOutcome, etc.
-        pipeline.ts      # runPolicyPipeline() — sequential middleware evaluator
-        noop.ts          # NoopExecutionPolicy
-        confirmation.ts  # ConfirmationPolicy — pause-and-resume user confirmation
+      middleware/
+        types.ts         # Middleware, PlannedAction, PipelineOutcome, signals
+        pipeline.ts       # runMiddlewarePipeline() — sequential chain evaluator
+        noop.ts           # noopMiddleware
+        confirmation.ts   # createConfirmationMiddleware() — pause-and-resume
       trace/
         types.ts         # ExecutionNode, ExecutionTrace, NodeKind, NodeStatus
         events.ts        # VMEvent discriminated union (10 event types)

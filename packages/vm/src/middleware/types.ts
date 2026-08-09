@@ -97,7 +97,7 @@ export interface ExecuteOutcome {
 
 export interface BlockedOutcome {
   kind: "blocked";
-  policyName: string;
+  middlewareName: string;
   reason: string;
 }
 

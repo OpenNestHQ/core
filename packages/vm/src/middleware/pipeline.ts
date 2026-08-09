@@ -75,7 +75,7 @@ async function evaluateAt(
       });
       return {
         kind: "blocked",
-        policyName: getMiddlewareName(middleware),
+        middlewareName: getMiddlewareName(middleware),
         reason: signal.reason,
       };
     }

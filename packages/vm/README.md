@@ -1,6 +1,6 @@
 # @opennest/vm
 
-HomeDSL interpreter — device resolution, interactions, policies, validation, and execution tracing.
+HomeDSL interpreter — device resolution, interactions, middleware, validation, and execution tracing.
 
 ## Install
 
@@ -73,29 +73,31 @@ The VM suspends with `status: "awaiting_interaction"` and a typed `interaction` 
 | Interaction type | When | Response |
 |---|---|---|
 | `device_selection` | Multiple devices match | `{ deviceId }` |
-| `confirmation` | Policy requires approval | `{ confirmed }` |
+| `confirmation` | Middleware requires approval | `{ confirmed }` |
 | `text_input` | Text input needed | `{ text }` |
 | `number_input` | Numeric input needed | `{ value }` |
 | `choice` | Choose from options | `{ value }` |
 
-## Execution policies
+## Middleware
 
-Composable middleware pipeline per `(device, operation)`. Add `policies` to `VMContext`:
+Composable Koa-style pipeline per `(device, operation)`. Add `middleware` to `VMContext`:
 
 ```ts
-import { ConfirmationPolicy } from "@opennest/vm";
+import { createConfirmationMiddleware } from "@opennest/vm";
 
-const confirmVacuum = new ConfirmationPolicy({
+const confirmVacuum = createConfirmationMiddleware({
   requireConfirmation: (action) => action.method === "start",
 });
 
 const result = await executeCommand(
   { kind: "run_program", program },
-  { devices, session, policies: [confirmVacuum] },
+  { devices, session, middleware: [confirmVacuum] },
 );
 ```
 
-Built-in policies: `NoopExecutionPolicy` (always allow), `ConfirmationPolicy` (pause and confirm).
+Built-in middleware: `noopMiddleware` (always passthrough), `createConfirmationMiddleware(opts)` (pause and confirm).
+
+Flow control via signals: `BlockSignal`, `SkipSignal`, `PauseSignal`, `ExpandSignal`. Replace via `ctx.action` mutation + `await next()`.
 
 ## Execution tracing
 
@@ -116,7 +118,7 @@ const result = await executeCommand(
 const trace = tracer.getTrace(); // { root: ExecutionNode }
 ```
 
-Captures `Program`, `Statement`, `Handler`, `Policy`, and `Execute` nodes with timing and status.
+Captures `Program`, `Statement`, `Handler`, `Middleware`, and `Execute` nodes with timing and status.
 
 ## Key features
 
@@ -126,5 +128,5 @@ Captures `Program`, `Statement`, `Handler`, `Policy`, and `Execute` nodes with t
 - **Collections** — `@all`, `@first` with batch execution
 - **Conditions** — `@if`/`@else`/`@endif` with `&` (AND) and `|` (OR)
 - **Pre-validation** — static program validation before execution
-- **Policies** — composable middleware for confirmation, blocking, skipping, expansion
+- **Middleware** — composable chain for confirmation, blocking, skipping, expansion
 - **Execution tracing** — deterministic event-bus-based trace tree

@@ -418,7 +418,7 @@ async function applyMiddlewareAndFinish(
           kind: "error",
           errors: [{
             statement,
-            message: `Blocked by middleware "${outcome.policyName}": ${outcome.reason}`,
+            message: `Blocked by middleware "${outcome.middlewareName}": ${outcome.reason}`,
           }],
         };
 

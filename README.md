@@ -16,7 +16,7 @@ Natural Language → HomeAgent (LLM) → HomeDSL → VM (executeCommand) → Dev
 |---|---|---|
 | [lang-core](./packages/lang-core/) | `@opennest/lang-core` | Parser (HomeDSL → AST), prompt generator, AST types |
 | [devices](./packages/devices/) | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers |
-| [vm](./packages/vm/) | `@opennest/vm` | Interpreter: resolution, policies, interactions, validation, tracing |
+| [vm](./packages/vm/) | `@opennest/vm` | Interpreter: resolution, middleware, interactions, validation, tracing |
 | [playground](./packages/playground/) | `@opennest/playground` | Interactive TUI REPL with 14 mock devices + NL→DSL AI agent |
 
 ---
@@ -177,7 +177,7 @@ The VM uses an **extensible user interaction system** instead of hardcoding ambi
 | Type | When | Response |
 |---|---|---|
 | `device_selection` | Multiple devices match a reference | Selected `deviceId` |
-| `confirmation` | A policy requires user approval | `confirmed: boolean` |
+| `confirmation` | A middleware requires user approval | `confirmed: boolean` |
 | `text_input` | Free-form text input needed | `text: string` |
 | `number_input` | Numeric input needed | `value: number` |
 | `choice` | Pick from options | Selected `value: string` |
@@ -188,34 +188,39 @@ When a statement targets a property or action, the resolver filters out devices 
 
 ---
 
-## Execution Policies
+## Middleware
 
-Policies form a **composable middleware pipeline** between statement resolution and device execution. Each `(device, operation)` pair passes through an ordered chain of `ExecutionPolicy` instances before dispatch.
+Middleware forms a **composable pipeline** between statement resolution and device execution using the Koa-style `(ctx, next)` pattern. Each `(device, operation)` pair passes through an ordered chain of `Middleware` functions before dispatch.
 
-### Built-in policies
+### Built-in middleware
 
-| Policy | Behavior |
+| Middleware | Behavior |
 |---|---|
-| `NoopExecutionPolicy` | Always allows — template/skeleton |
-| `ConfirmationPolicy` | Pauses for user confirmation on matching actions |
+| `noopMiddleware` | Always allows — template/skeleton |
+| `createConfirmationMiddleware(opts)` | Pauses for user confirmation on matching actions |
 
-### Policy decisions
+### Flow control
 
-Policies return one of: `continue`, `block` (reject with reason), `skip` (bypass silently), `pause` (suspend for user interaction), `replace` (substitute action), or `expand` (expand into multiple actions).
+Middleware uses **throw-based signals** for flow control:
+- **`BlockSignal(reason)`** — reject the action
+- **`SkipSignal(reason?)`** — bypass silently
+- **`PauseSignal(interaction, context?)`** — suspend for user interaction
+- **`ExpandSignal(actions[])`** — split into multiple actions
+- **`replace`** — mutate `ctx.action` then `await next()`
 
-The VM context accepts an optional `policies: ExecutionPolicy[]`:
+The VM context accepts an optional `middleware: Middleware[]`:
 
 ```ts
-import { ConfirmationPolicy } from "@opennest/vm";
+import { createConfirmationMiddleware } from "@opennest/vm";
 
-const confirmVacuum = new ConfirmationPolicy({
+const confirmVacuum = createConfirmationMiddleware({
   requireConfirmation: (action) => action.method === "start",
   message: "Start the vacuum?",
 });
 
 const result = await executeCommand(
   { kind: "run_program", program },
-  { devices, session, policies: [confirmVacuum] },
+  { devices, session, middleware: [confirmVacuum] },
 );
 ```
 
@@ -261,7 +266,7 @@ const trace = tracer.getTrace(); // { root: ExecutionNode }
 | `Program` | Root — one per `executeCommand` call |
 | `Statement` | One per DSL statement; `@if` bodies appear as children |
 | `Handler` | Interaction handler execution (device selection, confirmation) |
-| `Policy` | Policy evaluation per `PlannedAction` |
+| `Middleware` | Middleware evaluation per `PlannedAction` |
 | `Execute` | `setProperty` / `readProperty` / `incrementProperty` / `invokeAction` calls |
 
 Each node records `startedAt`, `endedAt`, `duration`, `status` (Running / Success / Failed / Waiting / Skipped), and arbitrary `attributes`.
@@ -303,7 +308,7 @@ packages/
     src/
       commands/       # VMCommand types, executeCommand() dispatcher
       interactions/   # UserInteraction types, handler registry, device-selection
-      policies/       # ExecutionPolicy interface, pipeline, confirmation
+      middleware/      # Middleware pipeline, signals, confirmation
       trace/          # VMEventBus, ExecutionTracer, event types
       interpreter.ts  # Main execution loop
       resolver.ts     # Device resolution
@@ -327,7 +332,7 @@ packages/
 1. **Separation of concerns** — LLM = compiler, VM = execution engine
 2. **Deterministic execution** — same DSL + same state → same result
 3. **Structured interactions** — user input is a first-class typed state, not an error
-4. **Composable policies** — middleware pipeline for authorization, confirmation, transformation
+4. **Composable middleware** — pipeline for authorization, confirmation, transformation
 5. **Stateful runtime** — session remembers variables, selections, history
 6. **DSL as interface contract** — HomeDSL is the only interface between LLM and system
 

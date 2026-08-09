@@ -129,8 +129,8 @@ describe("OpenTelemetryTraceSink", () => {
     sink.consume({
       type: "node.started",
       nodeId: "1",
-      kind: "Policy",
-      name: "policy:noop",
+      kind: "Middleware",
+      name: "middleware:noop",
       timestamp: 1000,
     });
 
@@ -200,17 +200,17 @@ describe("OpenTelemetryTraceSink", () => {
     sink.consume({
       type: "node.started",
       nodeId: "1",
-      kind: "Policy",
-      name: "policy:confirmation",
+      kind: "Middleware",
+      name: "middleware:confirmation",
       timestamp: 1000,
       attributes: { actionKind: "turn_off" },
     });
 
     expect(tracer.startSpan).toHaveBeenCalledWith(
-      "policy:confirmation",
+      "middleware:confirmation",
       {
         attributes: {
-          "node.kind": "Policy",
+          "node.kind": "Middleware",
           actionKind: "turn_off",
         },
       },
