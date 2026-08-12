@@ -1,4 +1,4 @@
-import { Cpu } from "lucide-react";
+import { Cpu } from 'lucide-react'
 
 export function Header() {
   return (
@@ -18,5 +18,5 @@ export function Header() {
         <span>HomeDSL → Parser → VM → Devices</span>
       </div>
     </header>
-  );
+  )
 }

@@ -1,14 +1,14 @@
-"use client";
+'use client'
 
-import { useVM } from "@/hooks/use-vm";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { ListChecks, Check, X, Minus } from "lucide-react";
+import { useVM } from '@/hooks/use-vm'
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { ListChecks, Check, X, Minus } from 'lucide-react'
 
 export function TimelinePanel() {
-  const { state } = useVM();
-  const { timeline } = state;
+  const { state } = useVM()
+  const { timeline } = state
 
   return (
     <Card className="flex h-full flex-col border-border">
@@ -27,15 +27,15 @@ export function TimelinePanel() {
             </div>
           ) : (
             <div className="flex flex-col">
-              {timeline.map((entry, i) => (
+              {timeline.map(entry => (
                 <div
                   key={entry.id}
                   className="flex items-start gap-2 px-3 py-2 border-b border-border last:border-b-0 hover:bg-muted/30 transition-colors"
                 >
                   <div className="mt-0.5">
-                    {entry.status === "success" ? (
+                    {entry.status === 'success' ? (
                       <Check className="h-3.5 w-3.5 text-green-400" />
-                    ) : entry.status === "failed" ? (
+                    ) : entry.status === 'failed' ? (
                       <X className="h-3.5 w-3.5 text-red-400" />
                     ) : (
                       <Minus className="h-3.5 w-3.5 text-yellow-400" />
@@ -48,11 +48,11 @@ export function TimelinePanel() {
                       </span>
                       <Badge
                         variant={
-                          entry.status === "success"
-                            ? "success"
-                            : entry.status === "failed"
-                              ? "destructive"
-                              : "warning"
+                          entry.status === 'success'
+                            ? 'success'
+                            : entry.status === 'failed'
+                              ? 'destructive'
+                              : 'warning'
                         }
                       >
                         {entry.status}
@@ -69,5 +69,5 @@ export function TimelinePanel() {
         </ScrollArea>
       </CardContent>
     </Card>
-  );
+  )
 }

@@ -1,15 +1,15 @@
-import type { Session } from "../types.js";
-import type { VMEventBus } from "../trace/event-bus.js";
+import type { Session } from '../types.js'
+import type { VMEventBus } from '../trace/event-bus.js'
 import type {
   InteractionHandler,
   UserInteraction,
   UserResponse,
-} from "./types.js";
+} from './types.js'
 
-const handlers = new Map<string, InteractionHandler>();
+const handlers = new Map<string, InteractionHandler>()
 
 export function registerHandler(handler: InteractionHandler): void {
-  handlers.set(handler.type, handler);
+  handlers.set(handler.type, handler)
 }
 
 export function createInteraction(
@@ -17,26 +17,26 @@ export function createInteraction(
   context: unknown,
   eventBus?: VMEventBus,
 ): UserInteraction {
-  const handler = handlers.get(type);
+  const handler = handlers.get(type)
   if (!handler) {
-    throw new Error(`Unknown interaction type: ${type}`);
+    throw new Error(`Unknown interaction type: ${type}`)
   }
 
   eventBus?.emit({
-    kind: "handler:begin",
+    kind: 'handler:begin',
     timestamp: Date.now(),
     name: type,
-  });
+  })
 
-  const interaction = handler.createInteraction(context);
+  const interaction = handler.createInteraction(context)
 
   eventBus?.emit({
-    kind: "handler:end",
+    kind: 'handler:end',
     timestamp: Date.now(),
-    status: "waiting",
-  });
+    status: 'waiting',
+  })
 
-  return interaction;
+  return interaction
 }
 
 export function processInteractionResponse(
@@ -46,22 +46,22 @@ export function processInteractionResponse(
   response: UserResponse,
   eventBus?: VMEventBus,
 ): void {
-  const handler = handlers.get(type);
+  const handler = handlers.get(type)
   if (!handler) {
-    throw new Error(`Unknown interaction type: ${type}`);
+    throw new Error(`Unknown interaction type: ${type}`)
   }
 
   eventBus?.emit({
-    kind: "handler:begin",
+    kind: 'handler:begin',
     timestamp: Date.now(),
     name: type,
-  });
+  })
 
-  handler.processResponse(session, context, response);
+  handler.processResponse(session, context, response)
 
   eventBus?.emit({
-    kind: "handler:end",
+    kind: 'handler:end',
     timestamp: Date.now(),
-    status: "success",
-  });
+    status: 'success',
+  })
 }

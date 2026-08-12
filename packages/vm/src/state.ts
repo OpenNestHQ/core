@@ -1,7 +1,7 @@
-import type { VMContext, VMResult, Session } from "./types.js";
-import type { UserResponse } from "./interactions/types.js";
-import { processInteractionResponse } from "./interactions/registry.js";
-import { interpretProgram } from "./interpreter.js";
+import type { VMContext, VMResult, Session } from './types.js'
+import type { UserResponse } from './interactions/types.js'
+import { processInteractionResponse } from './interactions/registry.js'
+import { interpretProgram } from './interpreter.js'
 
 export function createSession(): Session {
   return {
@@ -13,22 +13,22 @@ export function createSession(): Session {
     variableResolvedIds: {},
     variableModifiers: {},
     pendingInteraction: null,
-  };
+  }
 }
 
 export function resumeWithResponse(
   session: Session,
   response: UserResponse,
-  eventBus?: VMContext["eventBus"],
+  eventBus?: VMContext['eventBus'],
 ): Session {
-  const pending = session.pendingInteraction;
+  const pending = session.pendingInteraction
   if (!pending) {
-    throw new Error("No pending interaction to resume");
+    throw new Error('No pending interaction to resume')
   }
   if (pending.id !== response.interactionId) {
     throw new Error(
       `Interaction ID mismatch: expected ${pending.id}, got ${response.interactionId}`,
-    );
+    )
   }
 
   processInteractionResponse(
@@ -37,26 +37,26 @@ export function resumeWithResponse(
     pending.context,
     response,
     eventBus,
-  );
-  session.pendingInteraction = null;
-  return session;
+  )
+  session.pendingInteraction = null
+  return session
 }
 
 export async function resumeAndContinue(
   response: UserResponse,
   context: VMContext,
 ): Promise<VMResult> {
-  const session = context.session;
+  const session = context.session
   if (!session) {
-    throw new Error("Cannot resume: no session in context");
+    throw new Error('Cannot resume: no session in context')
   }
 
-  const program = session._pendingProgram;
+  const program = session._pendingProgram
   if (!program) {
-    throw new Error("Cannot resume: no pending program");
+    throw new Error('Cannot resume: no pending program')
   }
 
-  resumeWithResponse(session, response, context.eventBus);
+  resumeWithResponse(session, response, context.eventBus)
 
   return interpretProgram(
     program,
@@ -64,5 +64,5 @@ export async function resumeAndContinue(
     session,
     context.middleware,
     context.eventBus,
-  );
+  )
 }

@@ -9,18 +9,18 @@ import type {
   Segment,
   Statement,
   Value,
-} from "./types.js";
+} from './types.js'
 
 export function buildRoomSelector(room: string): RoomSelector {
-  return room === "*" ? { kind: "wildcard" } : { kind: "room", name: room };
+  return room === '*' ? { kind: 'wildcard' } : { kind: 'room', name: room }
 }
 
 export function buildOwnerSelector(name: string): Selector {
-  return { kind: "owner", name };
+  return { kind: 'owner', name }
 }
 
 export function buildTagSelector(name: string): Selector {
-  return { kind: "tag", name };
+  return { kind: 'tag', name }
 }
 
 function buildPath(deviceType: string, name: string, room?: string): Segment[] {
@@ -30,7 +30,7 @@ function buildPath(deviceType: string, name: string, room?: string): Segment[] {
       selectors: room === undefined ? [] : [buildRoomSelector(room)],
     },
     { identifier: name, selectors: [] },
-  ];
+  ]
 }
 
 export function buildAction(
@@ -39,9 +39,9 @@ export function buildAction(
   room?: string,
 ): Action {
   return {
-    kind: "action",
+    kind: 'action',
     path: buildPath(deviceType, method, room),
-  };
+  }
 }
 
 export function buildAssignment(
@@ -51,10 +51,10 @@ export function buildAssignment(
   room?: string,
 ): Assignment {
   return {
-    kind: "assignment",
+    kind: 'assignment',
     path: buildPath(deviceType, property, room),
     value,
-  };
+  }
 }
 
 export function buildQuery(
@@ -63,9 +63,9 @@ export function buildQuery(
   room?: string,
 ): Query {
   return {
-    kind: "query",
+    kind: 'query',
     path: buildPath(deviceType, property, room),
-  };
+  }
 }
 
 export function buildIncrement(
@@ -75,12 +75,12 @@ export function buildIncrement(
   room?: string,
 ): Increment {
   return {
-    kind: "increment",
+    kind: 'increment',
     path: buildPath(deviceType, property, room),
     value,
-  };
+  }
 }
 
 export function buildProgram(statements: Statement[]): Program {
-  return { kind: "program", statements };
+  return { kind: 'program', statements }
 }

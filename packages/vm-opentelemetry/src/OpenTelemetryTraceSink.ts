@@ -1,104 +1,104 @@
-import { context, trace, SpanStatusCode } from "@opentelemetry/api";
-import type { Attributes, Span, SpanContext, Tracer } from "@opentelemetry/api";
-import type { ExecutionEvent } from "./events.js";
+import { context, trace, SpanStatusCode } from '@opentelemetry/api'
+import type { Attributes, Span, SpanContext, Tracer } from '@opentelemetry/api'
+import type { ExecutionEvent } from './events.js'
 
 export class OpenTelemetryTraceSink {
-  private spans = new Map<string, Span>();
-  private tracer: Tracer;
-  private rootSpanContext: SpanContext | undefined;
-  private pendingLink: SpanContext | undefined;
+  private spans = new Map<string, Span>()
+  private tracer: Tracer
+  private rootSpanContext: SpanContext | undefined
+  private pendingLink: SpanContext | undefined
 
   constructor(tracer: Tracer) {
-    this.tracer = tracer;
+    this.tracer = tracer
   }
 
   consume(event: ExecutionEvent): void {
     switch (event.type) {
-      case "node.started": {
-        const isRoot = event.parentNodeId === undefined;
+      case 'node.started': {
+        const isRoot = event.parentNodeId === undefined
 
         const parentSpan = event.parentNodeId
           ? this.spans.get(event.parentNodeId)
-          : undefined;
+          : undefined
 
         const parentCtx = parentSpan
           ? trace.setSpan(context.active(), parentSpan)
-          : undefined;
+          : undefined
 
         const span = this.tracer.startSpan(
           event.name,
           {
             attributes: {
-              "node.kind": event.kind,
+              'node.kind': event.kind,
               ...event.attributes,
             } as Attributes,
           },
           parentCtx,
-        );
+        )
 
         if (isRoot) {
-          this.rootSpanContext = span.spanContext();
+          this.rootSpanContext = span.spanContext()
           if (this.pendingLink) {
-            span.addLink({ context: this.pendingLink });
-            this.pendingLink = undefined;
+            span.addLink({ context: this.pendingLink })
+            this.pendingLink = undefined
           }
         }
 
-        this.spans.set(event.nodeId, span);
-        break;
+        this.spans.set(event.nodeId, span)
+        break
       }
 
-      case "node.completed": {
-        const span = this.spans.get(event.nodeId);
-        if (!span) return;
+      case 'node.completed': {
+        const span = this.spans.get(event.nodeId)
+        if (!span) return
 
         if (event.attributes) {
           for (const [key, value] of Object.entries(event.attributes)) {
-            span.setAttribute(key, value as Parameters<Span["setAttribute"]>[1]);
+            span.setAttribute(key, value as Parameters<Span['setAttribute']>[1])
           }
         }
 
         switch (event.status) {
-          case "success":
-            span.setStatus({ code: SpanStatusCode.OK });
-            break;
-          case "failed":
-            span.setStatus({ code: SpanStatusCode.ERROR });
-            break;
-          case "cancelled":
-            span.setStatus({ code: SpanStatusCode.UNSET });
-            break;
+          case 'success':
+            span.setStatus({ code: SpanStatusCode.OK })
+            break
+          case 'failed':
+            span.setStatus({ code: SpanStatusCode.ERROR })
+            break
+          case 'cancelled':
+            span.setStatus({ code: SpanStatusCode.UNSET })
+            break
         }
 
-        span.end(event.timestamp);
-        this.spans.delete(event.nodeId);
-        break;
+        span.end(event.timestamp)
+        this.spans.delete(event.nodeId)
+        break
       }
 
-      case "node.attribute": {
-        const span = this.spans.get(event.nodeId);
-        if (!span) return;
-        span.setAttribute(event.key, event.value as Parameters<Span["setAttribute"]>[1]);
-        break;
+      case 'node.attribute': {
+        const span = this.spans.get(event.nodeId)
+        if (!span) return
+        span.setAttribute(
+          event.key,
+          event.value as Parameters<Span['setAttribute']>[1],
+        )
+        break
       }
 
-      case "node.event": {
-        const span = this.spans.get(event.nodeId);
-        if (!span) return;
-        span.addEvent(
-          event.name,
-          event.attributes as Attributes,
-        );
-        break;
+      case 'node.event': {
+        const span = this.spans.get(event.nodeId)
+        if (!span) return
+        span.addEvent(event.name, event.attributes as Attributes)
+        break
       }
     }
   }
 
   getRootSpanContext(): SpanContext | undefined {
-    return this.rootSpanContext;
+    return this.rootSpanContext
   }
 
   setContinuationLink(context: SpanContext): void {
-    this.pendingLink = context;
+    this.pendingLink = context
   }
 }

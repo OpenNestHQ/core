@@ -2,12 +2,12 @@ export {
   registerHandler,
   createInteraction,
   processInteractionResponse,
-} from "./registry.js";
+} from './registry.js'
 
-export { deviceSelectionHandler } from "./device-selection.js";
-export type { DeviceSelectionContext } from "./device-selection.js";
-export { confirmationHandler } from "./confirmation.js";
-export type { ConfirmationResumeContext } from "./confirmation.js";
+export { deviceSelectionHandler } from './device-selection.js'
+export type { DeviceSelectionContext } from './device-selection.js'
+export { confirmationHandler } from './confirmation.js'
+export type { ConfirmationResumeContext } from './confirmation.js'
 
 export type {
   UserInteraction,
@@ -25,4 +25,4 @@ export type {
   ChoiceResponse,
   InteractionHandler,
   PendingInteraction,
-} from "./types.js";
+} from './types.js'

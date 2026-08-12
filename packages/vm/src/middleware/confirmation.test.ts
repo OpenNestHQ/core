@@ -1,17 +1,13 @@
-import { describe, it, expect } from "vitest";
-import { parseHomeDSL } from "@opennest/lang-core";
-import { MockDriver } from "@opennest/devices";
+import { describe, it, expect } from 'vitest'
+import { parseHomeDSL } from '@opennest/lang-core'
+import { MockDriver } from '@opennest/devices'
 import {
   executeCommand,
   createSession,
   createConfirmationMiddleware,
-} from "../index.js";
-import { resumeWithResponse } from "../state.js";
-import type {
-  Device,
-  VMContext,
-  Session,
-} from "../index.js";
+} from '../index.js'
+import { resumeWithResponse } from '../state.js'
+import type { Device, VMContext, Session } from '../index.js'
 
 function makeDevice(
   id: string,
@@ -20,171 +16,219 @@ function makeDevice(
   name: string,
   initialState: Record<string, unknown> = {},
 ): Device {
-  const driver = new MockDriver();
-  driver.seed(id, initialState);
-  return { id, type, room, name, driver, driverConfig: {} };
+  const driver = new MockDriver()
+  driver.seed(id, initialState)
+  return { id, type, room, name, driver, driverConfig: {} }
 }
 
 async function devices(): Promise<Device[]> {
   return [
-    makeDevice("tv_salon", "tv", "salon", "Salon TV", { power: false }),
-    makeDevice("light_salon", "light", "salon", "Salon Light", { power: false }),
-    makeDevice("thermostat_salon", "thermostat", "salon", "Salon Thermostat", { temperature: 21 }),
-  ];
+    makeDevice('tv_salon', 'tv', 'salon', 'Salon TV', { power: false }),
+    makeDevice('light_salon', 'light', 'salon', 'Salon Light', {
+      power: false,
+    }),
+    makeDevice('thermostat_salon', 'thermostat', 'salon', 'Salon Thermostat', {
+      temperature: 21,
+    }),
+  ]
 }
 
 async function ctx(
   session?: Session,
   middleware?: ReturnType<typeof createConfirmationMiddleware>[],
 ): Promise<VMContext> {
-  return { devices: await devices(), session, middleware };
+  return { devices: await devices(), session, middleware }
 }
 
 function parse(code: string) {
-  const result = parseHomeDSL(code);
+  const result = parseHomeDSL(code)
   if (result.errors.length > 0) {
-    throw new Error(`Parse errors: ${result.errors.map((e) => e.message).join(", ")}`);
+    throw new Error(
+      `Parse errors: ${result.errors.map(e => e.message).join(', ')}`,
+    )
   }
-  return result.program;
+  return result.program
 }
 
-describe("createConfirmationMiddleware", () => {
-  it("does not pause when predicate returns false", async () => {
+describe('createConfirmationMiddleware', () => {
+  it('does not pause when predicate returns false', async () => {
     const mw = createConfirmationMiddleware({
       requireConfirmation: () => false,
-    });
+    })
 
-    const program = parse("tv[salon].power = on");
-    const result = await executeCommand({ kind: "run_program", program: program }, await ctx(undefined, [mw]));
+    const program = parse('tv[salon].power = on')
+    const result = await executeCommand(
+      { kind: 'run_program', program: program },
+      await ctx(undefined, [mw]),
+    )
 
-    expect(result.status).toBe("success");
-    expect(result.executed).toHaveLength(1);
-    expect(result.executed[0]!.changes).toHaveLength(1);
-  });
+    expect(result.status).toBe('success')
+    expect(result.executed).toHaveLength(1)
+    expect(result.executed[0]!.changes).toHaveLength(1)
+  })
 
-  it("pauses when predicate returns true", async () => {
+  it('pauses when predicate returns true', async () => {
     const mw = createConfirmationMiddleware({
       requireConfirmation: () => true,
-    });
+    })
 
-    const program = parse("tv[salon].power = on");
-    const result = await executeCommand({ kind: "run_program", program: program }, await ctx(undefined, [mw]));
+    const program = parse('tv[salon].power = on')
+    const result = await executeCommand(
+      { kind: 'run_program', program: program },
+      await ctx(undefined, [mw]),
+    )
 
-    expect(result.status).toBe("awaiting_interaction");
-    expect(result.interaction).not.toBeNull();
-    expect(result.interaction!.type).toBe("confirmation");
-    expect(result.interaction!.message).toContain("Salon TV");
-  });
+    expect(result.status).toBe('awaiting_interaction')
+    expect(result.interaction).not.toBeNull()
+    expect(result.interaction!.type).toBe('confirmation')
+    expect(result.interaction!.message).toContain('Salon TV')
+  })
 
-  it("pauses only on matching device types", async () => {
+  it('pauses only on matching device types', async () => {
     const mw = createConfirmationMiddleware({
-      requireConfirmation: (action) => action.device.type === "thermostat",
-    });
+      requireConfirmation: action => action.device.type === 'thermostat',
+    })
 
-    const tvProgram = parse("tv[salon].power = on");
-    const tvResult = await executeCommand({ kind: "run_program", program: tvProgram }, await ctx(undefined, [mw]));
-    expect(tvResult.status).toBe("success");
+    const tvProgram = parse('tv[salon].power = on')
+    const tvResult = await executeCommand(
+      { kind: 'run_program', program: tvProgram },
+      await ctx(undefined, [mw]),
+    )
+    expect(tvResult.status).toBe('success')
 
-    const thermoProgram = parse("thermostat[salon].temperature = 22");
-    const thermoResult = await executeCommand({ kind: "run_program", program: thermoProgram }, await ctx(undefined, [mw]));
-    expect(thermoResult.status).toBe("awaiting_interaction");
-  });
+    const thermoProgram = parse('thermostat[salon].temperature = 22')
+    const thermoResult = await executeCommand(
+      { kind: 'run_program', program: thermoProgram },
+      await ctx(undefined, [mw]),
+    )
+    expect(thermoResult.status).toBe('awaiting_interaction')
+  })
 
-  it("resumes and executes when confirmed", async () => {
+  it('resumes and executes when confirmed', async () => {
     const mw = createConfirmationMiddleware({
       requireConfirmation: () => true,
-    });
-    const session = createSession();
-    const program = parse("tv[salon].power = on");
+    })
+    const session = createSession()
+    const program = parse('tv[salon].power = on')
 
-    const firstResult = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [mw]));
-    expect(firstResult.status).toBe("awaiting_interaction");
+    const firstResult = await executeCommand(
+      { kind: 'run_program', program: program },
+      await ctx(session, [mw]),
+    )
+    expect(firstResult.status).toBe('awaiting_interaction')
 
     resumeWithResponse(session, {
       interactionId: firstResult.interaction!.id,
-      type: "confirmation",
+      type: 'confirmation',
       confirmed: true,
-    });
+    })
 
-    const secondResult = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [mw]));
-    expect(secondResult.status).toBe("success");
-    expect(secondResult.executed).toHaveLength(1);
-    expect(secondResult.executed[0]!.changes[0]!.newValue).toBe(true);
-  });
+    const secondResult = await executeCommand(
+      { kind: 'run_program', program: program },
+      await ctx(session, [mw]),
+    )
+    expect(secondResult.status).toBe('success')
+    expect(secondResult.executed).toHaveLength(1)
+    expect(secondResult.executed[0]!.changes[0]!.newValue).toBe(true)
+  })
 
-  it("resumes and blocks when denied", async () => {
+  it('resumes and blocks when denied', async () => {
     const mw = createConfirmationMiddleware({
       requireConfirmation: () => true,
-    });
-    const session = createSession();
-    const program = parse("tv[salon].power = on");
+    })
+    const session = createSession()
+    const program = parse('tv[salon].power = on')
 
-    const firstResult = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [mw]));
-    expect(firstResult.status).toBe("awaiting_interaction");
+    const firstResult = await executeCommand(
+      { kind: 'run_program', program: program },
+      await ctx(session, [mw]),
+    )
+    expect(firstResult.status).toBe('awaiting_interaction')
 
     resumeWithResponse(session, {
       interactionId: firstResult.interaction!.id,
-      type: "confirmation",
+      type: 'confirmation',
       confirmed: false,
-    });
+    })
 
-    const secondResult = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [mw]));
-    expect(secondResult.status).toBe("error");
-    expect(secondResult.errors[0]!.message).toContain("denied by user");
-  });
+    const secondResult = await executeCommand(
+      { kind: 'run_program', program: program },
+      await ctx(session, [mw]),
+    )
+    expect(secondResult.status).toBe('error')
+    expect(secondResult.errors[0]!.message).toContain('denied by user')
+  })
 
-  it("does not re-ask for an already confirmed action", async () => {
+  it('does not re-ask for an already confirmed action', async () => {
     const mw = createConfirmationMiddleware({
       requireConfirmation: () => true,
-    });
-    const session = createSession();
-    const program = parse("tv[salon].power = on");
+    })
+    const session = createSession()
+    const program = parse('tv[salon].power = on')
 
-    const first = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [mw]));
+    const first = await executeCommand(
+      { kind: 'run_program', program: program },
+      await ctx(session, [mw]),
+    )
     resumeWithResponse(session, {
       interactionId: first.interaction!.id,
-      type: "confirmation",
+      type: 'confirmation',
       confirmed: true,
-    });
+    })
 
-    const second = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [mw]));
-    expect(second.status).toBe("success");
+    const second = await executeCommand(
+      { kind: 'run_program', program: program },
+      await ctx(session, [mw]),
+    )
+    expect(second.status).toBe('success')
 
-    const third = await executeCommand({ kind: "run_program", program: program }, await ctx(session, [mw]));
-    expect(third.status).toBe("success");
-  });
+    const third = await executeCommand(
+      { kind: 'run_program', program: program },
+      await ctx(session, [mw]),
+    )
+    expect(third.status).toBe('success')
+  })
 
-  it("confirms each distinct action independently", async () => {
+  it('confirms each distinct action independently', async () => {
     const mw = createConfirmationMiddleware({
       requireConfirmation: () => true,
-    });
-    const session = createSession();
+    })
+    const session = createSession()
 
-    const programTv = parse("tv[salon].power = on");
-    const r1 = await executeCommand({ kind: "run_program", program: programTv }, await ctx(session, [mw]));
-    expect(r1.status).toBe("awaiting_interaction");
+    const programTv = parse('tv[salon].power = on')
+    const r1 = await executeCommand(
+      { kind: 'run_program', program: programTv },
+      await ctx(session, [mw]),
+    )
+    expect(r1.status).toBe('awaiting_interaction')
     resumeWithResponse(session, {
       interactionId: r1.interaction!.id,
-      type: "confirmation",
+      type: 'confirmation',
       confirmed: true,
-    });
+    })
 
-    const programLight = parse("light[salon].power = on");
-    const r2 = await executeCommand({ kind: "run_program", program: programLight }, await ctx(session, [mw]));
-    expect(r2.status).toBe("awaiting_interaction");
-    expect(r2.interaction!.id).not.toBe(r1.interaction!.id);
-  });
+    const programLight = parse('light[salon].power = on')
+    const r2 = await executeCommand(
+      { kind: 'run_program', program: programLight },
+      await ctx(session, [mw]),
+    )
+    expect(r2.status).toBe('awaiting_interaction')
+    expect(r2.interaction!.id).not.toBe(r1.interaction!.id)
+  })
 
-  it("uses custom message formatter", async () => {
+  it('uses custom message formatter', async () => {
     const mw = createConfirmationMiddleware({
       requireConfirmation: () => true,
-      message: (action) => `[CUSTOM] Allow ${action.device.name}?`,
-    });
+      message: action => `[CUSTOM] Allow ${action.device.name}?`,
+    })
 
-    const program = parse("tv[salon].power = on");
-    const result = await executeCommand({ kind: "run_program", program: program }, await ctx(undefined, [mw]));
+    const program = parse('tv[salon].power = on')
+    const result = await executeCommand(
+      { kind: 'run_program', program: program },
+      await ctx(undefined, [mw]),
+    )
 
-    expect(result.interaction!.message).toContain("[CUSTOM]");
-    expect(result.interaction!.message).toContain("Salon TV");
-  });
-});
+    expect(result.interaction!.message).toContain('[CUSTOM]')
+    expect(result.interaction!.message).toContain('Salon TV')
+  })
+})

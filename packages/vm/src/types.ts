@@ -3,92 +3,95 @@ import type {
   DeviceRef,
   CollectionModifier,
   Program,
-} from "@opennest/lang-core";
-import type { DeviceDriver } from "@opennest/devices";
-import type { UserInteraction, PendingInteraction } from "./interactions/types.js";
-import type { Middleware } from "./middleware/types.js";
-import type { VMEventBus } from "./trace/event-bus.js";
+} from '@opennest/lang-core'
+import type { DeviceDriver } from '@opennest/devices'
+import type {
+  UserInteraction,
+  PendingInteraction,
+} from './interactions/types.js'
+import type { Middleware } from './middleware/types.js'
+import type { VMEventBus } from './trace/event-bus.js'
 
 export interface Device {
-  id: string;
-  type: string;
-  room: string;
-  name: string;
-  driver: DeviceDriver;
-  driverConfig: Record<string, unknown>;
-  owners?: string[];
-  tags?: string[];
+  id: string
+  type: string
+  room: string
+  name: string
+  driver: DeviceDriver
+  driverConfig: Record<string, unknown>
+  owners?: string[]
+  tags?: string[]
 }
 
 export interface StateChange {
-  deviceId: string;
-  property: string;
-  oldValue: unknown;
-  newValue: unknown;
+  deviceId: string
+  property: string
+  oldValue: unknown
+  newValue: unknown
 }
 
 export interface ExecutedStatement {
-  statement: Statement;
-  resolvedDevices: Device[];
-  changes: StateChange[];
-  filter?: ResolutionFilter;
+  statement: Statement
+  resolvedDevices: Device[]
+  changes: StateChange[]
+  filter?: ResolutionFilter
 }
 
 export interface Session {
-  variables: Record<string, DeviceRef>;
-  it: Device | null;
-  history: ExecutedStatement[];
-  cursor: number;
-  resolvedIds: Record<string, string>;
-  variableResolvedIds: Record<string, string>;
-  variableModifiers: Record<string, CollectionModifier>;
-  pendingInteraction: PendingInteraction | null;
-  _pendingProgram?: Program;
+  variables: Record<string, DeviceRef>
+  it: Device | null
+  history: ExecutedStatement[]
+  cursor: number
+  resolvedIds: Record<string, string>
+  variableResolvedIds: Record<string, string>
+  variableModifiers: Record<string, CollectionModifier>
+  pendingInteraction: PendingInteraction | null
+  _pendingProgram?: Program
 }
 
 export interface VMError {
-  statement: Statement;
-  message: string;
+  statement: Statement
+  message: string
 }
 
-export type VMStatus = "success" | "awaiting_interaction" | "error";
+export type VMStatus = 'success' | 'awaiting_interaction' | 'error'
 
 export interface VMResult {
-  status: VMStatus;
-  session: Session;
-  executed: ExecutedStatement[];
-  interaction: UserInteraction | null;
-  errors: VMError[];
+  status: VMStatus
+  session: Session
+  executed: ExecutedStatement[]
+  interaction: UserInteraction | null
+  errors: VMError[]
 }
 
 export interface VMContext {
-  devices: Device[];
-  session?: Session;
-  middleware?: Middleware[];
-  eventBus?: VMEventBus;
+  devices: Device[]
+  session?: Session
+  middleware?: Middleware[]
+  eventBus?: VMEventBus
 }
 
 export interface ResolutionIntent {
-  kind: "property" | "action";
-  name: string;
+  kind: 'property' | 'action'
+  name: string
 }
 
 export interface ExcludedDevice {
-  deviceId: string;
-  deviceName: string;
-  reason: "property_not_supported" | "action_not_supported";
-  details: string;
+  deviceId: string
+  deviceName: string
+  reason: 'property_not_supported' | 'action_not_supported'
+  details: string
 }
 
 export interface ResolutionFilter {
-  candidates: number;
-  matched: number;
-  excluded: ExcludedDevice[];
+  candidates: number
+  matched: number
+  excluded: ExcludedDevice[]
 }
 
 export interface ResolutionResult {
-  devices: Device[];
-  ambiguous: boolean;
-  filter?: ResolutionFilter;
-  noMatchDescription?: string;
+  devices: Device[]
+  ambiguous: boolean
+  filter?: ResolutionFilter
+  noMatchDescription?: string
 }

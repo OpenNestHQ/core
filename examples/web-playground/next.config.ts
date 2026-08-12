@@ -1,10 +1,7 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  transpilePackages: [
-    "@opennest/lang-core",
-    "@opennest/vm",
-  ],
-};
+  transpilePackages: ['@opennest/lang-core', '@opennest/vm'],
+}
 
-export default nextConfig;
+export default nextConfig

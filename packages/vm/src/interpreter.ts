@@ -10,21 +10,25 @@ import type {
   DeviceRef,
   ConditionExpr,
   SimpleCondition,
-} from "@opennest/lang-core";
-import type { Device, Session, VMResult, VMError, ResolutionIntent, ResolutionResult } from "./types.js";
-import type { UserInteraction } from "./interactions/types.js";
-import type { DeviceSelectionContext } from "./interactions/device-selection.js";
-import type { Middleware, PlannedAction } from "./middleware/types.js";
-import type { VMEventBus } from "./trace/event-bus.js";
-import { createSession } from "./state.js";
-import { resolveDevices } from "./resolver.js";
-import { validateProgram } from "./validate.js";
-import { createInteraction } from "./interactions/registry.js";
-import {
-  executePlannedAction,
-  evaluateCondition,
-} from "./executor.js";
-import { runMiddlewarePipeline } from "./middleware/pipeline.js";
+} from '@opennest/lang-core'
+import type {
+  Device,
+  Session,
+  VMResult,
+  VMError,
+  ResolutionIntent,
+  ResolutionResult,
+} from './types.js'
+import type { UserInteraction } from './interactions/types.js'
+import type { DeviceSelectionContext } from './interactions/device-selection.js'
+import type { Middleware, PlannedAction } from './middleware/types.js'
+import type { VMEventBus } from './trace/event-bus.js'
+import { createSession } from './state.js'
+import { resolveDevices } from './resolver.js'
+import { validateProgram } from './validate.js'
+import { createInteraction } from './interactions/registry.js'
+import { executePlannedAction, evaluateCondition } from './executor.js'
+import { runMiddlewarePipeline } from './middleware/pipeline.js'
 
 export async function interpretProgram(
   program: Program,
@@ -33,50 +37,50 @@ export async function interpretProgram(
   middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<VMResult> {
-  const session = existingSession ?? createSession();
-  const isFresh = !existingSession || existingSession.cursor === 0;
+  const session = existingSession ?? createSession()
+  const isFresh = !existingSession || existingSession.cursor === 0
 
   if (isFresh) {
-    const validationErrors = validateProgram(program, devices, session);
+    const validationErrors = validateProgram(program, devices, session)
     if (validationErrors.length > 0) {
       eventBus?.emit({
-        kind: "program:begin",
+        kind: 'program:begin',
         timestamp: Date.now(),
-      });
+      })
       eventBus?.emit({
-        kind: "program:end",
+        kind: 'program:end',
         timestamp: Date.now(),
-        status: "failed",
+        status: 'failed',
         errorCount: validationErrors.length,
-      });
+      })
       return {
-        status: "error",
+        status: 'error',
         session,
         executed: [],
         interaction: null,
         errors: validationErrors,
-      };
+      }
     }
   }
 
   eventBus?.emit({
-    kind: "program:begin",
+    kind: 'program:begin',
     timestamp: Date.now(),
-  });
+  })
 
-  const errors: VMError[] = [];
-  let awaiting = false;
-  let interactionResult: UserInteraction | null = null;
+  const errors: VMError[] = []
+  let awaiting = false
+  let interactionResult: UserInteraction | null = null
 
   for (let i = session.cursor; i < program.statements.length; i++) {
-    const statement = program.statements[i]!;
+    const statement = program.statements[i]!
 
     eventBus?.emit({
-      kind: "statement:begin",
+      kind: 'statement:begin',
       timestamp: Date.now(),
       index: i,
       statementKind: statement.kind,
-    });
+    })
 
     const result = await interpretStatement(
       statement,
@@ -84,106 +88,110 @@ export async function interpretProgram(
       session,
       middleware,
       eventBus,
-    );
+    )
 
-    if (result.kind === "awaiting_interaction") {
+    if (result.kind === 'awaiting_interaction') {
       eventBus?.emit({
-        kind: "statement:end",
+        kind: 'statement:end',
         timestamp: Date.now(),
-        status: "waiting",
-      });
-      awaiting = true;
-      interactionResult = result.interaction;
+        status: 'waiting',
+      })
+      awaiting = true
+      interactionResult = result.interaction
       session.pendingInteraction = {
         id: result.interaction.id,
         type: result.interaction.type,
         context: result.pendingContext,
-      };
-      session._pendingProgram = program;
-      session.cursor = i;
-      break;
+      }
+      session._pendingProgram = program
+      session.cursor = i
+      break
     }
 
-    if (result.kind === "error") {
+    if (result.kind === 'error') {
       eventBus?.emit({
-        kind: "statement:end",
+        kind: 'statement:end',
         timestamp: Date.now(),
-        status: "failed",
+        status: 'failed',
         errors: result.errors,
-      });
-      errors.push(...result.errors);
+      })
+      errors.push(...result.errors)
     } else {
-      const lastEntry = session.history[session.history.length - 1];
-      const resolvedCount = lastEntry?.resolvedDevices.length ?? 0;
-      const changeCount = lastEntry?.changes.length ?? 0;
+      const lastEntry = session.history[session.history.length - 1]
+      const resolvedCount = lastEntry?.resolvedDevices.length ?? 0
+      const changeCount = lastEntry?.changes.length ?? 0
       eventBus?.emit({
-        kind: "statement:end",
+        kind: 'statement:end',
         timestamp: Date.now(),
-        status: "success",
+        status: 'success',
         resolvedDeviceCount: resolvedCount,
         changeCount,
-      });
+      })
     }
 
-    session.resolvedIds = {};
+    session.resolvedIds = {}
 
-    session.cursor = i + 1;
+    session.cursor = i + 1
   }
 
   if (!awaiting) {
-    session.cursor = 0;
-    delete session._pendingProgram;
+    session.cursor = 0
+    delete session._pendingProgram
   }
 
   if (awaiting) {
     eventBus?.emit({
-      kind: "program:end",
+      kind: 'program:end',
       timestamp: Date.now(),
-      status: "waiting",
-    });
+      status: 'waiting',
+    })
     return {
-      status: "awaiting_interaction",
+      status: 'awaiting_interaction',
       session,
       executed: session.history,
       interaction: interactionResult,
       errors,
-    };
+    }
   }
 
   if (errors.length > 0) {
     eventBus?.emit({
-      kind: "program:end",
+      kind: 'program:end',
       timestamp: Date.now(),
-      status: "failed",
+      status: 'failed',
       errorCount: errors.length,
-    });
+    })
     return {
-      status: "error",
+      status: 'error',
       session,
       executed: session.history,
       interaction: null,
       errors,
-    };
+    }
   }
 
   eventBus?.emit({
-    kind: "program:end",
+    kind: 'program:end',
     timestamp: Date.now(),
-    status: "success",
-  });
+    status: 'success',
+  })
   return {
-    status: "success",
+    status: 'success',
     session,
     executed: session.history,
     interaction: null,
     errors: [],
-  };
+  }
 }
 
 type InterpretResult =
-  | { kind: "success" }
-  | { kind: "awaiting_interaction"; interaction: UserInteraction; pendingContext: unknown }
-  | { kind: "error"; errors: VMError[] };
+  | { kind: 'success' }
+  | {
+      kind: 'awaiting_interaction'
+      interaction: UserInteraction
+      pendingContext: unknown
+    }
+  | { kind: 'error'; errors: VMError[] }
 
 async function interpretStatement(
   statement: Statement,
@@ -193,18 +201,36 @@ async function interpretStatement(
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
   switch (statement.kind) {
-    case "assignment":
-      return interpretAssignment(statement, devices, session, middleware, eventBus);
-    case "query":
-      return interpretQuery(statement, devices, session, middleware, eventBus);
-    case "increment":
-      return interpretIncrement(statement, devices, session, middleware, eventBus);
-    case "action":
-      return interpretAction(statement, devices, session, middleware, eventBus);
-    case "variable_assignment":
-      return interpretVariableAssignment(statement, devices, session, eventBus);
-    case "if":
-      return interpretIfStatement(statement, devices, session, middleware, eventBus);
+    case 'assignment':
+      return interpretAssignment(
+        statement,
+        devices,
+        session,
+        middleware,
+        eventBus,
+      )
+    case 'query':
+      return interpretQuery(statement, devices, session, middleware, eventBus)
+    case 'increment':
+      return interpretIncrement(
+        statement,
+        devices,
+        session,
+        middleware,
+        eventBus,
+      )
+    case 'action':
+      return interpretAction(statement, devices, session, middleware, eventBus)
+    case 'variable_assignment':
+      return interpretVariableAssignment(statement, devices, session, eventBus)
+    case 'if':
+      return interpretIfStatement(
+        statement,
+        devices,
+        session,
+        middleware,
+        eventBus,
+      )
   }
 }
 
@@ -218,30 +244,30 @@ function awaitDeviceSelection(
     devices: result.devices,
     deviceType,
     variableName,
-  };
+  }
   return {
-    kind: "awaiting_interaction",
-    interaction: createInteraction("device_selection", ctx, eventBus),
+    kind: 'awaiting_interaction',
+    interaction: createInteraction('device_selection', ctx, eventBus),
     pendingContext: ctx,
-  };
+  }
 }
 
 function extractDeviceContext(
   path: { identifier: string; isVariable?: boolean }[],
   session: Session,
 ): { deviceType: string; variableName: string | undefined } {
-  const firstSeg = path[0];
-  if (!firstSeg) return { deviceType: "unknown", variableName: undefined };
+  const firstSeg = path[0]
+  if (!firstSeg) return { deviceType: 'unknown', variableName: undefined }
 
   if (firstSeg.isVariable) {
-    const varRef = session.variables[firstSeg.identifier];
+    const varRef = session.variables[firstSeg.identifier]
     return {
       deviceType: varRef?.deviceType ?? firstSeg.identifier,
       variableName: firstSeg.identifier,
-    };
+    }
   }
 
-  return { deviceType: firstSeg.identifier, variableName: undefined };
+  return { deviceType: firstSeg.identifier, variableName: undefined }
 }
 
 async function interpretAssignment(
@@ -251,30 +277,52 @@ async function interpretAssignment(
   middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
-  const property = lastPropertyName(stmt.path);
-  const intent: ResolutionIntent = { kind: "property", name: property };
-  const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
+  const property = lastPropertyName(stmt.path)
+  const intent: ResolutionIntent = { kind: 'property', name: property }
+  const resolutionResult = resolveDevices(stmt.path, devices, session, intent)
 
   if (resolutionResult.ambiguous) {
-    const { deviceType, variableName } = extractDeviceContext(stmt.path, session);
-    return awaitDeviceSelection(resolutionResult, deviceType, variableName, eventBus);
+    const { deviceType, variableName } = extractDeviceContext(
+      stmt.path,
+      session,
+    )
+    return awaitDeviceSelection(
+      resolutionResult,
+      deviceType,
+      variableName,
+      eventBus,
+    )
   }
 
   if (resolutionResult.devices.length === 0) {
     return {
-      kind: "error",
-      errors: [{ statement: stmt, message: resolutionResult.noMatchDescription ?? `No devices found for path` }],
-    };
+      kind: 'error',
+      errors: [
+        {
+          statement: stmt,
+          message:
+            resolutionResult.noMatchDescription ?? `No devices found for path`,
+        },
+      ],
+    }
   }
 
-  const actions: PlannedAction[] = resolutionResult.devices.map((device) => ({
-    kind: "set_property" as const,
+  const actions: PlannedAction[] = resolutionResult.devices.map(device => ({
+    kind: 'set_property' as const,
     device,
     property,
     value: stmt.value,
-  }));
+  }))
 
-  return applyMiddlewareAndFinish(actions, middleware, session, devices, stmt, resolutionResult, eventBus);
+  return applyMiddlewareAndFinish(
+    actions,
+    middleware,
+    session,
+    devices,
+    stmt,
+    resolutionResult,
+    eventBus,
+  )
 }
 
 async function interpretQuery(
@@ -284,29 +332,51 @@ async function interpretQuery(
   middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
-  const property = lastPropertyName(stmt.path);
-  const intent: ResolutionIntent = { kind: "property", name: property };
-  const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
+  const property = lastPropertyName(stmt.path)
+  const intent: ResolutionIntent = { kind: 'property', name: property }
+  const resolutionResult = resolveDevices(stmt.path, devices, session, intent)
 
   if (resolutionResult.ambiguous) {
-    const { deviceType, variableName } = extractDeviceContext(stmt.path, session);
-    return awaitDeviceSelection(resolutionResult, deviceType, variableName, eventBus);
+    const { deviceType, variableName } = extractDeviceContext(
+      stmt.path,
+      session,
+    )
+    return awaitDeviceSelection(
+      resolutionResult,
+      deviceType,
+      variableName,
+      eventBus,
+    )
   }
 
   if (resolutionResult.devices.length === 0) {
     return {
-      kind: "error",
-      errors: [{ statement: stmt, message: resolutionResult.noMatchDescription ?? `No devices found for query` }],
-    };
+      kind: 'error',
+      errors: [
+        {
+          statement: stmt,
+          message:
+            resolutionResult.noMatchDescription ?? `No devices found for query`,
+        },
+      ],
+    }
   }
 
-  const actions: PlannedAction[] = resolutionResult.devices.map((device) => ({
-    kind: "read_property" as const,
+  const actions: PlannedAction[] = resolutionResult.devices.map(device => ({
+    kind: 'read_property' as const,
     device,
     property,
-  }));
+  }))
 
-  return applyMiddlewareAndFinish(actions, middleware, session, devices, stmt, resolutionResult, eventBus);
+  return applyMiddlewareAndFinish(
+    actions,
+    middleware,
+    session,
+    devices,
+    stmt,
+    resolutionResult,
+    eventBus,
+  )
 }
 
 async function interpretIncrement(
@@ -316,30 +386,53 @@ async function interpretIncrement(
   middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
-  const property = lastPropertyName(stmt.path);
-  const intent: ResolutionIntent = { kind: "property", name: property };
-  const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
+  const property = lastPropertyName(stmt.path)
+  const intent: ResolutionIntent = { kind: 'property', name: property }
+  const resolutionResult = resolveDevices(stmt.path, devices, session, intent)
 
   if (resolutionResult.ambiguous) {
-    const { deviceType, variableName } = extractDeviceContext(stmt.path, session);
-    return awaitDeviceSelection(resolutionResult, deviceType, variableName, eventBus);
+    const { deviceType, variableName } = extractDeviceContext(
+      stmt.path,
+      session,
+    )
+    return awaitDeviceSelection(
+      resolutionResult,
+      deviceType,
+      variableName,
+      eventBus,
+    )
   }
 
   if (resolutionResult.devices.length === 0) {
     return {
-      kind: "error",
-      errors: [{ statement: stmt, message: resolutionResult.noMatchDescription ?? `No devices found for increment` }],
-    };
+      kind: 'error',
+      errors: [
+        {
+          statement: stmt,
+          message:
+            resolutionResult.noMatchDescription ??
+            `No devices found for increment`,
+        },
+      ],
+    }
   }
 
-  const actions: PlannedAction[] = resolutionResult.devices.map((device) => ({
-    kind: "increment_property" as const,
+  const actions: PlannedAction[] = resolutionResult.devices.map(device => ({
+    kind: 'increment_property' as const,
     device,
     property,
     value: stmt.value,
-  }));
+  }))
 
-  return applyMiddlewareAndFinish(actions, middleware, session, devices, stmt, resolutionResult, eventBus);
+  return applyMiddlewareAndFinish(
+    actions,
+    middleware,
+    session,
+    devices,
+    stmt,
+    resolutionResult,
+    eventBus,
+  )
 }
 
 async function interpretAction(
@@ -349,29 +442,52 @@ async function interpretAction(
   middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
-  const method = lastPropertyName(stmt.path);
-  const intent: ResolutionIntent = { kind: "action", name: method };
-  const resolutionResult = resolveDevices(stmt.path, devices, session, intent);
+  const method = lastPropertyName(stmt.path)
+  const intent: ResolutionIntent = { kind: 'action', name: method }
+  const resolutionResult = resolveDevices(stmt.path, devices, session, intent)
 
   if (resolutionResult.ambiguous) {
-    const { deviceType, variableName } = extractDeviceContext(stmt.path, session);
-    return awaitDeviceSelection(resolutionResult, deviceType, variableName, eventBus);
+    const { deviceType, variableName } = extractDeviceContext(
+      stmt.path,
+      session,
+    )
+    return awaitDeviceSelection(
+      resolutionResult,
+      deviceType,
+      variableName,
+      eventBus,
+    )
   }
 
   if (resolutionResult.devices.length === 0) {
     return {
-      kind: "error",
-      errors: [{ statement: stmt, message: resolutionResult.noMatchDescription ?? `No devices found for action` }],
-    };
+      kind: 'error',
+      errors: [
+        {
+          statement: stmt,
+          message:
+            resolutionResult.noMatchDescription ??
+            `No devices found for action`,
+        },
+      ],
+    }
   }
 
-  const actions: PlannedAction[] = resolutionResult.devices.map((device) => ({
-    kind: "invoke_action" as const,
+  const actions: PlannedAction[] = resolutionResult.devices.map(device => ({
+    kind: 'invoke_action' as const,
     device,
     method,
-  }));
+  }))
 
-  return applyMiddlewareAndFinish(actions, middleware, session, devices, stmt, resolutionResult, eventBus);
+  return applyMiddlewareAndFinish(
+    actions,
+    middleware,
+    session,
+    devices,
+    stmt,
+    resolutionResult,
+    eventBus,
+  )
 }
 
 async function applyMiddlewareAndFinish(
@@ -385,62 +501,69 @@ async function applyMiddlewareAndFinish(
 ): Promise<InterpretResult> {
   if (!middleware || middleware.length === 0) {
     const changes = await Promise.all(
-      actions.map((action) => executePlannedAction(action, eventBus)),
-    );
+      actions.map(action => executePlannedAction(action, eventBus)),
+    )
 
     session.history.push({
       statement,
       resolvedDevices: resolutionResult.devices,
       changes,
       ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
-    });
+    })
 
     if (resolutionResult.devices[0]) {
-      session.it = resolutionResult.devices[0];
+      session.it = resolutionResult.devices[0]
     }
 
-    return { kind: "success" };
+    return { kind: 'success' }
   }
 
-  const env = { session, devices };
-  const approved: PlannedAction[] = [];
+  const env = { session, devices }
+  const approved: PlannedAction[] = []
 
   for (const action of actions) {
-    const outcome = await runMiddlewarePipeline(action, middleware, env, eventBus);
+    const outcome = await runMiddlewarePipeline(
+      action,
+      middleware,
+      env,
+      eventBus,
+    )
 
     switch (outcome.kind) {
-      case "execute":
-        approved.push(...outcome.actions);
-        break;
+      case 'execute':
+        approved.push(...outcome.actions)
+        break
 
-      case "blocked":
+      case 'blocked':
         return {
-          kind: "error",
-          errors: [{
-            statement,
-            message: `Blocked by middleware "${outcome.middlewareName}": ${outcome.reason}`,
-          }],
-        };
+          kind: 'error',
+          errors: [
+            {
+              statement,
+              message: `Blocked by middleware "${outcome.middlewareName}": ${outcome.reason}`,
+            },
+          ],
+        }
 
-      case "skipped":
-        continue;
+      case 'skipped':
+        continue
 
-      case "paused":
+      case 'paused':
         eventBus?.emit({
-          kind: "handler:begin",
+          kind: 'handler:begin',
           timestamp: Date.now(),
           name: outcome.interaction.type,
-        });
+        })
         eventBus?.emit({
-          kind: "handler:end",
+          kind: 'handler:end',
           timestamp: Date.now(),
-          status: "waiting",
-        });
+          status: 'waiting',
+        })
         return {
-          kind: "awaiting_interaction",
+          kind: 'awaiting_interaction',
           interaction: outcome.interaction,
           pendingContext: outcome.context ?? null,
-        };
+        }
     }
   }
 
@@ -450,30 +573,32 @@ async function applyMiddlewareAndFinish(
       resolvedDevices: resolutionResult.devices,
       changes: [],
       ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
-    });
+    })
 
-    return { kind: "success" };
+    return { kind: 'success' }
   }
 
   const changes = await Promise.all(
-      approved.map((action) => executePlannedAction(action, eventBus)),
-  );
+    approved.map(action => executePlannedAction(action, eventBus)),
+  )
 
-  const resolvedIds = new Set(approved.map((a) => a.device.id));
-  const executedDevices = resolutionResult.devices.filter((d) => resolvedIds.has(d.id));
+  const resolvedIds = new Set(approved.map(a => a.device.id))
+  const executedDevices = resolutionResult.devices.filter(d =>
+    resolvedIds.has(d.id),
+  )
 
   session.history.push({
     statement,
     resolvedDevices: executedDevices,
     changes,
     ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
-  });
+  })
 
   if (executedDevices[0]) {
-    session.it = executedDevices[0];
+    session.it = executedDevices[0]
   }
 
-  return { kind: "success" };
+  return { kind: 'success' }
 }
 
 async function interpretVariableAssignment(
@@ -482,33 +607,33 @@ async function interpretVariableAssignment(
   session: Session,
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
-  if (stmt.value.kind === "device_ref") {
-    session.variables[stmt.name] = stmt.value;
-    delete session.variableResolvedIds[stmt.name];
+  if (stmt.value.kind === 'device_ref') {
+    session.variables[stmt.name] = stmt.value
+    delete session.variableResolvedIds[stmt.name]
     session.history.push({
       statement: stmt,
       resolvedDevices: [],
       changes: [],
-    });
-    return { kind: "success" };
+    })
+    return { kind: 'success' }
   }
 
-  if (stmt.value.kind === "collection") {
+  if (stmt.value.kind === 'collection') {
     const deviceRef: DeviceRef = {
-      kind: "device_ref",
+      kind: 'device_ref',
       deviceType: stmt.value.device.deviceType,
       selectors: stmt.value.device.selectors,
-    };
+    }
 
-    if (stmt.value.modifier === "@oneof") {
+    if (stmt.value.modifier === '@oneof') {
       const pseudoSegments = [
         {
           identifier: stmt.value.device.deviceType,
           selectors: stmt.value.device.selectors,
         },
-      ];
+      ]
 
-      const resolutionResult = resolveDevices(pseudoSegments, devices, session);
+      const resolutionResult = resolveDevices(pseudoSegments, devices, session)
 
       if (resolutionResult.ambiguous) {
         return awaitDeviceSelection(
@@ -516,55 +641,59 @@ async function interpretVariableAssignment(
           stmt.value.device.deviceType,
           stmt.name,
           eventBus,
-        );
+        )
       }
 
       if (resolutionResult.devices.length === 0) {
         return {
-          kind: "error",
-          errors: [{
-            statement: stmt,
-            message: resolutionResult.noMatchDescription ?? `No devices found for @oneof(${stmt.value.device.deviceType})`,
-          }],
-        };
+          kind: 'error',
+          errors: [
+            {
+              statement: stmt,
+              message:
+                resolutionResult.noMatchDescription ??
+                `No devices found for @oneof(${stmt.value.device.deviceType})`,
+            },
+          ],
+        }
       }
 
-      const device = resolutionResult.devices[0]!;
-      session.variables[stmt.name] = deviceRef;
-      session.variableResolvedIds[stmt.name] = device.id;
-      session.variableModifiers[stmt.name] = "@oneof";
-      session.it = device;
+      const device = resolutionResult.devices[0]!
+      session.variables[stmt.name] = deviceRef
+      session.variableResolvedIds[stmt.name] = device.id
+      session.variableModifiers[stmt.name] = '@oneof'
+      session.it = device
       session.history.push({
         statement: stmt,
         resolvedDevices: [device],
         changes: [],
-      });
-      return { kind: "success" };
+      })
+      return { kind: 'success' }
     }
 
-    session.variables[stmt.name] = deviceRef;
-    session.variableModifiers[stmt.name] = stmt.value.modifier;
-    delete session.variableResolvedIds[stmt.name];
+    session.variables[stmt.name] = deviceRef
+    session.variableModifiers[stmt.name] = stmt.value.modifier
+    delete session.variableResolvedIds[stmt.name]
     session.history.push({
       statement: stmt,
       resolvedDevices: [],
       changes: [],
-    });
-    return { kind: "success" };
+    })
+    return { kind: 'success' }
   }
 
   session.history.push({
     statement: stmt,
     resolvedDevices: [],
     changes: [],
-  });
-  return { kind: "success" };
+  })
+  return { kind: 'success' }
 }
 
 function lastPropertyName(path: { identifier: string }[]): string {
-  const lastSegment = path[path.length - 1];
-  if (!lastSegment) return "";
-  return lastSegment.identifier;
+  const lastSegment = path[path.length - 1]
+  if (!lastSegment) return ''
+  return lastSegment.identifier
 }
 
 async function interpretIfStatement(
@@ -574,81 +703,93 @@ async function interpretIfStatement(
   middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
-  const evalResult = await evaluateConditionExpr(stmt.condition, devices, session, eventBus);
+  const evalResult = await evaluateConditionExpr(
+    stmt.condition,
+    devices,
+    session,
+    eventBus,
+  )
 
-  if (evalResult.kind === "error") {
+  if (evalResult.kind === 'error') {
     return {
-      kind: "error",
+      kind: 'error',
       errors: [{ statement: stmt, message: evalResult.message }],
-    };
+    }
   }
 
-  const conditionMet = evalResult.value;
+  const conditionMet = evalResult.value
 
-  const statementsToExecute = conditionMet ? stmt.body : (stmt.elseBody ?? []);
+  const statementsToExecute = conditionMet ? stmt.body : (stmt.elseBody ?? [])
 
-  const stmtIndex = session.cursor;
+  const stmtIndex = session.cursor
 
   for (let bi = 0; bi < statementsToExecute.length; bi++) {
-    const bodyStmt = statementsToExecute[bi]!;
+    const bodyStmt = statementsToExecute[bi]!
 
     eventBus?.emit({
-      kind: "statement:begin",
+      kind: 'statement:begin',
       timestamp: Date.now(),
       index: stmtIndex,
       statementKind: bodyStmt.kind,
-    });
+    })
 
-    const result = await interpretStatement(bodyStmt, devices, session, middleware, eventBus);
+    const result = await interpretStatement(
+      bodyStmt,
+      devices,
+      session,
+      middleware,
+      eventBus,
+    )
 
-    if (result.kind === "awaiting_interaction") {
+    if (result.kind === 'awaiting_interaction') {
       eventBus?.emit({
-        kind: "statement:end",
+        kind: 'statement:end',
         timestamp: Date.now(),
-        status: "waiting",
-      });
-      return result;
+        status: 'waiting',
+      })
+      return result
     }
 
-    if (result.kind === "error") {
+    if (result.kind === 'error') {
       eventBus?.emit({
-        kind: "statement:end",
+        kind: 'statement:end',
         timestamp: Date.now(),
-        status: "failed",
+        status: 'failed',
         errors: result.errors,
-      });
-      return result;
+      })
+      return result
     }
 
-    const lastEntry = session.history[session.history.length - 1];
-    const resolvedCount = lastEntry?.resolvedDevices.length ?? 0;
-    const changeCount = lastEntry?.changes.length ?? 0;
+    const lastEntry = session.history[session.history.length - 1]
+    const resolvedCount = lastEntry?.resolvedDevices.length ?? 0
+    const changeCount = lastEntry?.changes.length ?? 0
     eventBus?.emit({
-      kind: "statement:end",
+      kind: 'statement:end',
       timestamp: Date.now(),
-      status: "success",
+      status: 'success',
       resolvedDeviceCount: resolvedCount,
       changeCount,
-    });
+    })
   }
 
   session.history.push({
     statement: stmt,
     resolvedDevices: [],
-    changes: [{
-      deviceId: "",
-      property: "condition",
-      oldValue: null,
-      newValue: conditionMet,
-    }],
-  });
+    changes: [
+      {
+        deviceId: '',
+        property: 'condition',
+        oldValue: null,
+        newValue: conditionMet,
+      },
+    ],
+  })
 
-  return { kind: "success" };
+  return { kind: 'success' }
 }
 
 type ConditionEvalResult =
-  | { kind: "ok"; value: boolean }
-  | { kind: "error"; message: string };
+  { kind: 'ok'; value: boolean } | { kind: 'error'; message: string }
 
 async function evaluateConditionExpr(
   expr: ConditionExpr,
@@ -656,61 +797,84 @@ async function evaluateConditionExpr(
   session: Session,
   eventBus?: VMEventBus,
 ): Promise<ConditionEvalResult> {
-  if (expr.kind === "condition") {
-    return evaluateSimpleCondition(expr, devices, session, eventBus);
+  if (expr.kind === 'condition') {
+    return evaluateSimpleCondition(expr, devices, session)
   }
 
-  if (expr.kind === "compound_condition") {
-    const left = await evaluateConditionExpr(expr.left, devices, session, eventBus);
-    if (left.kind === "error") return left;
+  if (expr.kind === 'compound_condition') {
+    const left = await evaluateConditionExpr(
+      expr.left,
+      devices,
+      session,
+      eventBus,
+    )
+    if (left.kind === 'error') return left
 
-    if (expr.operator === "&" && !left.value) return { kind: "ok", value: false };
-    if (expr.operator === "|" && left.value) return { kind: "ok", value: true };
+    if (expr.operator === '&' && !left.value)
+      return { kind: 'ok', value: false }
+    if (expr.operator === '|' && left.value) return { kind: 'ok', value: true }
 
-    const right = await evaluateConditionExpr(expr.right, devices, session, eventBus);
-    if (right.kind === "error") return right;
+    const right = await evaluateConditionExpr(
+      expr.right,
+      devices,
+      session,
+      eventBus,
+    )
+    if (right.kind === 'error') return right
 
-    return { kind: "ok", value: right.value };
+    return { kind: 'ok', value: right.value }
   }
 
-  return { kind: "ok", value: false };
+  return { kind: 'ok', value: false }
 }
 
 async function evaluateSimpleCondition(
   condition: SimpleCondition,
   devices: Device[],
   session: Session,
-  eventBus?: VMEventBus,
 ): Promise<ConditionEvalResult> {
-  const property = lastPropertyName(condition.path);
-  const intent: ResolutionIntent = { kind: "property", name: property };
-  const resolutionResult = resolveDevices(condition.path, devices, session, intent);
+  const property = lastPropertyName(condition.path)
+  const intent: ResolutionIntent = { kind: 'property', name: property }
+  const resolutionResult = resolveDevices(
+    condition.path,
+    devices,
+    session,
+    intent,
+  )
 
   if (resolutionResult.ambiguous) {
     return {
-      kind: "error",
-      message: "Ambiguous device in @if condition — use @oneof to pre-resolve: $var = @oneof(device_type)",
-    };
+      kind: 'error',
+      message:
+        'Ambiguous device in @if condition — use @oneof to pre-resolve: $var = @oneof(device_type)',
+    }
   }
 
   if (resolutionResult.devices.length === 0) {
     return {
-      kind: "error",
-      message: resolutionResult.noMatchDescription ?? "No devices found for @if condition",
-    };
+      kind: 'error',
+      message:
+        resolutionResult.noMatchDescription ??
+        'No devices found for @if condition',
+    }
   }
 
   if (resolutionResult.devices.length > 1) {
     return {
-      kind: "error",
-      message: "Multiple devices matched in @if condition — use @oneof to pre-resolve: $var = @oneof(device_type)",
-    };
+      kind: 'error',
+      message:
+        'Multiple devices matched in @if condition — use @oneof to pre-resolve: $var = @oneof(device_type)',
+    }
   }
 
-  const device = resolutionResult.devices[0]!;
-  const currentValue = await device.driver.getProperty(device.id, property, device.driverConfig);
+  const device = resolutionResult.devices[0]!
+  const currentValue = await device.driver.getProperty(
+    device.id,
+    property,
+    device.driverConfig,
+  )
 
-  session.it = device;
+  session.it = device
 
-  return { kind: "ok", value: evaluateCondition(condition, currentValue) };
+  return { kind: 'ok', value: evaluateCondition(condition, currentValue) }
 }

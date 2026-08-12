@@ -1,11 +1,23 @@
 {
   "name": "opennest",
+  "type": "module",
   "private": true,
   "description": "OpenNest monorepo — DSL runtime for smart environments",
   "scripts": {
     "build": "pnpm -r run build",
     "build:prompt": "pnpm --filter @opennest/lang-core run build:prompt",
     "test": "pnpm -r run test",
-    "start": "pnpm --filter @opennest/playground run start"
+    "start": "pnpm --filter @opennest/playground run start",
+    "lint": "pnpm exec eslint \"examples/\" \"packages/\"",
+    "format": "pnpm exec prettier --write \"(examples|packages)/**/*.+(js|ts|json|tsx)\"",
+    "format:check": "pnpm exec prettier --check \"(examples|packages)/**/*.+(js|ts|json|tsx)\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.1",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.66.0"
   }
 }

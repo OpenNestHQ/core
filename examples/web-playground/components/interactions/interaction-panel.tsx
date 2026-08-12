@@ -1,15 +1,14 @@
-"use client";
+'use client'
 
-import { useVM } from "@/hooks/use-vm";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { MessageSquareWarning } from "lucide-react";
-import type { UserResponse } from "@opennest/vm";
+import { useVM } from '@/hooks/use-vm'
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { MessageSquareWarning } from 'lucide-react'
 
 export function InteractionPanel() {
-  const { state, respondToInteraction } = useVM();
-  const { interaction } = state;
+  const { state, respondToInteraction } = useVM()
+  const { interaction } = state
 
   if (!interaction) {
     return (
@@ -24,7 +23,7 @@ export function InteractionPanel() {
           Aucune interaction en attente
         </CardContent>
       </Card>
-    );
+    )
   }
 
   return (
@@ -39,54 +38,59 @@ export function InteractionPanel() {
         </CardTitle>
       </CardHeader>
       <CardContent className="flex-1 min-h-0 p-3">
-        {interaction.type === "device_selection" && (
+        {interaction.type === 'device_selection' && (
           <DeviceSelection
             interaction={interaction}
-            onSelect={(deviceId) =>
+            onSelect={deviceId =>
               respondToInteraction({
                 interactionId: interaction.id,
-                type: "device_selection",
+                type: 'device_selection',
                 deviceId,
               })
             }
           />
         )}
-        {interaction.type === "confirmation" && (
+        {interaction.type === 'confirmation' && (
           <ConfirmationView
             interaction={interaction}
             onConfirm={() =>
               respondToInteraction({
                 interactionId: interaction.id,
-                type: "confirmation",
+                type: 'confirmation',
                 confirmed: true,
               })
             }
             onDeny={() =>
               respondToInteraction({
                 interactionId: interaction.id,
-                type: "confirmation",
+                type: 'confirmation',
                 confirmed: false,
               })
             }
           />
         )}
-        {interaction.type !== "device_selection" &&
-          interaction.type !== "confirmation" && (
+        {interaction.type !== 'device_selection' &&
+          interaction.type !== 'confirmation' && (
             <div className="text-xs text-muted-foreground">
               Type d&apos;interaction non supporté : {interaction.type}
             </div>
           )}
       </CardContent>
     </Card>
-  );
+  )
 }
 
 function DeviceSelection({
   interaction,
   onSelect,
 }: {
-  interaction: { id: string; type: "device_selection"; message: string; devices: { id: string; name: string; type: string; room: string }[] };
-  onSelect: (deviceId: string) => void;
+  interaction: {
+    id: string
+    type: 'device_selection'
+    message: string
+    devices: { id: string; name: string; type: string; room: string }[]
+  }
+  onSelect: (deviceId: string) => void
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -111,7 +115,7 @@ function DeviceSelection({
         ))}
       </div>
     </div>
-  );
+  )
 }
 
 function ConfirmationView({
@@ -119,9 +123,9 @@ function ConfirmationView({
   onConfirm,
   onDeny,
 }: {
-  interaction: { id: string; type: "confirmation"; message: string };
-  onConfirm: () => void;
-  onDeny: () => void;
+  interaction: { id: string; type: 'confirmation'; message: string }
+  onConfirm: () => void
+  onDeny: () => void
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -145,5 +149,5 @@ function ConfirmationView({
         </Button>
       </div>
     </div>
-  );
+  )
 }

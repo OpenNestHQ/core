@@ -1,12 +1,12 @@
-"use client";
+'use client'
 
-import { Header } from "@/components/layout/header";
-import { ChatPanel } from "@/components/chat/chat-panel";
-import { InteractionPanel } from "@/components/interactions/interaction-panel";
-import { TimelinePanel } from "@/components/timeline/timeline-panel";
-import { PoliciesPanel } from "@/components/policies/policies-panel";
-import { VMEventsPanel } from "@/components/vm-events/vm-events-panel";
-import { DSLViewer } from "@/components/dsl-viewer/dsl-viewer";
+import { Header } from '@/components/layout/header'
+import { ChatPanel } from '@/components/chat/chat-panel'
+import { InteractionPanel } from '@/components/interactions/interaction-panel'
+import { TimelinePanel } from '@/components/timeline/timeline-panel'
+import { PoliciesPanel } from '@/components/policies/policies-panel'
+import { VMEventsPanel } from '@/components/vm-events/vm-events-panel'
+import { DSLViewer } from '@/components/dsl-viewer/dsl-viewer'
 
 export default function Home() {
   return (
@@ -49,5 +49,5 @@ export default function Home() {
         </div>
       </div>
     </div>
-  );
+  )
 }

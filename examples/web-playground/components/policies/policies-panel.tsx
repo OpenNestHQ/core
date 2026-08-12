@@ -1,13 +1,13 @@
-"use client";
+'use client'
 
-import { useVM } from "@/hooks/use-vm";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Shield, Check } from "lucide-react";
+import { useVM } from '@/hooks/use-vm'
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Shield, Check } from 'lucide-react'
 
 export function PoliciesPanel() {
-  const { state } = useVM();
+  const { state } = useVM()
 
   return (
     <Card className="flex h-full flex-col border-border">
@@ -20,7 +20,7 @@ export function PoliciesPanel() {
       <CardContent className="flex-1 min-h-0 p-0">
         <ScrollArea className="h-full">
           <div className="flex flex-col">
-            {state.policies.map((policy) => (
+            {state.policies.map(policy => (
               <div
                 key={policy.name}
                 className="flex flex-col gap-1 px-3 py-2 border-b border-border last:border-b-0 hover:bg-muted/30 transition-colors"
@@ -43,5 +43,5 @@ export function PoliciesPanel() {
         </ScrollArea>
       </CardContent>
     </Card>
-  );
+  )
 }

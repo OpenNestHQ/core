@@ -1,67 +1,90 @@
-import type { DeviceDriver } from "./interface.js";
+import type { DeviceDriver } from './interface.js'
 
 export class MockDriver implements DeviceDriver {
-  readonly name = "mock";
-  private store = new Map<string, Map<string, unknown>>();
-  private latency: number = 0;
+  readonly name = 'mock'
+  private store = new Map<string, Map<string, unknown>>()
+  private latency: number = 0
 
   async init(globalConfig: Record<string, unknown>): Promise<void> {
-    if (typeof globalConfig["latency"] === "number") {
-      this.latency = globalConfig["latency"];
+    if (typeof globalConfig['latency'] === 'number') {
+      this.latency = globalConfig['latency']
     }
   }
 
-  async getProperty(
+  getProperty(
     deviceId: string,
     property: string,
-    _deviceConfig: Record<string, unknown>,
+    // to match implemntation of DeviceDriver interface
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _deviceConfig?: Record<string, unknown>,
   ): Promise<unknown> {
-    await this.delay();
-    const deviceStore = this.store.get(deviceId);
-    if (!deviceStore) return null;
-    return deviceStore.get(property) ?? null;
+    return this._getProperty(deviceId, property)
   }
 
-  async setProperty(
+  async _getProperty(deviceId: string, property: string): Promise<unknown> {
+    await this.delay()
+    const deviceStore = this.store.get(deviceId)
+    if (!deviceStore) return null
+    return deviceStore.get(property) ?? null
+  }
+
+  setProperty(
     deviceId: string,
     property: string,
     value: unknown,
-    _deviceConfig: Record<string, unknown>,
+    // to match implemntation of DeviceDriver interface
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _deviceConfig?: Record<string, unknown>,
   ): Promise<void> {
-    await this.delay();
-    let deviceStore = this.store.get(deviceId);
-    if (!deviceStore) {
-      deviceStore = new Map();
-      this.store.set(deviceId, deviceStore);
-    }
-    deviceStore.set(property, value);
+    return this._setProperty(deviceId, property, value)
   }
 
-  async executeAction(
-    _deviceId: string,
-    _action: string,
-    _deviceConfig: Record<string, unknown>,
+  async _setProperty(
+    deviceId: string,
+    property: string,
+    value: unknown,
   ): Promise<void> {
-    await this.delay();
+    await this.delay()
+    let deviceStore = this.store.get(deviceId)
+    if (!deviceStore) {
+      deviceStore = new Map()
+      this.store.set(deviceId, deviceStore)
+    }
+    deviceStore.set(property, value)
+  }
+
+  // to match implemntation of DeviceDriver interface
+  executeAction(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _deviceId?: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _action?: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _deviceConfig?: Record<string, unknown>,
+  ): Promise<void> {
+    return this._executeAction()
+  }
+  async _executeAction(): Promise<void> {
+    await this.delay()
   }
 
   seed(deviceId: string, properties: Record<string, unknown>): void {
-    let deviceStore = this.store.get(deviceId);
+    let deviceStore = this.store.get(deviceId)
     if (!deviceStore) {
-      deviceStore = new Map();
-      this.store.set(deviceId, deviceStore);
+      deviceStore = new Map()
+      this.store.set(deviceId, deviceStore)
     }
     for (const [key, value] of Object.entries(properties)) {
-      deviceStore.set(key, value);
+      deviceStore.set(key, value)
     }
   }
 
   getStore(): ReadonlyMap<string, Map<string, unknown>> {
-    return this.store;
+    return this.store
   }
 
   private delay(): Promise<void> {
-    if (this.latency <= 0) return Promise.resolve();
-    return new Promise((resolve) => setTimeout(resolve, this.latency));
+    if (this.latency <= 0) return Promise.resolve()
+    return new Promise(resolve => setTimeout(resolve, this.latency))
   }
 }

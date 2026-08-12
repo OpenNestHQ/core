@@ -1,11 +1,11 @@
-"use client";
+'use client'
 
-import { useVM } from "@/hooks/use-vm";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Code2 } from "lucide-react";
+import { useVM } from '@/hooks/use-vm'
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Code2 } from 'lucide-react'
 
 export function DSLViewer() {
-  const { state } = useVM();
+  const { state } = useVM()
 
   return (
     <Card className="flex h-full flex-col border-border">
@@ -17,9 +17,9 @@ export function DSLViewer() {
       </CardHeader>
       <CardContent className="flex-1 min-h-0 p-0">
         <pre className="h-full p-3 text-xs font-mono text-foreground whitespace-pre-wrap overflow-auto">
-          {state.dslSource || "// Aucun programme"}
+          {state.dslSource || '// Aucun programme'}
         </pre>
       </CardContent>
     </Card>
-  );
+  )
 }

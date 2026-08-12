@@ -4,10 +4,10 @@ export type {
   DriverGlobalConfig,
   InventoryYaml,
   Device,
-} from "./types.js";
+} from './types.js'
 
-export type { DeviceDriver } from "./drivers/interface.js";
+export type { DeviceDriver } from './drivers/interface.js'
 
-export { MockDriver } from "./drivers/mock.js";
-export { HADriver } from "./drivers/homeassistant.js";
-export { DeviceRegistry } from "./registry.js";
+export { MockDriver } from './drivers/mock.js'
+export { HADriver } from './drivers/homeassistant.js'
+export { DeviceRegistry } from './registry.js'

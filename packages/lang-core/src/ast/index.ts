@@ -28,10 +28,8 @@ export type {
   ComparisonOp,
   CompoundOp,
   Program,
-} from "./types.js";
-export {
-  getRoomSelector,
-} from "./types.js";
+} from './types.js'
+export { getRoomSelector } from './types.js'
 export {
   buildAction,
   buildAssignment,
@@ -41,4 +39,4 @@ export {
   buildRoomSelector,
   buildOwnerSelector,
   buildTagSelector,
-} from "./builders.js";
+} from './builders.js'
