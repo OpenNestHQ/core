@@ -270,15 +270,24 @@ function extractDeviceContext(
   return { deviceType: firstSeg.identifier, variableName: undefined }
 }
 
-async function interpretAssignment(
-  stmt: Assignment,
+type DeviceStatement = Assignment | Query | Increment | Action
+
+interface DeviceStatementSpec {
+  intentKind: ResolutionIntent['kind']
+  emptyMessage: string
+  buildActions: (devices: Device[], name: string) => PlannedAction[]
+}
+
+async function interpretDeviceStatement(
+  stmt: DeviceStatement,
+  spec: DeviceStatementSpec,
   devices: Device[],
   session: Session,
   middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
-  const property = lastPropertyName(stmt.path)
-  const intent: ResolutionIntent = { kind: 'property', name: property }
+  const name = lastPropertyName(stmt.path)
+  const intent: ResolutionIntent = { kind: spec.intentKind, name }
   const resolutionResult = resolveDevices(stmt.path, devices, session, intent)
 
   if (resolutionResult.ambiguous) {
@@ -300,19 +309,16 @@ async function interpretAssignment(
       errors: [
         {
           statement: stmt,
-          message:
-            resolutionResult.noMatchDescription ?? `No devices found for path`,
+          message: resolutionResult.noMatchDescription ?? spec.emptyMessage,
         },
       ],
     }
   }
 
-  const actions: PlannedAction[] = resolutionResult.devices.map(device => ({
-    kind: 'set_property' as const,
-    device,
-    property,
-    value: stmt.value,
-  }))
+  const actions: PlannedAction[] = spec.buildActions(
+    resolutionResult.devices,
+    name,
+  )
 
   return applyMiddlewareAndFinish(
     actions,
@@ -321,6 +327,33 @@ async function interpretAssignment(
     devices,
     stmt,
     resolutionResult,
+    eventBus,
+  )
+}
+
+async function interpretAssignment(
+  stmt: Assignment,
+  devices: Device[],
+  session: Session,
+  middleware?: Middleware[],
+  eventBus?: VMEventBus,
+): Promise<InterpretResult> {
+  return interpretDeviceStatement(
+    stmt,
+    {
+      intentKind: 'property',
+      emptyMessage: 'No devices found for path',
+      buildActions: (devices, name) =>
+        devices.map(device => ({
+          kind: 'set_property',
+          device,
+          property: name,
+          value: stmt.value,
+        })),
+    },
+    devices,
+    session,
+    middleware,
     eventBus,
   )
 }
@@ -332,49 +365,21 @@ async function interpretQuery(
   middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
-  const property = lastPropertyName(stmt.path)
-  const intent: ResolutionIntent = { kind: 'property', name: property }
-  const resolutionResult = resolveDevices(stmt.path, devices, session, intent)
-
-  if (resolutionResult.ambiguous) {
-    const { deviceType, variableName } = extractDeviceContext(
-      stmt.path,
-      session,
-    )
-    return awaitDeviceSelection(
-      resolutionResult,
-      deviceType,
-      variableName,
-      eventBus,
-    )
-  }
-
-  if (resolutionResult.devices.length === 0) {
-    return {
-      kind: 'error',
-      errors: [
-        {
-          statement: stmt,
-          message:
-            resolutionResult.noMatchDescription ?? `No devices found for query`,
-        },
-      ],
-    }
-  }
-
-  const actions: PlannedAction[] = resolutionResult.devices.map(device => ({
-    kind: 'read_property' as const,
-    device,
-    property,
-  }))
-
-  return applyMiddlewareAndFinish(
-    actions,
-    middleware,
-    session,
-    devices,
+  return interpretDeviceStatement(
     stmt,
-    resolutionResult,
+    {
+      intentKind: 'property',
+      emptyMessage: 'No devices found for query',
+      buildActions: (devices, name) =>
+        devices.map(device => ({
+          kind: 'read_property',
+          device,
+          property: name,
+        })),
+    },
+    devices,
+    session,
+    middleware,
     eventBus,
   )
 }
@@ -386,51 +391,22 @@ async function interpretIncrement(
   middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
-  const property = lastPropertyName(stmt.path)
-  const intent: ResolutionIntent = { kind: 'property', name: property }
-  const resolutionResult = resolveDevices(stmt.path, devices, session, intent)
-
-  if (resolutionResult.ambiguous) {
-    const { deviceType, variableName } = extractDeviceContext(
-      stmt.path,
-      session,
-    )
-    return awaitDeviceSelection(
-      resolutionResult,
-      deviceType,
-      variableName,
-      eventBus,
-    )
-  }
-
-  if (resolutionResult.devices.length === 0) {
-    return {
-      kind: 'error',
-      errors: [
-        {
-          statement: stmt,
-          message:
-            resolutionResult.noMatchDescription ??
-            `No devices found for increment`,
-        },
-      ],
-    }
-  }
-
-  const actions: PlannedAction[] = resolutionResult.devices.map(device => ({
-    kind: 'increment_property' as const,
-    device,
-    property,
-    value: stmt.value,
-  }))
-
-  return applyMiddlewareAndFinish(
-    actions,
-    middleware,
-    session,
-    devices,
+  return interpretDeviceStatement(
     stmt,
-    resolutionResult,
+    {
+      intentKind: 'property',
+      emptyMessage: 'No devices found for increment',
+      buildActions: (devices, name) =>
+        devices.map(device => ({
+          kind: 'increment_property',
+          device,
+          property: name,
+          value: stmt.value,
+        })),
+    },
+    devices,
+    session,
+    middleware,
     eventBus,
   )
 }
@@ -442,50 +418,21 @@ async function interpretAction(
   middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
-  const method = lastPropertyName(stmt.path)
-  const intent: ResolutionIntent = { kind: 'action', name: method }
-  const resolutionResult = resolveDevices(stmt.path, devices, session, intent)
-
-  if (resolutionResult.ambiguous) {
-    const { deviceType, variableName } = extractDeviceContext(
-      stmt.path,
-      session,
-    )
-    return awaitDeviceSelection(
-      resolutionResult,
-      deviceType,
-      variableName,
-      eventBus,
-    )
-  }
-
-  if (resolutionResult.devices.length === 0) {
-    return {
-      kind: 'error',
-      errors: [
-        {
-          statement: stmt,
-          message:
-            resolutionResult.noMatchDescription ??
-            `No devices found for action`,
-        },
-      ],
-    }
-  }
-
-  const actions: PlannedAction[] = resolutionResult.devices.map(device => ({
-    kind: 'invoke_action' as const,
-    device,
-    method,
-  }))
-
-  return applyMiddlewareAndFinish(
-    actions,
-    middleware,
-    session,
-    devices,
+  return interpretDeviceStatement(
     stmt,
-    resolutionResult,
+    {
+      intentKind: 'action',
+      emptyMessage: 'No devices found for action',
+      buildActions: (devices, name) =>
+        devices.map(device => ({
+          kind: 'invoke_action',
+          device,
+          method: name,
+        })),
+    },
+    devices,
+    session,
+    middleware,
     eventBus,
   )
 }
