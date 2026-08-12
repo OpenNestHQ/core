@@ -43,6 +43,15 @@ pnpm run build:prompt
 
 # Run playground REPL
 pnpm run start
+
+# Lint (ESLint) — examples/ + packages/
+pnpm run lint
+
+# Format (Prettier, write)
+pnpm run format
+
+# Format check (Prettier, no write)
+pnpm run format:check
 ```
 
 You can also run commands per-package with `cd` and `pnpm run <script>` as usual.
@@ -337,9 +346,12 @@ packages/
       format.ts          # Colored output formatting
 ```
 
-## No CI / no lint
+## Linting & formatting
 
-This repo has no CI workflows (`.github/` absent), no ESLint, and no Prettier config. There are no pre-commit hooks. Formatting and lint errors must be caught manually.
+- **ESLint** — flat config at repo root `eslint.config.js`: `@eslint/js` recommended + `typescript-eslint` recommended + `eslint-config-prettier` (disables style rules that conflict with Prettier). ESLint covers correctness only; formatting is Prettier's job.
+- **Prettier** — config at `.prettierrc.json`: `semi: false`, `singleQuote: true`, `arrowParens: avoid`. Write code matching this style (no semicolons, single quotes) so `format` doesn't churn.
+- `lint` targets `examples/` + `packages/`; `format`/`format:check` target `(examples|packages)/**/*.+(js|ts|json|tsx)`.
+- No CI and no pre-commit hooks — run `pnpm run lint` and `pnpm run format:check` manually.
 
 ## Generated files (do not edit)
 
