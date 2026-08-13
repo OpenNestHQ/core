@@ -46,7 +46,14 @@ export class DeviceRegistry {
         )
       }
       const driver = factory()
-      driver.init(config)
+
+      const deviceInitConfigs: Record<string, Record<string, unknown>> = {}
+      for (const device of inventory.devices) {
+        if (device.driver === name && device.init) {
+          deviceInitConfigs[device.id] = device.init
+        }
+      }
+      driver.init(config, deviceInitConfigs)
       this.drivers.set(name, driver)
     }
   }

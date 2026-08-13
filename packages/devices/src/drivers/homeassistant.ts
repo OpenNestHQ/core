@@ -30,7 +30,11 @@ export class HADriver implements DeviceDriver {
   private stateCache = new Map<string, Record<string, unknown>>()
   private cacheProgramId: string | undefined = undefined
 
-  async init(globalConfig: Record<string, unknown>): Promise<void> {
+  async init(
+    globalConfig: Record<string, unknown>,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _deviceInitConfigs?: Record<string, Record<string, unknown>>,
+  ): Promise<void> {
     const url = globalConfig['url']
     const token = globalConfig['token']
     if (typeof url !== 'string' || !url) {

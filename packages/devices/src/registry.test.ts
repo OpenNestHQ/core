@@ -134,13 +134,48 @@ devices:
       cleanup(path)
     })
 
+    it('should seed initial state into the mock driver', async () => {
+      const yaml = `
+drivers:
+  mock:
+    latency: 0
+rooms: []
+devices:
+  - id: tv1
+    type: tv
+    room: salon
+    name: TV One
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+    actions: []
+    init:
+      power: false
+      volume: 20
+`
+      const path = writeTempYaml(yaml)
+      const registry = DeviceRegistry.fromYaml(path)
+      const tv = registry.getDevice('tv1')!
+
+      expect(await tv.driver.getProperty(tv.id, 'power', tv.driverConfig)).toBe(
+        false,
+      )
+      expect(
+        await tv.driver.getProperty(tv.id, 'volume', tv.driverConfig),
+      ).toBe(20)
+      cleanup(path)
+    })
+
     it('should allow executing actions through the driver', async () => {
       const path = writeTempYaml(TEST_YAML)
       const registry = DeviceRegistry.fromYaml(path)
       const tv = registry.getDevice('tv_salon')!
 
       await expect(
-        tv.driver.executeAction(tv.id, 'play', tv.driverConfig),
+        tv.driver.executeAction(tv.id, 'play', {}, tv.driverConfig),
       ).resolves.toBeUndefined()
       cleanup(path)
     })

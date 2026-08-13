@@ -5,9 +5,18 @@ export class MockDriver implements DeviceDriver {
   private store = new Map<string, Map<string, unknown>>()
   private latency: number = 0
 
-  async init(globalConfig: Record<string, unknown>): Promise<void> {
+  async init(
+    globalConfig: Record<string, unknown>,
+    deviceInitConfigs?: Record<string, Record<string, unknown>>,
+  ): Promise<void> {
     if (typeof globalConfig['latency'] === 'number') {
       this.latency = globalConfig['latency']
+    }
+
+    if (deviceInitConfigs) {
+      for (const [deviceId, properties] of Object.entries(deviceInitConfigs)) {
+        this.seed(deviceId, properties)
+      }
     }
   }
 

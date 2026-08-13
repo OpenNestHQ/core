@@ -4,7 +4,10 @@ export interface DriverRuntimeContext {
 
 export interface DeviceDriver {
   readonly name: string
-  init(globalConfig: Record<string, unknown>): Promise<void>
+  init(
+    globalConfig: Record<string, unknown>,
+    deviceInitConfigs?: Record<string, Record<string, unknown>>,
+  ): Promise<void>
   getProperty(
     deviceId: string,
     property: string,

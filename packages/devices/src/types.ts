@@ -27,6 +27,7 @@ export interface DeviceEntry {
   driver: string
   properties: Record<string, DevicePropertyConfig>
   actions: string[] | Record<string, ActionEntryConfig>
+  init?: Record<string, unknown>
   owners?: string[]
   tags?: string[]
 }
