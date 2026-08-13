@@ -2489,6 +2489,46 @@ describe('interpret_home_dsl', () => {
       expect(result.executed[0]!.resolvedDevices[0]!.id).toBe('speaker_next')
     })
 
+    it('should filter actions declared as an object (HA style)', async () => {
+      const driver = makeDriver()
+      await driver.init({})
+
+      const speaker_next: Device = {
+        id: 'speaker_next',
+        type: 'speaker',
+        room: 'salon',
+        name: 'Salon Speaker',
+        driver,
+        driverConfig: {
+          properties: {},
+          actions: { play: {}, pause: {}, next: {} },
+        },
+      }
+
+      const speaker_basic: Device = {
+        id: 'speaker_basic',
+        type: 'speaker',
+        room: 'chambre',
+        name: 'Chambre Speaker',
+        driver,
+        driverConfig: {
+          properties: {},
+          actions: { play: {}, pause: {} },
+        },
+      }
+
+      const ctx: VMContext = { devices: [speaker_next, speaker_basic] }
+      const program = parse('speaker.next()')
+      const result = await executeCommand(
+        { kind: 'run_program', program: program },
+        ctx,
+      )
+
+      expect(result.status).toBe('success')
+      expect(result.executed[0]!.resolvedDevices).toHaveLength(1)
+      expect(result.executed[0]!.resolvedDevices[0]!.id).toBe('speaker_next')
+    })
+
     it('should include filter feedback in executed statement', async () => {
       const program = parse('tv.mute = on')
       const result = await executeCommand(

@@ -244,12 +244,11 @@ function applyIntentFilter(
 function hasCapability(device: Device, intent: ResolutionIntent): boolean {
   const config = device.driverConfig as {
     properties?: Record<string, unknown>
-    actions?: string[]
+    actions?: string[] | Record<string, unknown>
   }
 
-  const hasDeclaredProperties = 'properties' in config
-  const hasDeclaredActions = 'actions' in config
-  const noCapabilityDeclared = !hasDeclaredProperties && !hasDeclaredActions
+  const noCapabilityDeclared =
+    !('properties' in config) && !('actions' in config)
 
   if (noCapabilityDeclared) {
     return true
@@ -261,13 +260,10 @@ function hasCapability(device: Device, intent: ResolutionIntent): boolean {
     return intent.name in props
   }
 
-  if (intent.kind === 'action') {
-    const actions = config.actions
-    if (!actions) return false
-    return actions.includes(intent.name)
-  }
-
-  return false
+  const actions = config.actions
+  if (!actions) return false
+  if (Array.isArray(actions)) return actions.includes(intent.name)
+  return intent.name in actions
 }
 
 function buildFilter(
