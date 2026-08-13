@@ -8,7 +8,7 @@ async function main(): Promise<void> {
   process.loadEnvFile()
 
   const telemetry = initTelemetry()
-  const { devices } = await createPlaygroundDevices()
+  const devices = createPlaygroundDevices()
 
   const confirmThermostat = createConfirmationMiddleware({
     requireConfirmation(action: PlannedAction) {

@@ -1,0 +1,252 @@
+drivers:
+  mock:
+    latency: 0
+
+rooms:
+  - living_room
+  - bedroom
+  - kitchen
+  - office
+  - bathroom
+  - entrance
+
+devices:
+  - id: tv_living_room
+    type: tv
+    room: living_room
+    name: Living Room TV
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+      source:
+        type: string
+      channel:
+        type: number
+    actions:
+      - play
+      - pause
+    init:
+      power: false
+      volume: 15
+      source: hdmi1
+      channel: 1
+
+  - id: tv_living_room_2
+    type: tv
+    room: living_room
+    name: Living Room TV 2
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+      source:
+        type: string
+      channel:
+        type: number
+    actions:
+      - play
+      - pause
+    init:
+      power: false
+      volume: 20
+      source: netflix
+      channel: 42
+
+  - id: tv_bedroom
+    type: tv
+    room: bedroom
+    name: Bedroom TV
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+      source:
+        type: string
+      channel:
+        type: number
+    actions:
+      - play
+      - pause
+    init:
+      power: false
+      volume: 10
+      source: tv
+      channel: 7
+
+  - id: light_living_room_1
+    type: light
+    room: living_room
+    name: Living Room Ceiling Light
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      brightness:
+        type: number
+      color:
+        type: string
+      mode:
+        type: string
+    actions: []
+    init:
+      power: false
+      brightness: 80
+      color: warm_white
+      mode: normal
+
+  - id: light_living_room_2
+    type: light
+    room: living_room
+    name: Living Room Lamp
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      brightness:
+        type: number
+      color:
+        type: string
+      mode:
+        type: string
+    actions: []
+    init:
+      power: true
+      brightness: 40
+      color: yellow
+      mode: reading
+
+  - id: light_bedroom
+    type: light
+    room: bedroom
+    name: Bedroom Ceiling Light
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      brightness:
+        type: number
+      color:
+        type: string
+      mode:
+        type: string
+    actions: []
+    init:
+      power: false
+      brightness: 100
+      color: white
+      mode: normal
+
+  - id: thermostat_living_room
+    type: thermostat
+    room: living_room
+    name: Living Room Thermostat
+    driver: mock
+    properties:
+      temperature:
+        type: number
+    actions: []
+    init:
+      temperature: 21
+
+  - id: speaker_living_room
+    type: speaker
+    room: living_room
+    name: Living Room Speaker
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+    actions:
+      - play
+      - pause
+      - next
+    init:
+      power: false
+      volume: 30
+
+  - id: speaker_bedroom
+    type: speaker
+    room: bedroom
+    name: Bedroom Speaker
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+    actions:
+      - play
+      - pause
+    init:
+      power: false
+      volume: 20
+
+  - id: vacuum_living_room
+    type: vacuum
+    room: living_room
+    name: Living Room Vacuum
+    driver: mock
+    properties: {}
+    actions:
+      - start
+      - stop
+    init: {}
+
+  - id: camera_entrance
+    type: camera
+    room: entrance
+    name: Entrance Camera
+    driver: mock
+    properties: {}
+    actions: []
+    init: {}
+
+  - id: door_entrance
+    type: door
+    room: entrance
+    name: Entrance Door
+    driver: mock
+    properties:
+      state:
+        type: string
+    actions:
+      - lock
+      - unlock
+    init:
+      state: unlocked
+
+  - id: fan_bedroom
+    type: fan
+    room: bedroom
+    name: Bedroom Fan
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      speed:
+        type: number
+    actions: []
+    init:
+      power: false
+      speed: 1
+
+  - id: switch_entrance
+    type: switch
+    room: entrance
+    name: Entrance Switch
+    driver: mock
+    properties:
+      power:
+        type: boolean
+    actions: []
+    init:
+      power: false
