@@ -267,5 +267,7 @@ export function formatInteractionMessage(interaction: UserInteraction): string {
       return `Number: ${interaction.message}`
     case 'choice':
       return `Choice: ${interaction.message}`
+    case 'action_parameter':
+      return `Missing parameters: ${interaction.message}`
   }
 }

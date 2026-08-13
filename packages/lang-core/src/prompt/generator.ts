@@ -7,6 +7,7 @@ import type {
   Capability,
   PropertyCapability,
   ActionCapability,
+  CapabilityParameter,
 } from './types.js'
 import {
   DEFAULT_DEVICES,
@@ -32,7 +33,16 @@ function renderPropertyCapability(cap: PropertyCapability): string {
 }
 
 function renderActionCapability(cap: ActionCapability): string {
-  return `${cap.name}()`
+  const params = cap.parameters?.map(renderParameter).join(', ') ?? ''
+  return `${cap.name}(${params})`
+}
+
+function renderParameter(p: CapabilityParameter): string {
+  const mark = p.required ? '' : '?'
+  if (p.type === 'enum' && p.values) {
+    return `${p.name}${mark}: ${p.values.join('|')}`
+  }
+  return `${p.name}${mark}: ${p.type}`
 }
 
 function renderCapability(cap: Capability): string {
@@ -297,6 +307,25 @@ function renderSyntaxSection(): string {
     'vacuum.start()',
     '',
     'camera.snapshot()',
+    '',
+    'Actions accept named arguments (name=value) and whole-bundle references:',
+    '',
+    'speaker.announce(message="bonjour", volume=80)',
+    'vacuum.start(mode=silent)',
+    '',
+    '## Named-argument bundles (?arg)',
+    'Arguments can be grouped in a reusable bundle:',
+    '',
+    '?greeting = { message="bonjour", volume=80 }',
+    'speaker.announce(?greeting)',
+    '',
+    'or built field-by-field:',
+    '',
+    '?greeting.message = "bonjour"',
+    'speaker.announce(?greeting)',
+    '',
+    'A bundle is referenced whole via `?name` inside the parentheses.',
+    'Bundles persist across statements in the session and can be reused.',
     '',
     '## Context reference',
     '$it.power = off',

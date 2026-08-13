@@ -6,10 +6,13 @@ import type {
   Increment,
   Action,
   VariableAssignment,
+  ArgFieldAssignment,
+  ArgBundleAssignment,
   IfStatement,
   DeviceRef,
   ConditionExpr,
   SimpleCondition,
+  Value,
 } from '@opennest/lang-core'
 import type {
   Device,
@@ -19,8 +22,13 @@ import type {
   ResolutionIntent,
   ResolutionResult,
 } from './types.js'
-import type { UserInteraction } from './interactions/types.js'
+import type { UserInteraction, MissingParameter } from './interactions/types.js'
 import type { DeviceSelectionContext } from './interactions/device-selection.js'
+import type { ActionParameterContext } from './interactions/action-parameter.js'
+import type {
+  ActionEntryConfig,
+  ActionParameterConfig,
+} from '@opennest/devices'
 import type { Middleware, PlannedAction } from './middleware/types.js'
 import type { VMEventBus } from './trace/event-bus.js'
 import { createSession } from './state.js'
@@ -223,6 +231,10 @@ async function interpretStatement(
       return interpretAction(statement, devices, session, middleware, eventBus)
     case 'variable_assignment':
       return interpretVariableAssignment(statement, devices, session, eventBus)
+    case 'arg_field_assignment':
+      return interpretArgFieldAssignment(statement, session)
+    case 'arg_bundle_assignment':
+      return interpretArgBundleAssignment(statement, session)
     case 'if':
       return interpretIfStatement(
         statement,
@@ -418,23 +430,101 @@ async function interpretAction(
   middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
-  return interpretDeviceStatement(
-    stmt,
-    {
-      intentKind: 'action',
-      emptyMessage: 'No devices found for action',
-      buildActions: (devices, name) =>
-        devices.map(device => ({
-          kind: 'invoke_action',
-          device,
-          method: name,
-        })),
-    },
-    devices,
-    session,
+  const method = lastPropertyName(stmt.path)
+  const intent: ResolutionIntent = { kind: 'action', name: method }
+  const resolutionResult = resolveDevices(stmt.path, devices, session, intent)
+
+  if (resolutionResult.ambiguous) {
+    const { deviceType, variableName } = extractDeviceContext(
+      stmt.path,
+      session,
+    )
+    return awaitDeviceSelection(
+      resolutionResult,
+      deviceType,
+      variableName,
+      eventBus,
+    )
+  }
+
+  if (resolutionResult.devices.length === 0) {
+    return {
+      kind: 'error',
+      errors: [
+        {
+          statement: stmt,
+          message:
+            resolutionResult.noMatchDescription ??
+            'No devices found for action',
+        },
+      ],
+    }
+  }
+
+  const effectiveArgs = materializeArgs(stmt, session)
+  const device = resolutionResult.devices[0]!
+  const missing: MissingParameter[] = getActionParameters(device, method)
+    .filter(p => p.required && !(p.name in effectiveArgs))
+    .map(p => ({
+      name: p.name,
+      type: p.type,
+      ...(p.values ? { values: p.values } : {}),
+    }))
+
+  if (missing.length > 0) {
+    const ctx: ActionParameterContext = {
+      stmt,
+      method,
+      deviceName: device.name,
+      missing,
+      ...(stmt.argBundle?.name !== undefined
+        ? { bundleName: stmt.argBundle.name }
+        : {}),
+    }
+    return {
+      kind: 'awaiting_interaction',
+      interaction: createInteraction('action_parameter', ctx, eventBus),
+      pendingContext: ctx,
+    }
+  }
+
+  const hasArgs = Object.keys(effectiveArgs).length > 0
+  const actions: PlannedAction[] = resolutionResult.devices.map(d => ({
+    kind: 'invoke_action' as const,
+    device: d,
+    method,
+    ...(hasArgs ? { args: effectiveArgs } : {}),
+  }))
+
+  return applyMiddlewareAndFinish(
+    actions,
     middleware,
+    session,
+    devices,
+    stmt,
+    resolutionResult,
     eventBus,
   )
+}
+
+function materializeArgs(
+  stmt: Action,
+  session: Session,
+): Record<string, Value> {
+  if (stmt.argBundle) {
+    return { ...(session.argVariables[stmt.argBundle.name] ?? {}) }
+  }
+  return { ...(stmt.args ?? {}) }
+}
+
+function getActionParameters(
+  device: Device,
+  method: string,
+): ActionParameterConfig[] {
+  const actions = device.driverConfig['actions'] as
+    string[] | Record<string, ActionEntryConfig> | undefined
+  if (!actions || Array.isArray(actions)) return []
+  return actions[method]?.parameters ?? []
 }
 
 async function applyMiddlewareAndFinish(
@@ -641,6 +731,34 @@ function lastPropertyName(path: { identifier: string }[]): string {
   const lastSegment = path[path.length - 1]
   if (!lastSegment) return ''
   return lastSegment.identifier
+}
+
+function interpretArgFieldAssignment(
+  stmt: ArgFieldAssignment,
+  session: Session,
+): InterpretResult {
+  const bundle = session.argVariables[stmt.name] ?? {}
+  bundle[stmt.field] = stmt.value
+  session.argVariables[stmt.name] = bundle
+  session.history.push({
+    statement: stmt,
+    resolvedDevices: [],
+    changes: [],
+  })
+  return { kind: 'success' }
+}
+
+function interpretArgBundleAssignment(
+  stmt: ArgBundleAssignment,
+  session: Session,
+): InterpretResult {
+  session.argVariables[stmt.name] = { ...stmt.values }
+  session.history.push({
+    statement: stmt,
+    resolvedDevices: [],
+    changes: [],
+  })
+  return { kind: 'success' }
 }
 
 async function interpretIfStatement(

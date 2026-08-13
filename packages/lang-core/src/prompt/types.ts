@@ -5,6 +5,7 @@ export interface CapabilityParameter {
   name: string
   type: CapabilityValueType
   required?: boolean
+  values?: string[]
 }
 
 export interface PropertyCapability {

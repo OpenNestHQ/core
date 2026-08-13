@@ -1,9 +1,11 @@
 import { registerHandler } from './interactions/registry.js'
 import { deviceSelectionHandler } from './interactions/device-selection.js'
 import { confirmationHandler } from './interactions/confirmation.js'
+import { actionParameterHandler } from './interactions/action-parameter.js'
 
 registerHandler(deviceSelectionHandler)
 registerHandler(confirmationHandler)
+registerHandler(actionParameterHandler)
 
 export { executeCommand } from './commands/dispatch.js'
 export type {
@@ -42,11 +44,14 @@ export type {
   TextInputInteraction,
   NumberInputInteraction,
   ChoiceInteraction,
+  ActionParameterInteraction,
+  MissingParameter,
   DeviceSelectionResponse,
   ConfirmationResponse,
   TextInputResponse,
   NumberInputResponse,
   ChoiceResponse,
+  ActionParameterResponse,
 } from './interactions/types.js'
 
 export { noopMiddleware } from './middleware/noop.js'

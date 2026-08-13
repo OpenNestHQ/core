@@ -166,6 +166,32 @@ async function handleInteraction(
       type: 'confirmation',
       confirmed,
     }
+  } else if (interaction.type === 'action_parameter') {
+    const values: Record<string, string> = {}
+    for (const part of trimmed
+      .split(',')
+      .map(p => p.trim())
+      .filter(Boolean)) {
+      const eq = part.indexOf('=')
+      if (eq === -1) {
+        const only = interaction.missing[0]
+        if (interaction.missing.length === 1 && only) {
+          values[only.name] = part
+        } else {
+          process.stdout.write(
+            `  Expected name=value for each missing parameter.\n\n`,
+          )
+          return null
+        }
+      } else {
+        values[part.slice(0, eq).trim()] = part.slice(eq + 1).trim()
+      }
+    }
+    response = {
+      interactionId: interaction.id,
+      type: 'action_parameter',
+      values,
+    }
   } else {
     process.stdout.write('  Unsupported interaction type.\n\n')
     return null

@@ -34,6 +34,7 @@ export interface InvokeActionAction {
   kind: 'invoke_action'
   device: Device
   method: string
+  args?: Record<string, Value>
 }
 
 // ── Signals (throw-based flow control) ──

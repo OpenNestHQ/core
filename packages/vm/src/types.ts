@@ -3,6 +3,7 @@ import type {
   DeviceRef,
   CollectionModifier,
   Program,
+  Value,
 } from '@opennest/lang-core'
 import type { DeviceDriver } from '@opennest/devices'
 import type {
@@ -39,6 +40,7 @@ export interface ExecutedStatement {
 
 export interface Session {
   variables: Record<string, DeviceRef>
+  argVariables: Record<string, Record<string, Value>>
   it: Device | null
   history: ExecutedStatement[]
   cursor: number

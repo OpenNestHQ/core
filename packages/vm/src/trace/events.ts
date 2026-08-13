@@ -74,6 +74,7 @@ export interface ActionBeginEvent {
   property?: string
   value?: Value
   method?: string
+  args?: Record<string, Value>
 }
 
 export interface ActionEndEvent {

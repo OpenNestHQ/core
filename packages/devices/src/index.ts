@@ -1,5 +1,7 @@
 export type {
   DevicePropertyConfig,
+  ActionParameterConfig,
+  ActionEntryConfig,
   DeviceEntry,
   DriverGlobalConfig,
   InventoryYaml,

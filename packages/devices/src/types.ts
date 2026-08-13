@@ -3,6 +3,22 @@ export interface DevicePropertyConfig {
   [key: string]: unknown
 }
 
+export interface ActionParameterConfig {
+  name: string
+  type: 'string' | 'number' | 'power' | 'enum'
+  values?: string[]
+  range?: [number, number]
+  required?: boolean
+}
+
+export interface ActionEntryConfig {
+  service?: string
+  target?: Record<string, unknown>
+  data?: Record<string, unknown>
+  parameters?: ActionParameterConfig[]
+  [key: string]: unknown
+}
+
 export interface DeviceEntry {
   id: string
   type: string
@@ -10,7 +26,7 @@ export interface DeviceEntry {
   name: string
   driver: string
   properties: Record<string, DevicePropertyConfig>
-  actions: string[] | Record<string, unknown>
+  actions: string[] | Record<string, ActionEntryConfig>
   owners?: string[]
   tags?: string[]
 }

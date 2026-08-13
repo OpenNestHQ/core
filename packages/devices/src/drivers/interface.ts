@@ -15,6 +15,7 @@ export interface DeviceDriver {
   executeAction(
     deviceId: string,
     action: string,
+    args: Record<string, unknown>,
     deviceConfig: Record<string, unknown>,
   ): Promise<void>
 }

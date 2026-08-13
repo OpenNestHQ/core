@@ -44,12 +44,28 @@ export interface ChoiceInteraction {
   options: { value: string; label: string }[]
 }
 
+export interface MissingParameter {
+  name: string
+  type: 'string' | 'number' | 'power' | 'enum'
+  values?: string[]
+}
+
+export interface ActionParameterInteraction {
+  id: string
+  type: 'action_parameter'
+  message: string
+  deviceName: string
+  action: string
+  missing: MissingParameter[]
+}
+
 export type UserInteraction =
   | DeviceSelectionInteraction
   | ConfirmationInteraction
   | TextInputInteraction
   | NumberInputInteraction
   | ChoiceInteraction
+  | ActionParameterInteraction
 
 // ──── Response discriminated union ────
 
@@ -83,12 +99,19 @@ export interface ChoiceResponse {
   value: string
 }
 
+export interface ActionParameterResponse {
+  interactionId: string
+  type: 'action_parameter'
+  values: Record<string, string>
+}
+
 export type UserResponse =
   | DeviceSelectionResponse
   | ConfirmationResponse
   | TextInputResponse
   | NumberInputResponse
   | ChoiceResponse
+  | ActionParameterResponse
 
 // ──── Handler interface ────
 

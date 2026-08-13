@@ -6,6 +6,7 @@ import { interpretProgram } from './interpreter.js'
 export function createSession(): Session {
   return {
     variables: {},
+    argVariables: {},
     it: null,
     history: [],
     cursor: 0,

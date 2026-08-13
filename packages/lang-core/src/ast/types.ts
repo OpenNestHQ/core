@@ -113,9 +113,22 @@ export interface IfStatement {
   elseBody?: Statement[]
 }
 
+/** A reference to a whole named-argument bundle (`?arg1`). */
+export interface ArgBundleRef {
+  kind: 'arg_bundle_ref'
+  name: string
+}
+
 /** A single HomeDSL statement. */
 export type Statement =
-  Assignment | Query | Increment | Action | VariableAssignment | IfStatement
+  | Assignment
+  | Query
+  | Increment
+  | Action
+  | VariableAssignment
+  | ArgFieldAssignment
+  | ArgBundleAssignment
+  | IfStatement
 
 export interface Assignment {
   kind: 'assignment'
@@ -137,12 +150,27 @@ export interface Increment {
 export interface Action {
   kind: 'action'
   path: Segment[]
+  args?: Record<string, Value>
+  argBundle?: ArgBundleRef
 }
 
 export interface VariableAssignment {
   kind: 'variable_assignment'
   name: string
   value: Expr
+}
+
+export interface ArgFieldAssignment {
+  kind: 'arg_field_assignment'
+  name: string
+  field: string
+  value: Value
+}
+
+export interface ArgBundleAssignment {
+  kind: 'arg_bundle_assignment'
+  name: string
+  values: Record<string, Value>
 }
 
 /** A complete HomeDSL program — a sequence of statements. */

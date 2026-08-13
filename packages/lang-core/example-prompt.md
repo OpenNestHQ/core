@@ -86,6 +86,7 @@ Actions (callable):
 - play()
 - pause()
 - next()
+- announce(message: string, volume?: number)
 
 ## THERMOSTAT
 Properties:
@@ -102,11 +103,11 @@ Properties:
 
 ## CAMERA
 Actions (callable):
-- snapshot()
+- snapshot(count?: number)
 
 ## VACUUM
 Actions (callable):
-- start()
+- start(room?: salon|chambre|cuisine|bureau, mode?: silent|normal|turbo)
 - stop()
 
 ## NIGHTSTAND
@@ -191,6 +192,25 @@ speaker.volume += 10
 vacuum.start()
 
 camera.snapshot()
+
+Actions accept named arguments (name=value) and whole-bundle references:
+
+speaker.announce(message="bonjour", volume=80)
+vacuum.start(mode=silent)
+
+## Named-argument bundles (?arg)
+Arguments can be grouped in a reusable bundle:
+
+?greeting = { message="bonjour", volume=80 }
+speaker.announce(?greeting)
+
+or built field-by-field:
+
+?greeting.message = "bonjour"
+speaker.announce(?greeting)
+
+A bundle is referenced whole via `?name` inside the parentheses.
+Bundles persist across statements in the session and can be reused.
 
 ## Context reference
 $it.power = off

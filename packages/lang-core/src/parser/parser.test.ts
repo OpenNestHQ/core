@@ -247,6 +247,93 @@ describe('parseHomeDSL', () => {
         result([{ kind: 'action', path: [vseg('it'), seg('play')] }]),
       )
     })
+
+    it('should parse action with named args', () => {
+      expect(
+        parseHomeDSL('speaker.announce(message="bonjour", volume=5)'),
+      ).toEqual(
+        result([
+          {
+            kind: 'action',
+            path: [seg('speaker'), seg('announce')],
+            args: {
+              message: { kind: 'string', value: 'bonjour' },
+              volume: { kind: 'number', value: 5 },
+            },
+          },
+        ]),
+      )
+    })
+
+    it('should parse action with power arg', () => {
+      expect(parseHomeDSL('door.lock(force=on)')).toEqual(
+        result([
+          {
+            kind: 'action',
+            path: [seg('door'), seg('lock')],
+            args: { force: { kind: 'power', value: 'on' } },
+          },
+        ]),
+      )
+    })
+
+    it('should parse action with whole-bundle reference', () => {
+      expect(parseHomeDSL('speaker.announce(?args)')).toEqual(
+        result([
+          {
+            kind: 'action',
+            path: [seg('speaker'), seg('announce')],
+            argBundle: { kind: 'arg_bundle_ref', name: 'args' },
+          },
+        ]),
+      )
+    })
+
+    it('should reject field reference inside action args', () => {
+      const r = parseHomeDSL('speaker.announce(message=?args.message)')
+      expect(r.errors).toHaveLength(1)
+    })
+  })
+
+  describe('arg bundles', () => {
+    it('should parse field assignment', () => {
+      expect(parseHomeDSL('?args.message = "bonjour"')).toEqual(
+        result([
+          {
+            kind: 'arg_field_assignment',
+            name: 'args',
+            field: 'message',
+            value: { kind: 'string', value: 'bonjour' },
+          },
+        ]),
+      )
+    })
+
+    it('should parse object literal assignment', () => {
+      expect(parseHomeDSL('?args = { message="bonjour", volume=5 }')).toEqual(
+        result([
+          {
+            kind: 'arg_bundle_assignment',
+            name: 'args',
+            values: {
+              message: { kind: 'string', value: 'bonjour' },
+              volume: { kind: 'number', value: 5 },
+            },
+          },
+        ]),
+      )
+    })
+
+    it('should parse empty object literal', () => {
+      expect(parseHomeDSL('?args = {}')).toEqual(
+        result([{ kind: 'arg_bundle_assignment', name: 'args', values: {} }]),
+      )
+    })
+
+    it('should reject non-object bundle assignment', () => {
+      const r = parseHomeDSL('?args = "bonjour"')
+      expect(r.errors).toHaveLength(1)
+    })
   })
 
   describe('variable assignments', () => {
@@ -711,9 +798,10 @@ describe('parseHomeDSL', () => {
       expect(r.errors[0]!.message).toMatch(/Invalid path segment/)
     })
 
-    it('should record error on action with arguments', () => {
+    it('should reject positional action argument', () => {
       const r = parseHomeDSL('vacuum.start(5)')
       expect(r.errors).toHaveLength(1)
+      expect(r.errors[0]!.message).toMatch(/expected name=value/)
     })
 
     it('should record error on stale line', () => {

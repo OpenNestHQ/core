@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { parseHomeDSL } from '@opennest/lang-core'
 import type { Segment, PowerValue, Selector } from '@opennest/lang-core'
 import { MockDriver } from '@opennest/devices'
@@ -9,6 +9,7 @@ import type {
   Session,
   ExcludedDevice,
   DeviceSelectionInteraction,
+  ActionParameterInteraction,
 } from './index.js'
 import { resumeWithResponse } from './state.js'
 import { resolveDevices } from './resolver.js'
@@ -3184,6 +3185,205 @@ describe('interpret_home_dsl', () => {
       expect(result.errors[0]!.message).toBe(
         "No 'light' devices with tag 'outdoor'",
       )
+    })
+  })
+
+  describe('action arguments', () => {
+    async function actionDevice(
+      id: string,
+      type: string,
+      room: string,
+      name: string,
+      actions: Record<string, unknown>,
+    ): Promise<Device> {
+      const driver = makeDriver()
+      await driver.init({})
+      return {
+        id,
+        type,
+        room,
+        name,
+        driver,
+        driverConfig: { actions },
+      }
+    }
+
+    function speakerWithAnnounce(): Promise<Device> {
+      return actionDevice(
+        'speaker_salon',
+        'speaker',
+        'salon',
+        'Salon Speaker',
+        {
+          announce: {
+            parameters: [
+              { name: 'message', type: 'string', required: true },
+              { name: 'volume', type: 'number' },
+            ],
+          },
+        },
+      )
+    }
+
+    it('should pass inline named args to the driver', async () => {
+      const dev = await speakerWithAnnounce()
+      const spy = vi.spyOn(dev.driver, 'executeAction')
+      const program = parse(
+        'speaker[salon].announce(message="bonjour", volume=80)',
+      )
+      const result = await executeCommand(
+        { kind: 'run_program', program },
+        { devices: [dev] },
+      )
+
+      expect(result.status).toBe('success')
+      expect(spy).toHaveBeenCalledWith(
+        'speaker_salon',
+        'announce',
+        { message: 'bonjour', volume: 80 },
+        expect.anything(),
+      )
+    })
+
+    it('should pass whole-bundle args to the driver', async () => {
+      const dev = await speakerWithAnnounce()
+      const spy = vi.spyOn(dev.driver, 'executeAction')
+      const program = parse(
+        '?args = { message="bonjour", volume=80 }\nspeaker[salon].announce(?args)',
+      )
+      const result = await executeCommand(
+        { kind: 'run_program', program },
+        { devices: [dev] },
+      )
+
+      expect(result.status).toBe('success')
+      expect(spy).toHaveBeenCalledWith(
+        'speaker_salon',
+        'announce',
+        { message: 'bonjour', volume: 80 },
+        expect.anything(),
+      )
+    })
+
+    it('should pause for missing required arg', async () => {
+      const dev = await speakerWithAnnounce()
+      const program = parse('speaker[salon].announce()')
+      const result = await executeCommand(
+        { kind: 'run_program', program },
+        { devices: [dev] },
+      )
+
+      expect(result.status).toBe('awaiting_interaction')
+      expect(result.interaction!.type).toBe('action_parameter')
+      const interaction = result.interaction as ActionParameterInteraction
+      expect(interaction.missing).toEqual([{ name: 'message', type: 'string' }])
+    })
+
+    it('should resume and execute with filled inline args', async () => {
+      const dev = await speakerWithAnnounce()
+      const spy = vi.spyOn(dev.driver, 'executeAction')
+      const program = parse('speaker[salon].announce()')
+      const result1 = await executeCommand(
+        { kind: 'run_program', program },
+        { devices: [dev] },
+      )
+      expect(result1.status).toBe('awaiting_interaction')
+
+      const result2 = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: result1.session.pendingInteraction!.id,
+            type: 'action_parameter',
+            values: { message: 'bonjour' },
+          },
+        },
+        { devices: [dev], session: result1.session },
+      )
+
+      expect(result2.status).toBe('success')
+      expect(spy).toHaveBeenCalledWith(
+        'speaker_salon',
+        'announce',
+        { message: 'bonjour' },
+        expect.anything(),
+      )
+    })
+
+    it('should fill missing args into the bundle on resume', async () => {
+      const dev = await speakerWithAnnounce()
+      const spy = vi.spyOn(dev.driver, 'executeAction')
+      const program = parse(
+        '?args = { volume=80 }\nspeaker[salon].announce(?args)',
+      )
+      const result1 = await executeCommand(
+        { kind: 'run_program', program },
+        { devices: [dev] },
+      )
+      expect(result1.status).toBe('awaiting_interaction')
+
+      const result2 = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: result1.session.pendingInteraction!.id,
+            type: 'action_parameter',
+            values: { message: 'bonjour' },
+          },
+        },
+        { devices: [dev], session: result1.session },
+      )
+
+      expect(result2.status).toBe('success')
+      expect(spy).toHaveBeenCalledWith(
+        'speaker_salon',
+        'announce',
+        { message: 'bonjour', volume: 80 },
+        expect.anything(),
+      )
+      expect(result2.session.argVariables['args']).toEqual({
+        volume: { kind: 'number', value: 80 },
+        message: { kind: 'string', value: 'bonjour' },
+      })
+    })
+
+    it('should persist bundles across statements', async () => {
+      const dev = await speakerWithAnnounce()
+      const program = parse(
+        '?args = { message="bonjour" }\nspeaker[salon].announce(?args)',
+      )
+      const result = await executeCommand(
+        { kind: 'run_program', program },
+        { devices: [dev] },
+      )
+
+      expect(result.status).toBe('success')
+      expect(result.session.argVariables['args']).toEqual({
+        message: { kind: 'string', value: 'bonjour' },
+      })
+    })
+
+    it('should execute action with no required params without pausing', async () => {
+      const dev = await actionDevice(
+        'vacuum_salon',
+        'vacuum',
+        'salon',
+        'Salon Vacuum',
+        {
+          start: {
+            parameters: [
+              { name: 'mode', type: 'enum', values: ['silent', 'normal'] },
+            ],
+          },
+        },
+      )
+      const program = parse('vacuum[salon].start()')
+      const result = await executeCommand(
+        { kind: 'run_program', program },
+        { devices: [dev] },
+      )
+
+      expect(result.status).toBe('success')
     })
   })
 })

@@ -315,14 +315,19 @@ describe('HADriver', () => {
       })
 
       const driver = await initDriver()
-      await driver.executeAction('d1', 'play', {
-        actions: {
-          play: {
-            service: 'media_player.media_play',
-            target: { entity_id: 'media_player.test' },
+      await driver.executeAction(
+        'd1',
+        'play',
+        {},
+        {
+          actions: {
+            play: {
+              service: 'media_player.media_play',
+              target: { entity_id: 'media_player.test' },
+            },
           },
         },
-      })
+      )
 
       expect(calls).toHaveLength(1)
       expect(calls[0]!.url).toContain('/api/services/media_player/media_play')
@@ -338,32 +343,64 @@ describe('HADriver', () => {
       })
 
       const driver = await initDriver()
-      await driver.executeAction('d1', 'set_volume', {
-        actions: {
-          set_volume: {
-            service: 'media_player.volume_set',
-            target: { entity_id: 'media_player.test' },
-            data: { volume_level: 0.5 },
+      await driver.executeAction(
+        'd1',
+        'set_volume',
+        {},
+        {
+          actions: {
+            set_volume: {
+              service: 'media_player.volume_set',
+              target: { entity_id: 'media_player.test' },
+              data: { volume_level: 0.5 },
+            },
           },
         },
-      })
+      )
 
       const body = JSON.parse(calls[0]!.body)
       expect(body.entity_id).toBe('media_player.test')
       expect(body.volume_level).toBe(0.5)
     })
 
+    it('should merge args into the service call payload', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.executeAction(
+        'd1',
+        'announce',
+        { message: 'bonjour' },
+        {
+          actions: {
+            announce: {
+              service: 'tts.speak',
+              target: { entity_id: 'media_player.test' },
+            },
+          },
+        },
+      )
+
+      const body = JSON.parse(calls[0]!.body)
+      expect(body.entity_id).toBe('media_player.test')
+      expect(body.message).toBe('bonjour')
+    })
+
     it('should be a no-op when action is not found', async () => {
       const driver = await initDriver()
       await expect(
-        driver.executeAction('d1', 'unknown', { actions: {} }),
+        driver.executeAction('d1', 'unknown', {}, { actions: {} }),
       ).resolves.toBeUndefined()
     })
 
     it('should be a no-op when actions key is missing', async () => {
       const driver = await initDriver()
       await expect(
-        driver.executeAction('d1', 'play', {}),
+        driver.executeAction('d1', 'play', {}, {}),
       ).resolves.toBeUndefined()
     })
   })

@@ -19,8 +19,17 @@ function defaultMessage(action: PlannedAction): string {
     case 'read_property':
       return `Read ${action.property} from ${label}?`
     case 'invoke_action':
-      return `Execute ${action.method}() on ${label}?`
+      return `Execute ${action.method}(${describeArgs(action.args)}) on ${label}?`
   }
+}
+
+function describeArgs(
+  args?: Record<string, import('@opennest/lang-core').Value>,
+): string {
+  if (!args) return ''
+  return Object.entries(args)
+    .map(([name, value]) => `${name}=${describeValue(value)}`)
+    .join(', ')
 }
 
 function describeValue(value: unknown): string {
@@ -89,5 +98,9 @@ export function createConfirmationMiddleware(
 }
 
 function fingerprint(action: PlannedAction): string {
-  return `${action.device.id}::${action.kind}::${propertyOrMethod(action)}`
+  const base = `${action.device.id}::${action.kind}::${propertyOrMethod(action)}`
+  if (action.kind === 'invoke_action' && action.args) {
+    return `${base}::${JSON.stringify(action.args)}`
+  }
+  return base
 }

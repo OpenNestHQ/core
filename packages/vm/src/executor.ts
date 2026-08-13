@@ -17,6 +17,7 @@ export async function executePlannedAction(
       ? { property: action.property, value: action.value }
       : {}),
     ...('method' in action ? { method: action.method } : {}),
+    ...('args' in action && action.args ? { args: action.args } : {}),
   })
 
   try {
@@ -40,7 +41,7 @@ export async function executePlannedAction(
         change = await executeQuery(action.device, action.property)
         break
       case 'invoke_action':
-        change = await executeAction(action.device, action.method)
+        change = await executeAction(action.device, action.method, action.args)
         break
     }
 
@@ -144,8 +145,21 @@ export async function executeQuery(
 export async function executeAction(
   device: Device,
   method: string,
+  args?: Record<string, Value>,
 ): Promise<StateChange> {
-  await device.driver.executeAction(device.id, method, device.driverConfig)
+  const extractedArgs: Record<string, unknown> = {}
+  if (args) {
+    for (const [name, value] of Object.entries(args)) {
+      extractedArgs[name] = extractValue(value)
+    }
+  }
+
+  await device.driver.executeAction(
+    device.id,
+    method,
+    extractedArgs,
+    device.driverConfig,
+  )
 
   return {
     deviceId: device.id,

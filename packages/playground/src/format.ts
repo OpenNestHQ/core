@@ -94,6 +94,16 @@ export function formatInteraction(interaction: UserInteraction): string {
         lines.push(`  ${G}[${opt.value}]${N} ${opt.label}`)
       }
       return lines.join('\n')
+    case 'action_parameter':
+      lines.push(`\n${Y}${B}?${N} ${Y}${interaction.message}${N}`)
+      for (const param of interaction.missing) {
+        const hint =
+          param.type === 'enum' && param.values
+            ? ` ${D}(${param.values.join('/')})${N}`
+            : ` ${D}(${param.type})${N}`
+        lines.push(`  ${B}${param.name}${N}${hint}:`)
+      }
+      return lines.join('\n')
   }
 }
 

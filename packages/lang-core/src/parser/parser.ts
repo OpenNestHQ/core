@@ -247,6 +247,131 @@ function parseExpr(raw: string, line: number, col: number): Expr {
   throw new ParseError(`Invalid expression: "${trimmed}"`, line, col)
 }
 
+function splitArgs(raw: string): string[] {
+  const parts: string[] = []
+  let current = ''
+  let inString = false
+
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]!
+    if (ch === '"') {
+      inString = !inString
+      current += ch
+      continue
+    }
+    if (ch === ',' && !inString) {
+      parts.push(current.trim())
+      current = ''
+      continue
+    }
+    current += ch
+  }
+
+  const trimmed = current.trim()
+  if (trimmed.length > 0) parts.push(trimmed)
+  return parts
+}
+
+function parseNamedArgs(
+  raw: string,
+  line: number,
+  col: number,
+): Record<string, Value> {
+  const args: Record<string, Value> = {}
+  for (const part of splitArgs(raw)) {
+    const eqIdx = part.indexOf('=')
+    if (eqIdx === -1) {
+      throw new ParseError(
+        `Invalid argument "${part.trim()}": expected name=value`,
+        line,
+        col,
+      )
+    }
+    const name = part.slice(0, eqIdx).trim()
+    if (!/^[a-zA-Z_]\w*$/.test(name)) {
+      throw new ParseError(
+        `Invalid argument name "${name}": expected name=value`,
+        line,
+        col,
+      )
+    }
+    const valueRaw = part.slice(eqIdx + 1).trim()
+    args[name] = parseValue(valueRaw, line, col + eqIdx + 1)
+  }
+  return args
+}
+
+function parseArgObject(
+  raw: string,
+  line: number,
+  col: number,
+): Record<string, Value> {
+  const trimmed = raw.trim()
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+    throw new ParseError(
+      `Expected arg bundle object: "{ name=value, ... }"`,
+      line,
+      col,
+    )
+  }
+
+  const body = trimmed.slice(1, -1).trim()
+  const values: Record<string, Value> = {}
+  if (body.length === 0) return values
+
+  for (const part of splitArgs(body)) {
+    const eqIdx = part.indexOf('=')
+    if (eqIdx === -1) {
+      throw new ParseError(
+        `Invalid arg entry "${part.trim()}": expected name=value`,
+        line,
+        col,
+      )
+    }
+    const name = part.slice(0, eqIdx).trim()
+    if (!/^[a-zA-Z_]\w*$/.test(name)) {
+      throw new ParseError(
+        `Invalid arg name "${name}": expected name=value`,
+        line,
+        col,
+      )
+    }
+    const valueRaw = part.slice(eqIdx + 1).trim()
+    values[name] = parseValue(valueRaw, line, col + eqIdx + 1)
+  }
+  return values
+}
+
+function parseArgAssignment(
+  left: string,
+  right: string,
+  line: number,
+  col: number,
+): Statement {
+  const rest = left.slice(1).trim()
+
+  const dotIdx = rest.indexOf('.')
+  if (dotIdx !== -1) {
+    const name = rest.slice(0, dotIdx).trim()
+    const field = rest.slice(dotIdx + 1).trim()
+    if (!/^[a-zA-Z_]\w*$/.test(name)) {
+      throw new ParseError(`Invalid arg bundle name: "${name}"`, line, col)
+    }
+    if (!/^[a-zA-Z_]\w*$/.test(field)) {
+      throw new ParseError(`Invalid arg field name: "${field}"`, line, col)
+    }
+    const value = parseValue(right, line, col + left.length + 1)
+    return { kind: 'arg_field_assignment', name, field, value }
+  }
+
+  if (!/^[a-zA-Z_]\w*$/.test(rest)) {
+    throw new ParseError(`Invalid arg bundle name: "${rest}"`, line, col)
+  }
+
+  const values = parseArgObject(right, line, col + left.length + 1)
+  return { kind: 'arg_bundle_assignment', name: rest, values }
+}
+
 function parseStatement(raw: string, lineNumber: number): Statement {
   const trimmed = raw.trim()
   const col = raw.length - trimmed.length + 1
@@ -255,7 +380,9 @@ function parseStatement(raw: string, lineNumber: number): Statement {
     throw new ParseError('Empty statement', lineNumber, 1)
   }
 
-  const actionMatch = trimmed.match(/^(.+)\.([a-zA-Z_]\w*)\s*\(\s*\)$/)
+  const actionMatch = trimmed.match(
+    /^(.+)\.([a-zA-Z_]\w*)\s*\(\s*([^)]*?)\s*\)$/,
+  )
   if (actionMatch) {
     const path = parsePath(actionMatch[1]!.trim(), lineNumber)
     path.push(
@@ -265,7 +392,27 @@ function parseStatement(raw: string, lineNumber: number): Statement {
         col + actionMatch[1]!.length + 1,
       ),
     )
-    return { kind: 'action', path }
+
+    const rawArgs = actionMatch[3]!.trim()
+    if (rawArgs.length === 0) {
+      return { kind: 'action', path }
+    }
+
+    const bundleMatch = rawArgs.match(/^\?([a-zA-Z_]\w*)$/)
+    if (bundleMatch) {
+      return {
+        kind: 'action',
+        path,
+        argBundle: { kind: 'arg_bundle_ref', name: bundleMatch[1]! },
+      }
+    }
+
+    const args = parseNamedArgs(
+      rawArgs,
+      lineNumber,
+      col + actionMatch[0].indexOf('(') + 1,
+    )
+    return { kind: 'action', path, args }
   }
 
   const queryMatch = trimmed.match(/^(.+)\.([a-zA-Z_]\w*)\s*\?$/)
@@ -295,6 +442,10 @@ function parseStatement(raw: string, lineNumber: number): Statement {
   if (eqIndex !== -1) {
     const left = trimmed.slice(0, eqIndex).trim()
     const right = trimmed.slice(eqIndex + 1).trim()
+
+    if (left.startsWith('?')) {
+      return parseArgAssignment(left, right, lineNumber, col)
+    }
 
     if (left.includes('.')) {
       const dotMatch = left.match(/^(.+)\.([a-zA-Z_]\w*)$/)

@@ -108,6 +108,7 @@ export class HADriver implements DeviceDriver {
   async executeAction(
     _deviceId: string,
     action: string,
+    args: Record<string, unknown>,
     deviceConfig: Record<string, unknown>,
   ): Promise<void> {
     const actions = deviceConfig['actions'] as
@@ -125,6 +126,7 @@ export class HADriver implements DeviceDriver {
     if (actionConfig.data) {
       Object.assign(payload, actionConfig.data)
     }
+    Object.assign(payload, args)
 
     await this.callService(domain, service, payload)
   }

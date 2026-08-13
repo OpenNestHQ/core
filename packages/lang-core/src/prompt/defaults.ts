@@ -40,6 +40,14 @@ export const DEFAULT_DEVICES = {
       { kind: 'action', name: 'play' },
       { kind: 'action', name: 'pause' },
       { kind: 'action', name: 'next' },
+      {
+        kind: 'action',
+        name: 'announce',
+        parameters: [
+          { name: 'message', type: 'string', required: true },
+          { name: 'volume', type: 'number' },
+        ],
+      },
     ],
   },
   thermostat: {
@@ -61,12 +69,29 @@ export const DEFAULT_DEVICES = {
   },
   camera: {
     description: 'Security camera — captures snapshots, no video streaming',
-    capabilities: [{ kind: 'action', name: 'snapshot' }],
+    capabilities: [
+      {
+        kind: 'action',
+        name: 'snapshot',
+        parameters: [{ name: 'count', type: 'number' }],
+      },
+    ],
   },
   vacuum: {
     description: 'Robot vacuum cleaner — autonomous floor cleaning',
     capabilities: [
-      { kind: 'action', name: 'start' },
+      {
+        kind: 'action',
+        name: 'start',
+        parameters: [
+          {
+            name: 'room',
+            type: 'enum',
+            values: ['salon', 'chambre', 'cuisine', 'bureau'],
+          },
+          { name: 'mode', type: 'enum', values: ['silent', 'normal', 'turbo'] },
+        ],
+      },
       { kind: 'action', name: 'stop' },
     ],
   },
