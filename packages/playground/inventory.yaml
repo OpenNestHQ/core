@@ -15,59 +15,122 @@ definitions:
     tv:
       description: Television set — for watching content, streaming, and multimedia
       properties:
+        power:
+          type: boolean
+          description: Turn the TV on or off
         volume:
           type: number
           range: [0, 100]
+          description: Sound level, from 0 (mute) to 100 (max)
         source:
           type: string
           values: [hdmi1, hdmi2, tv, netflix]
+          description: Input source to display
+        channel:
+          type: number
+          description: TV channel number
+      actions:
+        play:
+          description: Start or resume playback
+        pause:
+          description: Pause playback
     light:
       description: Ceiling or wall light — main room illumination
       properties:
+        power:
+          type: boolean
+          description: Turn the light on or off
         brightness:
           type: number
           range: [0, 100]
+          description: Brightness level, from 0 (off) to 100 (full)
+        color:
+          type: string
+          description: Light color (e.g. warm_white, yellow)
+        mode:
+          type: string
+          description: Lighting mode (e.g. normal, reading)
     speaker:
       description: Music speaker — for audio playback and media control
       properties:
+        power:
+          type: boolean
+          description: Turn the speaker on or off
         volume:
           type: number
           range: [0, 100]
+          description: Playback volume, from 0 (mute) to 100 (max)
       actions:
+        play:
+          description: Start or resume playback
+        pause:
+          description: Pause playback
+        next:
+          description: Skip to the next track
         announce:
+          description: Speak a message aloud
           parameters:
             - name: message
               type: string
               required: true
+              description: Text to speak
             - name: volume
               type: number
+              description: Announcement volume
     thermostat:
       description: Room thermostat — controls heating/cooling temperature
+      properties:
+        temperature:
+          type: number
+          description: Target temperature in degrees Celsius
     fan:
       description: Ventilation fan — for air circulation and cooling
       properties:
+        power:
+          type: boolean
+          description: Turn the fan on or off
         speed:
           type: number
           range: [0, 3]
+          description: Fan speed, from 0 (off) to 3 (max)
     camera:
       description: Security camera — captures snapshots
       actions:
         snapshot:
+          description: Capture a snapshot image
           parameters:
             - name: count
               type: number
+              description: Number of snapshots to capture
     vacuum:
       description: Robot vacuum cleaner — autonomous floor cleaning
       actions:
         start:
+          description: Start a cleaning session
           parameters:
             - name: mode
               type: enum
               values: [silent, normal, turbo]
+              description: Cleaning intensity
+        stop:
+          description: Stop the current cleaning session
     door:
       description: Smart door — controls lock/unlock state
+      properties:
+        state:
+          type: string
+          description: Current lock state (locked or unlocked)
+      actions:
+        lock:
+          description: Lock the door
+        unlock:
+          description: Unlock the door
     switch:
       description: Generic on/off switch — for simple power control
+      properties:
+        power:
+          type: boolean
+          description: Turn the switch on or off
   owners:
     Alice:
       name: Alice

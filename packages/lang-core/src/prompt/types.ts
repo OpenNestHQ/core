@@ -4,6 +4,7 @@ export type CapabilityValueType =
 export interface CapabilityParameter {
   name: string
   type: CapabilityValueType
+  description?: string
   required?: boolean
   values?: string[]
 }
@@ -12,6 +13,7 @@ export interface PropertyCapability {
   kind: 'property'
   name: string
   type: 'power' | 'number' | 'string' | 'enum'
+  description?: string
   values?: string[]
   range?: [number, number]
 }
@@ -19,6 +21,7 @@ export interface PropertyCapability {
 export interface ActionCapability {
   kind: 'action'
   name: string
+  description?: string
   parameters?: CapabilityParameter[]
 }
 

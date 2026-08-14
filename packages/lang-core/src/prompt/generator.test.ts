@@ -528,6 +528,58 @@ describe('capability rendering', () => {
     expect(prompt).toContain('- start()')
     expect(prompt).toContain('- stop()')
   })
+
+  it('should render property description inline', () => {
+    const prompt = new OpenNestPrompt(
+      {
+        plug: makeDevice([
+          {
+            kind: 'property',
+            name: 'power',
+            type: 'power',
+            description: 'Allume ou éteint',
+          },
+        ]),
+      },
+      {},
+    ).prompt()
+    expect(prompt).toContain('- power (on/off) — Allume ou éteint')
+  })
+
+  it('should render action description inline', () => {
+    const prompt = new OpenNestPrompt(
+      {
+        robot: makeDevice([
+          { kind: 'action', name: 'clean', description: 'Nettoie la pièce' },
+        ]),
+      },
+      {},
+    ).prompt()
+    expect(prompt).toContain('- clean() — Nettoie la pièce')
+  })
+
+  it('should render parameter description inline', () => {
+    const prompt = new OpenNestPrompt(
+      {
+        robot: makeDevice([
+          {
+            kind: 'action',
+            name: 'clean',
+            parameters: [
+              {
+                name: 'mode',
+                type: 'enum',
+                values: ['silent', 'turbo'],
+                description: 'Mode de nettoyage',
+              },
+            ],
+          },
+        ]),
+      },
+      {},
+    ).prompt()
+    expect(prompt).toContain('- clean(mode?: silent|turbo — Mode de nettoyage)')
+  })
 })
 
 describe('section ordering', () => {

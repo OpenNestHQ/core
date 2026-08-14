@@ -143,6 +143,56 @@ describe('extractPromptDefinitions', () => {
     expect(defs.tags['security']).toEqual({})
   })
 
+  it('propagates descriptions from definitions to properties, actions and parameters', () => {
+    const defs = extractPromptDefinitions(
+      inventory({
+        definitions: {
+          devices: {
+            tv: {
+              properties: {
+                volume: { type: 'number', description: 'Sound level' },
+              },
+              actions: {
+                announce: {
+                  description: 'Broadcast a message',
+                  parameters: [
+                    {
+                      name: 'message',
+                      type: 'string',
+                      required: true,
+                      description: 'Text to speak',
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const tv = defs.devices['tv']!
+    expect(tv.capabilities).toContainEqual({
+      kind: 'property',
+      name: 'volume',
+      type: 'number',
+      description: 'Sound level',
+    })
+    expect(tv.capabilities).toContainEqual({
+      kind: 'action',
+      name: 'announce',
+      description: 'Broadcast a message',
+      parameters: [
+        {
+          name: 'message',
+          type: 'string',
+          required: true,
+          description: 'Text to speak',
+        },
+      ],
+    })
+  })
+
   it('dedupes capabilities across devices of the same type', () => {
     const defs = extractPromptDefinitions(
       inventory({

@@ -24,20 +24,38 @@ function propertyCapability(
   name: string,
   config: DevicePropertyConfig,
 ): PropertyCapability {
+  const description = config.description
   if (config.type === 'boolean')
-    return { kind: 'property', name, type: 'power' }
+    return {
+      kind: 'property',
+      name,
+      type: 'power',
+      ...(description ? { description } : {}),
+    }
   if (config.type === 'number') {
     return {
       kind: 'property',
       name,
       type: 'number',
+      ...(description ? { description } : {}),
       ...(config.range ? { range: config.range } : {}),
     }
   }
   if (config.values && config.values.length > 0) {
-    return { kind: 'property', name, type: 'enum', values: config.values }
+    return {
+      kind: 'property',
+      name,
+      type: 'enum',
+      values: config.values,
+      ...(description ? { description } : {}),
+    }
   }
-  return { kind: 'property', name, type: 'string' }
+  return {
+    kind: 'property',
+    name,
+    type: 'string',
+    ...(description ? { description } : {}),
+  }
 }
 
 function actionCapabilities(
@@ -49,6 +67,7 @@ function actionCapabilities(
   return Object.entries(actions).map(([name, config]) => ({
     kind: 'action',
     name,
+    ...(config.description ? { description: config.description } : {}),
     ...(config.parameters ? { parameters: config.parameters } : {}),
   }))
 }

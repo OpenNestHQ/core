@@ -29,20 +29,26 @@ function renderPropertyCapability(cap: PropertyCapability): string {
     parts.push('(optional)')
   }
 
+  if (cap.description) {
+    parts.push(`— ${cap.description}`)
+  }
+
   return parts.join(' ')
 }
 
 function renderActionCapability(cap: ActionCapability): string {
   const params = cap.parameters?.map(renderParameter).join(', ') ?? ''
-  return `${cap.name}(${params})`
+  const description = cap.description ? ` — ${cap.description}` : ''
+  return `${cap.name}(${params})${description}`
 }
 
 function renderParameter(p: CapabilityParameter): string {
   const mark = p.required ? '' : '?'
-  if (p.type === 'enum' && p.values) {
-    return `${p.name}${mark}: ${p.values.join('|')}`
-  }
-  return `${p.name}${mark}: ${p.type}`
+  const base =
+    p.type === 'enum' && p.values
+      ? `${p.name}${mark}: ${p.values.join('|')}`
+      : `${p.name}${mark}: ${p.type}`
+  return p.description ? `${base} — ${p.description}` : base
 }
 
 function renderCapability(cap: Capability): string {

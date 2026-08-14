@@ -9,12 +9,14 @@ export interface DevicePropertyConfig {
 export interface ActionParameterConfig {
   name: string
   type: 'string' | 'number' | 'power' | 'enum'
+  description?: string
   values?: string[]
   range?: [number, number]
   required?: boolean
 }
 
 export interface ActionEntryConfig {
+  description?: string
   service?: string
   target?: Record<string, unknown>
   data?: Record<string, unknown>
