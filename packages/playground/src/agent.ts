@@ -1,30 +1,10 @@
-import { OpenNestPrompt } from '@opennest/lang-core'
 import { parseHomeDSL } from '@opennest/lang-core'
 import type { Program } from '@opennest/lang-core'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
-import { createPlaygroundPromptDefinitions } from './devices.js'
+import { createPlaygroundSystemPrompt } from './prompt.js'
 
 const MAX_RETRIES = 5
-
-function createSystemPrompt() {
-  const defs = createPlaygroundPromptDefinitions()
-  return new OpenNestPrompt(
-    defs.devices,
-    defs.rooms,
-    defs.owners,
-    defs.tags,
-  ).prompt({
-    preamble: `# YOUR ROLE
-You are a HomeDSL translator. Convert natural language smart home commands into valid HomeDSL code only.`,
-    customInstruction: `CRITICAL RULES:
-- Output ONLY raw HomeDSL statements — nothing else.
-- No markdown fences, no backticks, no natural language explanations.
-- If the user request is unclear or cannot be translated, respond with exactly: UNTRANSLATABLE
-- Always use device TYPE + ROOM selectors (e.g., tv[living_room]), never raw device IDs.
-- Prefer the most natural device for the described action.`,
-  })
-}
 
 function getModelId(): string {
   return process.env['OPENNEST_MODEL'] ?? 'openai/gpt-4o-mini'
@@ -59,7 +39,7 @@ export async function translateNlToDsl(
   input: string,
   onAttempt?: AttemptCallback,
 ): Promise<NlTranslateResult> {
-  const systemPrompt = createSystemPrompt()
+  const systemPrompt = createPlaygroundSystemPrompt()
   const modelId = getModelId()
   const apiKey = process.env['OPENAI_API_KEY']
   const baseURL = process.env['OPENAI_BASE_URL']

@@ -8,7 +8,8 @@
   "main": "dist/index.js",
   "scripts": {
     "start": "pnpm run build && node dist/index.js",
-    "build": "tsc"
+    "build": "tsc",
+    "print:prompt": "pnpm run build && node scripts/print-prompt.js"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2",
