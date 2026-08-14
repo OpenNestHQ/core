@@ -1,5 +1,8 @@
 export interface DevicePropertyConfig {
   type: 'boolean' | 'number' | 'string'
+  description?: string
+  range?: [number, number]
+  values?: string[]
   [key: string]: unknown
 }
 
@@ -37,10 +40,32 @@ export interface DriverGlobalConfig {
   [key: string]: unknown
 }
 
+export interface DeviceTypeDefinition {
+  description?: string
+  properties?: Record<string, DevicePropertyConfig>
+  actions?: string[] | Record<string, ActionEntryConfig>
+}
+
+export interface OwnerTypeDefinition {
+  name?: string
+  description?: string
+}
+
+export interface TagTypeDefinition {
+  description?: string
+}
+
+export interface InventoryDefinitions {
+  devices?: Record<string, DeviceTypeDefinition>
+  owners?: Record<string, OwnerTypeDefinition>
+  tags?: Record<string, TagTypeDefinition>
+}
+
 export interface InventoryYaml {
   drivers: Record<string, DriverGlobalConfig>
   rooms: string[]
   devices: DeviceEntry[]
+  definitions?: InventoryDefinitions
 }
 
 export interface Device {

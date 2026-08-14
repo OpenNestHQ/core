@@ -14,6 +14,7 @@
     "js-yaml": "^4.1.0"
   },
   "devDependencies": {
+    "@opennest/lang-core": "workspace:*",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^26.1.0",
     "typescript": "^6.0.3",

@@ -4,6 +4,8 @@ import type { InventoryYaml, Device, DeviceEntry } from './types.js'
 import type { DeviceDriver } from './drivers/interface.js'
 import { MockDriver } from './drivers/mock.js'
 import { HADriver } from './drivers/homeassistant.js'
+import { extractPromptDefinitions } from './prompt.js'
+import type { PromptDefinitions } from './prompt.js'
 
 const driverFactories: Record<string, () => DeviceDriver> = {
   mock: () => new MockDriver(),
@@ -13,6 +15,7 @@ const driverFactories: Record<string, () => DeviceDriver> = {
 export class DeviceRegistry {
   private devices: Device[] = []
   private drivers = new Map<string, DeviceDriver>()
+  private inventory: InventoryYaml
 
   static fromYaml(path: string): DeviceRegistry {
     const raw = readFileSync(path, 'utf-8')
@@ -21,6 +24,7 @@ export class DeviceRegistry {
   }
 
   constructor(inventory: InventoryYaml) {
+    this.inventory = inventory
     this.initDrivers(inventory)
     this.initDevices(inventory)
   }
@@ -35,6 +39,10 @@ export class DeviceRegistry {
 
   getDriver(name: string): DeviceDriver | undefined {
     return this.drivers.get(name)
+  }
+
+  getPromptDefinitions(): PromptDefinitions {
+    return extractPromptDefinitions(this.inventory)
   }
 
   private initDrivers(inventory: InventoryYaml): void {
