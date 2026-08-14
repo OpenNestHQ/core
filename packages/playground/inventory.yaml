@@ -10,12 +10,95 @@ rooms:
   - bathroom
   - entrance
 
+definitions:
+  devices:
+    tv:
+      description: Television set — for watching content, streaming, and multimedia
+      properties:
+        volume:
+          type: number
+          range: [0, 100]
+        source:
+          type: string
+          values: [hdmi1, hdmi2, tv, netflix]
+    light:
+      description: Ceiling or wall light — main room illumination
+      properties:
+        brightness:
+          type: number
+          range: [0, 100]
+    speaker:
+      description: Music speaker — for audio playback and media control
+      properties:
+        volume:
+          type: number
+          range: [0, 100]
+      actions:
+        announce:
+          parameters:
+            - name: message
+              type: string
+              required: true
+            - name: volume
+              type: number
+    thermostat:
+      description: Room thermostat — controls heating/cooling temperature
+    fan:
+      description: Ventilation fan — for air circulation and cooling
+      properties:
+        speed:
+          type: number
+          range: [0, 3]
+    camera:
+      description: Security camera — captures snapshots
+      actions:
+        snapshot:
+          parameters:
+            - name: count
+              type: number
+    vacuum:
+      description: Robot vacuum cleaner — autonomous floor cleaning
+      actions:
+        start:
+          parameters:
+            - name: mode
+              type: enum
+              values: [silent, normal, turbo]
+    door:
+      description: Smart door — controls lock/unlock state
+    switch:
+      description: Generic on/off switch — for simple power control
+  owners:
+    Alice:
+      name: Alice
+      description: "Alice's personal devices"
+    Bob:
+      name: Bob
+      description: "Bob's personal devices"
+    kids:
+      name: Kids
+      description: "Devices in the children's rooms"
+    everybody:
+      name: everybody
+      description: "Shared family devices (default)"
+  tags:
+    main:
+      description: "Main/default device in a room"
+    audio:
+      description: "Devices with audio capabilities"
+    video:
+      description: "Devices with video/display capabilities"
+    security:
+      description: "Security-related devices"
+
 devices:
   - id: tv_living_room
     type: tv
     room: living_room
     name: Living Room TV
     driver: mock
+    owners: [Alice]
+    tags: [video]
     properties:
       power:
         type: boolean
@@ -39,6 +122,8 @@ devices:
     room: living_room
     name: Living Room TV 2
     driver: mock
+    owners: [Bob]
+    tags: [video]
     properties:
       power:
         type: boolean
@@ -62,6 +147,8 @@ devices:
     room: bedroom
     name: Bedroom TV
     driver: mock
+    owners: [kids]
+    tags: [video]
     properties:
       power:
         type: boolean
@@ -85,6 +172,7 @@ devices:
     room: living_room
     name: Living Room Ceiling Light
     driver: mock
+    tags: [main]
     properties:
       power:
         type: boolean
@@ -127,6 +215,7 @@ devices:
     room: bedroom
     name: Bedroom Ceiling Light
     driver: mock
+    owners: [kids]
     properties:
       power:
         type: boolean
@@ -160,6 +249,7 @@ devices:
     room: living_room
     name: Living Room Speaker
     driver: mock
+    tags: [audio, main]
     properties:
       power:
         type: boolean
@@ -169,6 +259,7 @@ devices:
       - play
       - pause
       - next
+      - announce
     init:
       power: false
       volume: 30
@@ -178,6 +269,7 @@ devices:
     room: bedroom
     name: Bedroom Speaker
     driver: mock
+    tags: [audio]
     properties:
       power:
         type: boolean
@@ -186,6 +278,7 @@ devices:
     actions:
       - play
       - pause
+      - announce
     init:
       power: false
       volume: 20
@@ -206,8 +299,10 @@ devices:
     room: entrance
     name: Entrance Camera
     driver: mock
+    tags: [security]
     properties: {}
-    actions: []
+    actions:
+      - snapshot
     init: {}
 
   - id: door_entrance
@@ -215,6 +310,7 @@ devices:
     room: entrance
     name: Entrance Door
     driver: mock
+    tags: [security]
     properties:
       state:
         type: string

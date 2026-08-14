@@ -1,24 +1,27 @@
-import {
-  OpenNestPrompt,
-  DEFAULT_DEVICES,
-  DEFAULT_ROOMS,
-} from '@opennest/lang-core'
+import { OpenNestPrompt } from '@opennest/lang-core'
 import { parseHomeDSL } from '@opennest/lang-core'
 import type { Program } from '@opennest/lang-core'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
+import { createPlaygroundPromptDefinitions } from './devices.js'
 
 const MAX_RETRIES = 5
 
 function createSystemPrompt() {
-  return new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt({
+  const defs = createPlaygroundPromptDefinitions()
+  return new OpenNestPrompt(
+    defs.devices,
+    defs.rooms,
+    defs.owners,
+    defs.tags,
+  ).prompt({
     preamble: `# YOUR ROLE
 You are a HomeDSL translator. Convert natural language smart home commands into valid HomeDSL code only.`,
     customInstruction: `CRITICAL RULES:
 - Output ONLY raw HomeDSL statements — nothing else.
 - No markdown fences, no backticks, no natural language explanations.
 - If the user request is unclear or cannot be translated, respond with exactly: UNTRANSLATABLE
-- Always use device TYPE + ROOM selectors (e.g., tv[salon]), never raw device IDs.
+- Always use device TYPE + ROOM selectors (e.g., tv[living_room]), never raw device IDs.
 - Prefer the most natural device for the described action.`,
   })
 }
