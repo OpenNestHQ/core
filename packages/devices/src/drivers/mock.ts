@@ -1,4 +1,4 @@
-import type { DeviceDriver } from './interface.js'
+import type { DeviceDriver, DriverRuntimeContext } from './interface.js'
 
 export class MockDriver implements DeviceDriver {
   readonly name = 'mock'
@@ -17,6 +17,8 @@ export class MockDriver implements DeviceDriver {
     // to match implemntation of DeviceDriver interface
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _deviceConfig?: Record<string, unknown>,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _runtime?: DriverRuntimeContext,
   ): Promise<unknown> {
     return this._getProperty(deviceId, property)
   }
@@ -35,6 +37,8 @@ export class MockDriver implements DeviceDriver {
     // to match implemntation of DeviceDriver interface
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _deviceConfig?: Record<string, unknown>,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _runtime?: DriverRuntimeContext,
   ): Promise<void> {
     return this._setProperty(deviceId, property, value)
   }
@@ -56,11 +60,15 @@ export class MockDriver implements DeviceDriver {
   // to match implemntation of DeviceDriver interface
   executeAction(
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _deviceId?: string,
+    _deviceId: string,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _action?: string,
+    _action: string,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _deviceConfig?: Record<string, unknown>,
+    _args: Record<string, unknown>,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _deviceConfig: Record<string, unknown>,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _runtime?: DriverRuntimeContext,
   ): Promise<void> {
     return this._executeAction()
   }

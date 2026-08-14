@@ -8,7 +8,7 @@ export type {
   Device,
 } from './types.js'
 
-export type { DeviceDriver } from './drivers/interface.js'
+export type { DeviceDriver, DriverRuntimeContext } from './drivers/interface.js'
 
 export { MockDriver } from './drivers/mock.js'
 export { HADriver } from './drivers/homeassistant.js'
