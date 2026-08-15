@@ -28,6 +28,7 @@ import type { ActionParameterContext } from './interactions/action-parameter.js'
 import type {
   ActionEntryConfig,
   ActionParameterConfig,
+  DriverRuntimeContext,
 } from '@opennest/devices'
 import type { Middleware, PlannedAction } from './middleware/types.js'
 import type { VMEventBus } from './trace/event-bus.js'
@@ -47,6 +48,7 @@ export async function interpretProgram(
 ): Promise<VMResult> {
   const session = existingSession ?? createSession()
   const isFresh = !existingSession || existingSession.cursor === 0
+  const runtime: DriverRuntimeContext = { programId: session.programId }
 
   if (isFresh) {
     const validationErrors = validateProgram(program, devices, session)
@@ -96,6 +98,7 @@ export async function interpretProgram(
       session,
       middleware,
       eventBus,
+      runtime,
     )
 
     if (result.kind === 'awaiting_interaction') {
@@ -205,8 +208,9 @@ async function interpretStatement(
   statement: Statement,
   devices: Device[],
   session: Session,
-  middleware?: Middleware[],
-  eventBus?: VMEventBus,
+  middleware: Middleware[] | undefined,
+  eventBus: VMEventBus | undefined,
+  runtime: DriverRuntimeContext,
 ): Promise<InterpretResult> {
   switch (statement.kind) {
     case 'assignment':
@@ -216,9 +220,17 @@ async function interpretStatement(
         session,
         middleware,
         eventBus,
+        runtime,
       )
     case 'query':
-      return interpretQuery(statement, devices, session, middleware, eventBus)
+      return interpretQuery(
+        statement,
+        devices,
+        session,
+        middleware,
+        eventBus,
+        runtime,
+      )
     case 'increment':
       return interpretIncrement(
         statement,
@@ -226,9 +238,17 @@ async function interpretStatement(
         session,
         middleware,
         eventBus,
+        runtime,
       )
     case 'action':
-      return interpretAction(statement, devices, session, middleware, eventBus)
+      return interpretAction(
+        statement,
+        devices,
+        session,
+        middleware,
+        eventBus,
+        runtime,
+      )
     case 'variable_assignment':
       return interpretVariableAssignment(statement, devices, session, eventBus)
     case 'arg_field_assignment':
@@ -242,6 +262,7 @@ async function interpretStatement(
         session,
         middleware,
         eventBus,
+        runtime,
       )
   }
 }
@@ -295,8 +316,9 @@ async function interpretDeviceStatement(
   spec: DeviceStatementSpec,
   devices: Device[],
   session: Session,
-  middleware?: Middleware[],
-  eventBus?: VMEventBus,
+  middleware: Middleware[] | undefined,
+  eventBus: VMEventBus | undefined,
+  runtime: DriverRuntimeContext,
 ): Promise<InterpretResult> {
   const name = lastPropertyName(stmt.path)
   const intent: ResolutionIntent = { kind: spec.intentKind, name }
@@ -339,6 +361,7 @@ async function interpretDeviceStatement(
     devices,
     stmt,
     resolutionResult,
+    runtime,
     eventBus,
   )
 }
@@ -347,8 +370,9 @@ async function interpretAssignment(
   stmt: Assignment,
   devices: Device[],
   session: Session,
-  middleware?: Middleware[],
-  eventBus?: VMEventBus,
+  middleware: Middleware[] | undefined,
+  eventBus: VMEventBus | undefined,
+  runtime: DriverRuntimeContext,
 ): Promise<InterpretResult> {
   return interpretDeviceStatement(
     stmt,
@@ -367,6 +391,7 @@ async function interpretAssignment(
     session,
     middleware,
     eventBus,
+    runtime,
   )
 }
 
@@ -374,8 +399,9 @@ async function interpretQuery(
   stmt: Query,
   devices: Device[],
   session: Session,
-  middleware?: Middleware[],
-  eventBus?: VMEventBus,
+  middleware: Middleware[] | undefined,
+  eventBus: VMEventBus | undefined,
+  runtime: DriverRuntimeContext,
 ): Promise<InterpretResult> {
   return interpretDeviceStatement(
     stmt,
@@ -393,6 +419,7 @@ async function interpretQuery(
     session,
     middleware,
     eventBus,
+    runtime,
   )
 }
 
@@ -400,8 +427,9 @@ async function interpretIncrement(
   stmt: Increment,
   devices: Device[],
   session: Session,
-  middleware?: Middleware[],
-  eventBus?: VMEventBus,
+  middleware: Middleware[] | undefined,
+  eventBus: VMEventBus | undefined,
+  runtime: DriverRuntimeContext,
 ): Promise<InterpretResult> {
   return interpretDeviceStatement(
     stmt,
@@ -420,6 +448,7 @@ async function interpretIncrement(
     session,
     middleware,
     eventBus,
+    runtime,
   )
 }
 
@@ -427,8 +456,9 @@ async function interpretAction(
   stmt: Action,
   devices: Device[],
   session: Session,
-  middleware?: Middleware[],
-  eventBus?: VMEventBus,
+  middleware: Middleware[] | undefined,
+  eventBus: VMEventBus | undefined,
+  runtime: DriverRuntimeContext,
 ): Promise<InterpretResult> {
   const method = lastPropertyName(stmt.path)
   const intent: ResolutionIntent = { kind: 'action', name: method }
@@ -503,6 +533,7 @@ async function interpretAction(
     devices,
     stmt,
     resolutionResult,
+    runtime,
     eventBus,
   )
 }
@@ -534,11 +565,12 @@ async function applyMiddlewareAndFinish(
   devices: Device[],
   statement: Statement,
   resolutionResult: ResolutionResult,
+  runtime: DriverRuntimeContext,
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
   if (!middleware || middleware.length === 0) {
     const changes = await Promise.all(
-      actions.map(action => executePlannedAction(action, eventBus)),
+      actions.map(action => executePlannedAction(action, runtime, eventBus)),
     )
 
     session.history.push({
@@ -616,7 +648,7 @@ async function applyMiddlewareAndFinish(
   }
 
   const changes = await Promise.all(
-    approved.map(action => executePlannedAction(action, eventBus)),
+    approved.map(action => executePlannedAction(action, runtime, eventBus)),
   )
 
   const resolvedIds = new Set(approved.map(a => a.device.id))
@@ -765,13 +797,15 @@ async function interpretIfStatement(
   stmt: IfStatement,
   devices: Device[],
   session: Session,
-  middleware?: Middleware[],
-  eventBus?: VMEventBus,
+  middleware: Middleware[] | undefined,
+  eventBus: VMEventBus | undefined,
+  runtime: DriverRuntimeContext,
 ): Promise<InterpretResult> {
   const evalResult = await evaluateConditionExpr(
     stmt.condition,
     devices,
     session,
+    runtime,
     eventBus,
   )
 
@@ -804,6 +838,7 @@ async function interpretIfStatement(
       session,
       middleware,
       eventBus,
+      runtime,
     )
 
     if (result.kind === 'awaiting_interaction') {
@@ -860,10 +895,11 @@ async function evaluateConditionExpr(
   expr: ConditionExpr,
   devices: Device[],
   session: Session,
+  runtime: DriverRuntimeContext,
   eventBus?: VMEventBus,
 ): Promise<ConditionEvalResult> {
   if (expr.kind === 'condition') {
-    return evaluateSimpleCondition(expr, devices, session)
+    return evaluateSimpleCondition(expr, devices, session, runtime)
   }
 
   if (expr.kind === 'compound_condition') {
@@ -871,6 +907,7 @@ async function evaluateConditionExpr(
       expr.left,
       devices,
       session,
+      runtime,
       eventBus,
     )
     if (left.kind === 'error') return left
@@ -883,6 +920,7 @@ async function evaluateConditionExpr(
       expr.right,
       devices,
       session,
+      runtime,
       eventBus,
     )
     if (right.kind === 'error') return right
@@ -897,6 +935,7 @@ async function evaluateSimpleCondition(
   condition: SimpleCondition,
   devices: Device[],
   session: Session,
+  runtime: DriverRuntimeContext,
 ): Promise<ConditionEvalResult> {
   const property = lastPropertyName(condition.path)
   const intent: ResolutionIntent = { kind: 'property', name: property }
@@ -937,6 +976,7 @@ async function evaluateSimpleCondition(
     device.id,
     property,
     device.driverConfig,
+    runtime,
   )
 
   session.it = device

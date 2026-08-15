@@ -877,7 +877,9 @@ describe('interpret_home_dsl', () => {
         driverConfig: {},
       }
 
-      const change = await executeAssignment(device, 'power', on())
+      const change = await executeAssignment(device, 'power', on(), {
+        programId: 'test-program',
+      })
 
       expect(change.newValue).toBe(true)
       const storedValue = await driver.getProperty('test_light', 'power')
@@ -897,7 +899,9 @@ describe('interpret_home_dsl', () => {
         driverConfig: {},
       }
 
-      const change = await executeQuery(device, 'brightness')
+      const change = await executeQuery(device, 'brightness', {
+        programId: 'test-program',
+      })
 
       expect(change.newValue).toBe(50)
     })
@@ -914,7 +918,9 @@ describe('interpret_home_dsl', () => {
         driverConfig: {},
       }
 
-      const change = await executeAction(device, 'start')
+      const change = await executeAction(device, 'start', undefined, {
+        programId: 'test-program',
+      })
 
       expect(change.property).toBe('action:start')
       expect(change.newValue).toBe('called')
@@ -3242,6 +3248,7 @@ describe('interpret_home_dsl', () => {
         'announce',
         { message: 'bonjour', volume: 80 },
         expect.anything(),
+        expect.anything(),
       )
     })
 
@@ -3261,6 +3268,7 @@ describe('interpret_home_dsl', () => {
         'speaker_salon',
         'announce',
         { message: 'bonjour', volume: 80 },
+        expect.anything(),
         expect.anything(),
       )
     })
@@ -3307,6 +3315,7 @@ describe('interpret_home_dsl', () => {
         'announce',
         { message: 'bonjour' },
         expect.anything(),
+        expect.anything(),
       )
     })
 
@@ -3339,6 +3348,7 @@ describe('interpret_home_dsl', () => {
         'speaker_salon',
         'announce',
         { message: 'bonjour', volume: 80 },
+        expect.anything(),
         expect.anything(),
       )
       expect(result2.session.argVariables['args']).toEqual({
@@ -3385,5 +3395,82 @@ describe('interpret_home_dsl', () => {
 
       expect(result.status).toBe('success')
     })
+  })
+})
+
+describe('session programId threading', () => {
+  it('threads the same programId into every driver call within one program', async () => {
+    const driver = makeDriver()
+    const tv = await makeDevice('tv_salon', 'tv', 'salon', 'Salon TV', driver, {
+      power: false,
+    })
+    const spy = vi.spyOn(driver, 'setProperty')
+
+    const program = parse('tv[salon].power = on\ntv[salon].volume = 42')
+    const result = await executeCommand(
+      { kind: 'run_program', program },
+      { devices: [tv] },
+    )
+
+    expect(result.status).toBe('success')
+    expect(result.session.programId).toBeTypeOf('string')
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy.mock.calls.map(call => call[4])).toEqual([
+      { programId: result.session.programId },
+      { programId: result.session.programId },
+    ])
+  })
+
+  it('keeps the same programId across a resumed interaction', async () => {
+    const driver = makeDriver()
+    const tv1 = await makeDevice(
+      'tv_salon',
+      'tv',
+      'salon',
+      'Salon TV',
+      driver,
+      {
+        power: false,
+      },
+    )
+    const tv2 = await makeDevice(
+      'tv_chambre',
+      'tv',
+      'chambre',
+      'Chambre TV',
+      driver,
+      { power: false },
+    )
+    const spy = vi.spyOn(driver, 'setProperty')
+
+    const program = parse('tv.power = on')
+    const result1 = await executeCommand(
+      { kind: 'run_program', program },
+      { devices: [tv1, tv2] },
+    )
+    expect(result1.status).toBe('awaiting_interaction')
+    expect(result1.session.programId).toBeTypeOf('string')
+
+    const result2 = await executeCommand(
+      {
+        kind: 'resume_interaction',
+        response: {
+          interactionId: result1.session.pendingInteraction!.id,
+          type: 'device_selection',
+          deviceId: 'tv_salon',
+        },
+      },
+      { devices: [tv1, tv2], session: result1.session },
+    )
+
+    expect(result2.status).toBe('success')
+    expect(result2.session.programId).toBe(result1.session.programId)
+    expect(spy).toHaveBeenCalledWith(
+      'tv_salon',
+      'power',
+      true,
+      expect.anything(),
+      { programId: result1.session.programId },
+    )
   })
 })

@@ -39,6 +39,7 @@ export interface ExecutedStatement {
 }
 
 export interface Session {
+  programId: string
   variables: Record<string, DeviceRef>
   argVariables: Record<string, Record<string, Value>>
   it: Device | null

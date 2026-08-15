@@ -1,10 +1,12 @@
 import type { Value, SimpleCondition } from '@opennest/lang-core'
+import type { DriverRuntimeContext } from '@opennest/devices'
 import type { Device, StateChange } from './types.js'
 import type { PlannedAction } from './middleware/types.js'
 import type { VMEventBus } from './trace/event-bus.js'
 
 export async function executePlannedAction(
   action: PlannedAction,
+  runtime: DriverRuntimeContext,
   eventBus?: VMEventBus,
 ): Promise<StateChange> {
   eventBus?.emit({
@@ -28,6 +30,7 @@ export async function executePlannedAction(
           action.device,
           action.property,
           action.value,
+          runtime,
         )
         break
       case 'increment_property':
@@ -35,13 +38,19 @@ export async function executePlannedAction(
           action.device,
           action.property,
           action.value,
+          runtime,
         )
         break
       case 'read_property':
-        change = await executeQuery(action.device, action.property)
+        change = await executeQuery(action.device, action.property, runtime)
         break
       case 'invoke_action':
-        change = await executeAction(action.device, action.method, action.args)
+        change = await executeAction(
+          action.device,
+          action.method,
+          action.args,
+          runtime,
+        )
         break
     }
 
@@ -67,11 +76,13 @@ export async function executeAssignment(
   device: Device,
   property: string,
   value: Value,
+  runtime: DriverRuntimeContext,
 ): Promise<StateChange> {
   const oldValue = await device.driver.getProperty(
     device.id,
     property,
     device.driverConfig,
+    runtime,
   )
   const newValue = extractValue(value)
 
@@ -80,6 +91,7 @@ export async function executeAssignment(
     property,
     newValue,
     device.driverConfig,
+    runtime,
   )
 
   return {
@@ -94,11 +106,13 @@ export async function executeIncrement(
   device: Device,
   property: string,
   value: Value,
+  runtime: DriverRuntimeContext,
 ): Promise<StateChange> {
   const currentValue = await device.driver.getProperty(
     device.id,
     property,
     device.driverConfig,
+    runtime,
   )
   const increment = extractNumericValue(value)
 
@@ -114,6 +128,7 @@ export async function executeIncrement(
     property,
     newValue,
     device.driverConfig,
+    runtime,
   )
 
   return {
@@ -127,11 +142,13 @@ export async function executeIncrement(
 export async function executeQuery(
   device: Device,
   property: string,
+  runtime: DriverRuntimeContext,
 ): Promise<StateChange> {
   const currentValue = await device.driver.getProperty(
     device.id,
     property,
     device.driverConfig,
+    runtime,
   )
 
   return {
@@ -145,7 +162,8 @@ export async function executeQuery(
 export async function executeAction(
   device: Device,
   method: string,
-  args?: Record<string, Value>,
+  args: Record<string, Value> | undefined,
+  runtime: DriverRuntimeContext,
 ): Promise<StateChange> {
   const extractedArgs: Record<string, unknown> = {}
   if (args) {
@@ -159,6 +177,7 @@ export async function executeAction(
     method,
     extractedArgs,
     device.driverConfig,
+    runtime,
   )
 
   return {

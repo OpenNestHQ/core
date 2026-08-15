@@ -5,6 +5,7 @@ import { interpretProgram } from './interpreter.js'
 
 export function createSession(): Session {
   return {
+    programId: crypto.randomUUID(),
     variables: {},
     argVariables: {},
     it: null,
