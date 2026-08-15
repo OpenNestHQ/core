@@ -1,4 +1,4 @@
-import type { DeviceDriver } from './interface.js'
+import type { DeviceDriver, DriverRuntimeContext } from './interface.js'
 
 interface HAPropertyConfig {
   entity: string
@@ -27,6 +27,8 @@ export class HADriver implements DeviceDriver {
   readonly name = 'homeassistant'
   private baseUrl = ''
   private token = ''
+  private stateCache = new Map<string, Record<string, unknown>>()
+  private cacheProgramId: string | undefined = undefined
 
   async init(globalConfig: Record<string, unknown>): Promise<void> {
     const url = globalConfig['url']
@@ -47,13 +49,14 @@ export class HADriver implements DeviceDriver {
     _deviceId: string,
     property: string,
     deviceConfig: Record<string, unknown>,
+    runtime?: DriverRuntimeContext,
   ): Promise<unknown> {
     const props = deviceConfig['properties'] as
       Record<string, HAPropertyConfig> | undefined
     const propConfig = props?.[property]
     if (!propConfig) return null
 
-    const state = await this.fetchState(propConfig.entity)
+    const state = await this.fetchState(propConfig.entity, runtime)
 
     if (propConfig.attribute) {
       const attrs = state['attributes'] as Record<string, unknown> | undefined
@@ -131,7 +134,27 @@ export class HADriver implements DeviceDriver {
     await this.callService(domain, service, payload)
   }
 
-  private async fetchState(entityId: string): Promise<Record<string, unknown>> {
+  private async fetchState(
+    entityId: string,
+    runtime?: DriverRuntimeContext,
+  ): Promise<Record<string, unknown>> {
+    if (runtime?.programId) {
+      if (this.cacheProgramId !== runtime.programId) {
+        this.stateCache = new Map()
+        this.cacheProgramId = runtime.programId
+      }
+      const cached = this.stateCache.get(entityId)
+      if (cached !== undefined) return cached
+      const state = await this.fetchStateRemote(entityId)
+      this.stateCache.set(entityId, state)
+      return state
+    }
+    return this.fetchStateRemote(entityId)
+  }
+
+  private async fetchStateRemote(
+    entityId: string,
+  ): Promise<Record<string, unknown>> {
     const url = `${this.baseUrl}/api/states/${entityId}`
     const res = await fetch(url, {
       headers: {

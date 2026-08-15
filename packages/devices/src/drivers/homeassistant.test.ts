@@ -173,6 +173,59 @@ describe('HADriver', () => {
     })
   })
 
+  describe('per-program state caching', () => {
+    const deviceConfig = {
+      properties: { power: { entity: 'switch.test' } },
+    }
+
+    it('should fetch state once per entity within the same program', async () => {
+      let fetchCount = 0
+      mockFetch(() => {
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const driver = await initDriver()
+      const runtime = { programId: 'program-1' }
+
+      const first = await driver.getProperty(
+        'd1',
+        'power',
+        deviceConfig,
+        runtime,
+      )
+      const second = await driver.getProperty(
+        'd1',
+        'power',
+        deviceConfig,
+        runtime,
+      )
+
+      expect(first).toBe(true)
+      expect(second).toBe(true)
+      expect(fetchCount).toBe(1)
+    })
+
+    it('should fetch again when programId changes', async () => {
+      let fetchCount = 0
+      mockFetch(() => {
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const driver = await initDriver()
+
+      await driver.getProperty('d1', 'power', deviceConfig, {
+        programId: 'program-1',
+      })
+      await driver.getProperty('d1', 'power', deviceConfig, {
+        programId: 'program-2',
+      })
+
+      expect(fetchCount).toBe(2)
+    })
+  })
+
   describe('setProperty', () => {
     it('should call switch.turn_on for boolean true (inferred)', async () => {
       const calls: { url: string; body: string }[] = []
