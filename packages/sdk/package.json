@@ -1,0 +1,22 @@
+{
+  "name": "@opennest/sdk",
+  "version": "1.0.0",
+  "description": "OpenNest SDK — deterministic execution facade over the HomeDSL parser, device registry, and VM",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@opennest/lang-core": "workspace:*",
+    "@opennest/devices": "workspace:*",
+    "@opennest/vm": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}
