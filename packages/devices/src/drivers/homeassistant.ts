@@ -23,11 +23,16 @@ const DOMAIN_SERVICES: Record<string, { on: string; off: string }> = {
   lock: { on: 'lock', off: 'unlock' },
 }
 
+export const STATE_CACHE_TTL_MS = 5000
+
 export class HADriver implements DeviceDriver {
   readonly name = 'homeassistant'
   private baseUrl = ''
   private token = ''
-  private stateCache = new Map<string, Record<string, unknown>>()
+  private stateCache = new Map<
+    string,
+    { at: number; state: Record<string, unknown> }
+  >()
   private cacheProgramId: string | undefined = undefined
 
   async init(
@@ -110,6 +115,7 @@ export class HADriver implements DeviceDriver {
     }
 
     await this.callService(domain, service, payload)
+    this.stateCache.clear()
   }
 
   async executeAction(
@@ -136,6 +142,7 @@ export class HADriver implements DeviceDriver {
     Object.assign(payload, args)
 
     await this.callService(domain, service, payload)
+    this.stateCache.clear()
   }
 
   private async fetchState(
@@ -147,13 +154,25 @@ export class HADriver implements DeviceDriver {
         this.stateCache = new Map()
         this.cacheProgramId = runtime.programId
       }
+      this.evictExpired()
       const cached = this.stateCache.get(entityId)
-      if (cached !== undefined) return cached
+      if (cached !== undefined) {
+        return cached.state
+      }
       const state = await this.fetchStateRemote(entityId)
-      this.stateCache.set(entityId, state)
+      this.stateCache.set(entityId, { at: Date.now(), state })
       return state
     }
     return this.fetchStateRemote(entityId)
+  }
+
+  private evictExpired(): void {
+    const now = Date.now()
+    for (const [entityId, entry] of this.stateCache) {
+      if (now - entry.at >= STATE_CACHE_TTL_MS) {
+        this.stateCache.delete(entityId)
+      }
+    }
   }
 
   private async fetchStateRemote(

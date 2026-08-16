@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import { HADriver } from './homeassistant.js'
+import { HADriver, STATE_CACHE_TTL_MS } from './homeassistant.js'
 
 function mockFetch(
   responseFactory: (url: string, init?: RequestInit) => Response,
@@ -33,6 +33,11 @@ async function initDriver(config = GLOBAL_CONFIG): Promise<HADriver> {
   const driver = makeDriver()
   await driver.init(config)
   return driver
+}
+
+function cacheSize(driver: HADriver): number {
+  return (driver as unknown as { stateCache: Map<string, unknown> }).stateCache
+    .size
 }
 
 describe('HADriver', () => {
@@ -223,6 +228,135 @@ describe('HADriver', () => {
       })
 
       expect(fetchCount).toBe(2)
+    })
+
+    it('should refetch once a cache entry has expired', async () => {
+      vi.useFakeTimers()
+      try {
+        let fetchCount = 0
+        mockFetch(() => {
+          fetchCount++
+          return jsonResponse({ state: 'on', attributes: {} })
+        })
+
+        const driver = await initDriver()
+        const runtime = { programId: 'program-1' }
+
+        await driver.getProperty('d1', 'power', deviceConfig, runtime)
+        expect(fetchCount).toBe(1)
+
+        vi.advanceTimersByTime(STATE_CACHE_TTL_MS + 1)
+
+        await driver.getProperty('d1', 'power', deviceConfig, runtime)
+        expect(fetchCount).toBe(2)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should serve a fresh cache entry without refetching', async () => {
+      vi.useFakeTimers()
+      try {
+        let fetchCount = 0
+        mockFetch(() => {
+          fetchCount++
+          return jsonResponse({ state: 'on', attributes: {} })
+        })
+
+        const driver = await initDriver()
+        const runtime = { programId: 'program-1' }
+
+        await driver.getProperty('d1', 'power', deviceConfig, runtime)
+        vi.advanceTimersByTime(STATE_CACHE_TTL_MS - 1)
+        await driver.getProperty('d1', 'power', deviceConfig, runtime)
+
+        expect(fetchCount).toBe(1)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should refetch after setProperty invalidates the cache', async () => {
+      let stateFetches = 0
+      mockFetch(url => {
+        if (url.includes('/states/')) {
+          stateFetches++
+          return jsonResponse({ state: 'on', attributes: {} })
+        }
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      const runtime = { programId: 'program-1' }
+
+      await driver.getProperty('d1', 'power', deviceConfig, runtime)
+      expect(stateFetches).toBe(1)
+
+      await driver.setProperty('d1', 'power', true, deviceConfig)
+
+      await driver.getProperty('d1', 'power', deviceConfig, runtime)
+      expect(stateFetches).toBe(2)
+    })
+
+    it('should evict expired entries that are not re-read', async () => {
+      vi.useFakeTimers()
+      try {
+        const fetchCounts: Record<string, number> = {}
+        mockFetch(url => {
+          const entityId = url.split('/states/')[1]!
+          fetchCounts[entityId] = (fetchCounts[entityId] ?? 0) + 1
+          return jsonResponse({ state: 'on', attributes: {} })
+        })
+
+        const driver = await initDriver()
+        const runtime = { programId: 'program-1' }
+        const deviceA = { properties: { power: { entity: 'switch.a' } } }
+        const deviceB = { properties: { power: { entity: 'switch.b' } } }
+
+        await driver.getProperty('d1', 'power', deviceA, runtime)
+        await driver.getProperty('d2', 'power', deviceB, runtime)
+        expect(cacheSize(driver)).toBe(2)
+
+        vi.advanceTimersByTime(STATE_CACHE_TTL_MS + 1)
+
+        await driver.getProperty('d1', 'power', deviceA, runtime)
+
+        expect(fetchCounts['switch.a']).toBe(2)
+        expect(fetchCounts['switch.b']).toBe(1)
+        expect(cacheSize(driver)).toBe(1)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should refetch after executeAction invalidates the cache', async () => {
+      let stateFetches = 0
+      mockFetch(url => {
+        if (url.includes('/states/')) {
+          stateFetches++
+          return jsonResponse({ state: 'on', attributes: {} })
+        }
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      const runtime = { programId: 'program-1' }
+      const actionConfig = {
+        actions: {
+          play: {
+            service: 'media_player.media_play',
+            target: { entity_id: 'media_player.test' },
+          },
+        },
+      }
+
+      await driver.getProperty('d1', 'power', deviceConfig, runtime)
+      expect(stateFetches).toBe(1)
+
+      await driver.executeAction('d1', 'play', {}, actionConfig)
+
+      await driver.getProperty('d1', 'power', deviceConfig, runtime)
+      expect(stateFetches).toBe(2)
     })
   })
 
