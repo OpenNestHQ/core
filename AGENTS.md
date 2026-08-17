@@ -15,6 +15,7 @@ No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm w
 | `packages/lang-core` | `@opennest/lang-core` | Parser (HomeDSL → AST), prompt generator, AST builders | *none* |
 | `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers | *none* (only `js-yaml`) |
 | `packages/vm` | `@opennest/vm` | interpreter: `executeCommand()`, resolution, middleware, interactions, validation, tracing | `lang-core`, `devices` |
+| `packages/sdk` | `@opennest/sdk` | Deterministic execution facade (`OpenNestClient`) over parser + devices + VM | `lang-core`, `devices`, `vm` |
 | `packages/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `lang-core`, `devices`, `vm` |
 
 Cross-package deps use `"workspace:*"` in package.json, resolved by pnpm.
@@ -62,8 +63,9 @@ pnpm handles topological ordering automatically. The dependency graph is:
 
 1. `devices` and `lang-core` — no cross-package deps, build independently (parallel-safe).
 2. `vm` — depends on both `devices` + `lang-core`.
-3. `playground` — depends on `devices` + `lang-core` + `vm`.
-4. `lang-core`'s `build:prompt` requires `dist/` to exist, so `build` must run first.
+3. `sdk` — depends on `lang-core` + `devices` + `vm`.
+4. `playground` — depends on `devices` + `lang-core` + `vm`.
+5. `lang-core`'s `build:prompt` requires `dist/` to exist, so `build` must run first.
 
 ## Module system
 
@@ -112,6 +114,7 @@ Key flags:
 - Run all tests: `pnpm run test` (from the package directory).
 - Run a single file: `pnpm exec vitest run path/to/file.test.ts` (from the package directory).
 - **playground has no tests.**
+- `sdk` is covered by `client.test.ts` (end-to-end via `MockDriver`).
 - `vm` tests create devices inline with `MockDriver` + `seed()`. No external fixture files are required at runtime. An `__fixtures__/inventory.yaml` exists for reference (7 sample devices).
 - `devices` tests use temporary YAML files in `/tmp/` for registry tests. `homeassistant.test.ts` uses `vi.stubGlobal("fetch", ...)` to mock HTTP calls.
 
@@ -124,6 +127,7 @@ Key flags:
 - **Prompt**: `generateHomeAgentPrompt(config?: PromptConfig) → string` in `packages/lang-core/src/prompt/generator.ts`.
 - **Registry**: `DeviceRegistry.fromYaml(yaml: string)` in `packages/devices/src/registry.ts`.
 - **AST Builders**: `buildProgram()`, `buildAction()`, `buildAssignment()`, `buildQuery()`, `buildIncrement()`, `buildRoomSelector()` in `packages/lang-core/src/ast/builders.ts`.
+- **SDK**: `OpenNestClient` in `packages/sdk/src/client.ts` — high-level facade (`parse`/`execute`/`runDsl`/`resume`/`cancel`/`getSession`) + `buildPrompt` + `analyze`. See `packages/sdk/README.md` for the full surface.
 
 ### VMCommand layer
 
@@ -344,6 +348,11 @@ packages/
       devices.ts         # createPlaygroundDevices() — 14 mock devices
       repl.ts            # startRepl() — readline-based interactive loop (handles 5 interaction types)
       format.ts          # Colored output formatting
+  sdk/
+    src/
+      index.ts           # Re-exports (OpenNestClient + types)
+      client.ts          # OpenNestClient facade (parse/execute/runDsl/resume/cancel/getSession)
+      client.test.ts     # vitest tests (e2e via MockDriver)
 ```
 
 ## Linting & formatting

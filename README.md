@@ -18,6 +18,7 @@ Natural Language → HomeAgent (LLM) → HomeDSL → VM (executeCommand) → Dev
 | [devices](./packages/devices/) | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers |
 | [vm](./packages/vm/) | `@opennest/vm` | Interpreter: resolution, middleware, interactions, validation, tracing |
 | [playground](./packages/playground/) | `@opennest/playground` | Interactive TUI REPL with 14 mock devices + NL→DSL AI agent |
+| [sdk](./packages/sdk/) | `@opennest/sdk` | High-level `OpenNestClient` facade over parser + VM + devices |
 
 ---
 
@@ -291,6 +292,86 @@ Requires `OPENAI_API_KEY` (or compatible API via `OPENAI_BASE_URL`). Uses `gpt-4
 
 ---
 
+## SDK
+
+The `@opennest/sdk` package exposes a single `OpenNestClient` facade over the whole pipeline — parse → VM → devices — for building applications on top of OpenNest. No embedded LLM: the host supplies the model.
+
+### Quick start
+
+```ts
+import { OpenNestClient } from "@opennest/sdk";
+import { MockDriver } from "@opennest/devices";
+
+const client = new OpenNestClient({
+  devices: [
+    {
+      id: "tv_salon",
+      type: "tv",
+      room: "salon",
+      name: "Salon TV",
+      driver: new MockDriver(),
+      driverConfig: {},
+    },
+  ],
+});
+
+const result = await client.runDsl("tv[salon].power = on"); // status: "success"
+```
+
+### Facade
+
+| Method | Description |
+|---|---|
+| `parse(dsl)` | Parse HomeDSL into a `Program`; throws `ParseError` on invalid DSL |
+| `execute(program)` | Execute a parsed `Program` → `Promise<VMResult>` |
+| `runDsl(dsl)` | `execute(parse(dsl))` in one call |
+| `resume(response)` | Resume a suspended interaction with a `UserResponse` |
+| `cancel()` | Cancel the current execution and reset the session |
+| `getSession()` | Return the current `Session` (variables, history, `$it`, …) |
+
+### LLM helpers
+
+`buildPrompt(promptOptions?)` renders a HomeDSL prompt from the inventory's `PromptDefinitions` for the host's own LLM. It needs either a `DeviceRegistry` or an explicit `promptDefinitions`; a client built from a bare `Device[]` with neither throws.
+
+`analyze(dsl)` runs `parseHomeDSL` + `validateProgram` without executing and returns typed feedback — no throw, no retry loop:
+
+```ts
+const feedback = client.analyze("tv[unknown_room].power = on");
+
+// {
+//   program: Program | null,          // null when parsing failed
+//   parseErrors: ParseErrorInfo[],    // { message, line, column }
+//   validationErrors: VMError[],      // { statement, message }
+//   ok: boolean,
+// }
+```
+
+### Interaction round-trip
+
+On `status: "awaiting_interaction"`, read the typed `UserInteraction` and reply with a matching `UserResponse` via `resume(response)`:
+
+```ts
+const result = await client.runDsl("$tv = @oneof(tv)");
+// With ≥2 TVs in the inventory, this suspends with `awaiting_interaction`.
+
+if (result.status === "awaiting_interaction" && result.interaction) {
+  const interaction = result.interaction; // typed UserInteraction
+  // e.g. { id, type: "device_selection", message, devices }
+
+  const resumed = await client.resume({
+    interactionId: interaction.id,
+    type: "device_selection",
+    deviceId: "tv_salon",
+  });
+}
+```
+
+Each `UserInteraction` (`device_selection`, `confirmation`, `text_input`, `number_input`, `choice`, `action_parameter`) carries an `id` to copy into the `interactionId` field of the matching `UserResponse`.
+
+An optional `onInteraction(interaction)` callback fires whenever a run returns `awaiting_interaction` with a non-null `interaction`, so the host can react without polling the result. It is fire-and-forget (`run()` never awaits it); errors are routed to `onInteractionError(error, interaction)` when provided, otherwise ignored.
+
+---
+
 ## Repository Structure
 
 ```
@@ -323,6 +404,10 @@ packages/
       agent.ts        # NL→DSL AI translator (OpenAI via ai-sdk)
       devices.ts      # 14 mock devices across 4 rooms
       format.ts       # Colored terminal output
+  sdk/               # High-level client facade
+    src/
+      client.ts       # OpenNestClient (parse/execute/runDsl/resume/cancel/getSession)
+      index.ts        # Public exports
 ```
 
 ---
