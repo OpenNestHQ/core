@@ -16,7 +16,7 @@ No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm w
 | `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers | *none* (only `js-yaml`) |
 | `packages/vm` | `@opennest/vm` | interpreter: `executeCommand()`, resolution, middleware, interactions, validation, tracing | `lang-core`, `devices` |
 | `packages/sdk` | `@opennest/sdk` | Deterministic execution facade (`OpenNestClient`) over parser + devices + VM | `lang-core`, `devices`, `vm` |
-| `packages/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `lang-core`, `devices`, `vm` |
+| `examples/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `sdk` |
 
 Cross-package deps use `"workspace:*"` in package.json, resolved by pnpm.
 
@@ -64,7 +64,7 @@ pnpm handles topological ordering automatically. The dependency graph is:
 1. `devices` and `lang-core` — no cross-package deps, build independently (parallel-safe).
 2. `vm` — depends on both `devices` + `lang-core`.
 3. `sdk` — depends on `lang-core` + `devices` + `vm`.
-4. `playground` — depends on `devices` + `lang-core` + `vm`.
+4. `examples/playground` (TUI) and `examples/web-playground` — depend on `sdk`.
 5. `lang-core`'s `build:prompt` requires `dist/` to exist, so `build` must run first.
 
 ## Module system
@@ -342,17 +342,21 @@ packages/
       validate.ts        # validateProgram() — pre-execution static validation
     __fixtures__/
       inventory.yaml     # Sample YAML inventory (7 devices)
-  playground/
-    src/
-      index.ts           # main(): creates devices, starts REPL
-      devices.ts         # createPlaygroundDevices() — 14 mock devices
-      repl.ts            # startRepl() — readline-based interactive loop (handles 5 interaction types)
-      format.ts          # Colored output formatting
   sdk/
     src/
       index.ts           # Re-exports (OpenNestClient + types)
       client.ts          # OpenNestClient facade (parse/execute/runDsl/resume/cancel/getSession)
       client.test.ts     # vitest tests (e2e via MockDriver)
+examples/
+  playground/
+    src/
+      index.ts           # main(): creates devices, starts REPL
+      devices.ts         # createPlaygroundRegistry() — 14 mock devices
+      repl.ts            # startRepl() — readline-based interactive loop (handles 5 interaction types)
+      format.ts          # Colored output formatting
+  web-playground/
+    lib/vm/              # VM adapter + device fixtures
+    hooks/               # use-vm() React context + reducer
 ```
 
 ## Linting & formatting

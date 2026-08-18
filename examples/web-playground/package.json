@@ -11,8 +11,7 @@
   },
   "dependencies": {
     "@opennest/devices": "workspace:*",
-    "@opennest/lang-core": "workspace:*",
-    "@opennest/vm": "workspace:*",
+    "@opennest/sdk": "workspace:*",
     "@radix-ui/react-dialog": "^1.1.13",
     "@radix-ui/react-scroll-area": "^1.2.7",
     "@radix-ui/react-separator": "^1.1.3",

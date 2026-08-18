@@ -14,8 +14,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^2",
     "@opennest/devices": "workspace:*",
-    "@opennest/lang-core": "workspace:*",
-    "@opennest/vm": "workspace:*",
+    "@opennest/sdk": "workspace:*",
     "@opennest/vm-opentelemetry": "workspace:*",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",

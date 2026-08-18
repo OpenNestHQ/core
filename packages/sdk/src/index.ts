@@ -8,6 +8,7 @@ export type {
   PromptOptions,
 } from '@opennest/lang-core'
 
+export { createConfirmationMiddleware, DefaultVMEventBus } from '@opennest/vm'
 export type {
   Device,
   Session,
@@ -16,8 +17,13 @@ export type {
   VMStatus,
   UserInteraction,
   UserResponse,
+  DeviceSelectionInteraction,
   Middleware,
   VMEventBus,
+  VMEvent,
+  ExecutedStatement,
+  StateChange,
+  PlannedAction,
 } from '@opennest/vm'
 
 export type { DeviceRegistry, PromptDefinitions } from '@opennest/devices'

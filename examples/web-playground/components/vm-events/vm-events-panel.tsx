@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Activity } from 'lucide-react'
-import type { VMEvent } from '@opennest/vm'
+import type { VMEvent } from '@opennest/sdk'
 
 const EVENT_COLORS: Record<string, string> = {
   'program:begin': 'text-blue-400',

@@ -8,8 +8,7 @@ import {
   useRef,
   type ReactNode,
 } from 'react'
-import { createSession } from '@opennest/vm'
-import type { UserResponse } from '@opennest/vm'
+import type { UserResponse } from '@opennest/sdk'
 import {
   VMAdapter,
   buildTimelineEntries,
@@ -53,7 +52,7 @@ function vmReducer(state: VMState, action: VMAction): VMState {
     case 'RESET':
       return {
         ...state,
-        session: createSession(),
+        session: null,
         status: 'idle',
         dslSource: '',
         executedStatements: [],
@@ -108,7 +107,10 @@ export function VMProvider({ children }: { children: ReactNode }) {
     adapterRef.current = new VMAdapter(handleEvent, handleSession)
 
     dispatch({ type: 'SET_DEVICES', devices: adapterRef.current.getDevices() })
-    dispatch({ type: 'SET_SESSION', session: createSession() })
+    dispatch({
+      type: 'SET_SESSION',
+      session: adapterRef.current.getSession(),
+    })
     dispatch({
       type: 'SET_POLICIES',
       policies: adapterRef.current.getPolicies(),
@@ -298,6 +300,7 @@ export function VMProvider({ children }: { children: ReactNode }) {
     adapter.resetSession()
     dispatch({ type: 'RESET' })
     dispatch({ type: 'SET_DEVICES', devices: adapter.getDevices() })
+    dispatch({ type: 'SET_SESSION', session: adapter.getSession() })
     dispatch({
       type: 'ADD_MESSAGE',
       message: buildChatMessage('system', 'Session reset.'),

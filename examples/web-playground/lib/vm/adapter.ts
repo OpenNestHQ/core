@@ -1,22 +1,18 @@
-import { parseHomeDSL } from '@opennest/lang-core'
 import {
-  executeCommand,
-  createSession,
+  OpenNestClient,
   createConfirmationMiddleware,
   DefaultVMEventBus,
-} from '@opennest/vm'
+} from '@opennest/sdk'
 import type {
-  VMCommand,
   Session,
   Device,
   Middleware,
   UserInteraction,
   UserResponse,
   VMResult,
-  VMEventBus,
   VMEvent,
   PlannedAction,
-} from '@opennest/vm'
+} from '@opennest/sdk'
 import { createPlaygroundDevices } from './devices'
 import type {
   VMEventLogEntry,
@@ -54,9 +50,8 @@ function createDemoMiddleware(): Middleware[] {
 // ── VM Adapter ──
 
 export class VMAdapter {
-  private session: Session
+  private client: OpenNestClient
   private middlewareList: Middleware[]
-  private eventBus!: VMEventBus
   private devices: Device[]
   private eventIdCounter = 0
 
@@ -69,16 +64,15 @@ export class VMAdapter {
   ) {
     const fixture = createPlaygroundDevices()
     this.devices = fixture.devices
-    this.session = createSession()
     this.middlewareList = createDemoMiddleware()
     this.onEvent = onEvent
     this.onSessionUpdate = onSessionUpdate
-    this.setupEventBus()
+    this.client = this.createClient()
   }
 
-  private setupEventBus(): void {
-    this.eventBus = new DefaultVMEventBus()
-    this.eventBus.subscribe((event: VMEvent) => {
+  private createClient(): OpenNestClient {
+    const eventBus = new DefaultVMEventBus()
+    eventBus.subscribe((event: VMEvent) => {
       const entry: VMEventLogEntry = {
         id: ++this.eventIdCounter,
         event,
@@ -86,10 +80,19 @@ export class VMAdapter {
       }
       this.onEvent(entry)
     })
+    return new OpenNestClient({
+      devices: this.devices,
+      middleware: this.middlewareList,
+      eventBus,
+    })
   }
 
   getDevices(): Device[] {
     return this.devices
+  }
+
+  getSession(): Session {
+    return this.client.getSession()
   }
 
   getPolicies(): PolicyInfo[] {
@@ -108,14 +111,14 @@ export class VMAdapter {
 
   async executeDSL(source: string): Promise<VMResult> {
     const normalized = source.replace(/\r\n/g, '\n')
-    const parseResult = parseHomeDSL(normalized)
-    if (parseResult.errors.length > 0) {
+    const feedback = this.client.analyze(normalized)
+    if (feedback.parseErrors.length > 0) {
       return {
         status: 'error',
-        session: this.session,
+        session: this.client.getSession(),
         executed: [],
         interaction: null,
-        errors: parseResult.errors.map(e => ({
+        errors: feedback.parseErrors.map(e => ({
           statement: {
             kind: 'action' as const,
             path: [],
@@ -125,49 +128,30 @@ export class VMAdapter {
       }
     }
 
-    const result = await this.run({
-      kind: 'run_program',
-      program: parseResult.program,
-    })
+    const result = await this.client.execute(feedback.program!)
 
-    this.session = result.session
-    this.onSessionUpdate(this.session)
+    this.onSessionUpdate(this.client.getSession())
     return result
   }
 
   async resumeInteraction(response: UserResponse): Promise<VMResult> {
-    const result = await this.run({
-      kind: 'resume_interaction',
-      response,
-    })
+    const result = await this.client.resume(response)
 
-    this.session = result.session
-    this.onSessionUpdate(this.session)
+    this.onSessionUpdate(this.client.getSession())
     return result
   }
 
   async cancelExecution(): Promise<VMResult> {
-    const result = await this.run({ kind: 'cancel_execution' })
-    this.session = result.session
-    this.onSessionUpdate(this.session)
+    const result = await this.client.cancel()
+    this.onSessionUpdate(this.client.getSession())
     return result
   }
 
   resetSession(): void {
     this.eventIdCounter = 0
-    this.session = createSession()
     this.middlewareList = createDemoMiddleware()
-    this.setupEventBus()
-    this.onSessionUpdate(this.session)
-  }
-
-  private async run(command: VMCommand): Promise<VMResult> {
-    return executeCommand(command, {
-      devices: this.devices,
-      session: this.session,
-      middleware: this.middlewareList,
-      eventBus: this.eventBus,
-    })
+    this.client = this.createClient()
+    this.onSessionUpdate(this.client.getSession())
   }
 }
 

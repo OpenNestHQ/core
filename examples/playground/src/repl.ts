@@ -1,16 +1,13 @@
 import * as readline from 'node:readline'
-import { parseHomeDSL } from '@opennest/lang-core'
-import type { Program } from '@opennest/lang-core'
-import { executeCommand, createSession } from '@opennest/vm'
+import { OpenNestClient } from '@opennest/sdk'
 import type {
-  Session,
+  Program,
   Device,
   UserInteraction,
   DeviceSelectionInteraction,
-  Middleware,
   UserResponse,
   VMResult,
-} from '@opennest/vm'
+} from '@opennest/sdk'
 import {
   formatSuccess,
   formatInteraction,
@@ -32,42 +29,23 @@ import type { AttemptCallback } from './agent.js'
 import type { TelemetryHandle } from './telemetry.js'
 
 interface State {
-  session: Session
+  client: OpenNestClient
   devices: Device[]
   nlMode: boolean
-  middleware: Middleware[]
   telemetry: TelemetryHandle | undefined
 }
 
 function createState(
+  client: OpenNestClient,
   devices: Device[],
-  middleware: Middleware[],
   telemetry?: TelemetryHandle,
 ): State {
   return {
-    session: createSession(),
+    client,
     devices,
     nlMode: false,
-    middleware,
-    telemetry: telemetry ?? (undefined as never),
+    telemetry: telemetry ?? undefined,
   }
-}
-
-function buildVMContext(state: State): {
-  devices: Device[]
-  session: Session
-  middleware: Middleware[]
-  eventBus?: import('@opennest/vm').VMEventBus
-} {
-  const ctx: ReturnType<typeof buildVMContext> = {
-    devices: state.devices,
-    session: state.session,
-    middleware: state.middleware,
-  }
-  if (state.telemetry !== undefined) {
-    ctx.eventBus = state.telemetry.eventBus
-  }
-  return ctx
 }
 
 function presentResult(
@@ -105,17 +83,13 @@ async function executeProgram(
   program: Program,
   state: State,
 ): Promise<UserInteraction | null> {
-  const prevHistoryLen = state.session.history.length
+  const prevHistoryLen = state.client.getSession().history.length
 
   state.telemetry?.beginCycle()
 
-  const result = await executeCommand(
-    { kind: 'run_program', program },
-    buildVMContext(state),
-  )
+  const result = await state.client.execute(program)
 
   state.telemetry?.endCycle(result.status === 'awaiting_interaction')
-  state.session = result.session
   return presentResult(result, prevHistoryLen)
 }
 
@@ -129,13 +103,9 @@ async function handleInteraction(
   if (trimmed === ':cancel' || trimmed === ':q') {
     state.telemetry?.beginCycle()
 
-    const result = await executeCommand(
-      { kind: 'cancel_execution' },
-      buildVMContext(state),
-    )
+    await state.client.cancel()
 
     state.telemetry?.endCycle(false)
-    state.session = result.session
     process.stdout.write('  Cancelled.\n\n')
     return null
   }
@@ -197,17 +167,13 @@ async function handleInteraction(
     return null
   }
 
-  const prevHistoryLen = state.session.history.length
+  const prevHistoryLen = state.client.getSession().history.length
 
   state.telemetry?.beginCycle()
 
-  const result = await executeCommand(
-    { kind: 'resume_interaction', response },
-    buildVMContext(state),
-  )
+  const result = await state.client.resume(response)
 
   state.telemetry?.endCycle(result.status === 'awaiting_interaction')
-  state.session = result.session
   return presentResult(result, prevHistoryLen)
 }
 
@@ -215,15 +181,15 @@ async function executeSource(
   state: State,
   src: string,
 ): Promise<UserInteraction | null> {
-  const parseResult = parseHomeDSL(src)
-  if (parseResult.errors.length > 0) {
+  const feedback = state.client.analyze(src)
+  if (feedback.parseErrors.length > 0) {
     process.stdout.write(
-      formatParseErrors(parseResult.errors.map(e => e.message)) + '\n',
+      formatParseErrors(feedback.parseErrors.map(e => e.message)) + '\n',
     )
     return null
   }
 
-  return executeProgram(parseResult.program, state)
+  return executeProgram(feedback.program!, state)
 }
 
 async function executeNlSource(
@@ -239,7 +205,7 @@ async function executeNlSource(
   }
 
   try {
-    const result = await translateNlToDsl(input, onAttempt)
+    const result = await translateNlToDsl(input, state.client, onAttempt)
 
     if (result.failed || !result.program) {
       process.stdout.write(formatNlFailed(result.attempts) + '\n\n')
@@ -275,11 +241,11 @@ const COMMANDS = [
 ]
 
 export async function startRepl(
+  client: OpenNestClient,
   devices: Device[],
-  middleware?: Middleware[],
   telemetry?: TelemetryHandle,
 ): Promise<void> {
-  const state = createState(devices, middleware ?? [], telemetry)
+  const state = createState(client, devices, telemetry)
 
   function deviceTypes(): string[] {
     return [...new Set(state.devices.map(d => d.type))]
@@ -349,7 +315,7 @@ export async function startRepl(
       const partial = lastToken.slice(dollarIdx + 1)
       const prefix = lastToken.slice(0, dollarIdx + 1)
 
-      const varNames = Object.keys(state.session.variables)
+      const varNames = Object.keys(state.client.getSession().variables)
       if (!varNames.includes('it')) varNames.push('it')
 
       const hits = varNames.filter(name => name.startsWith(partial))
@@ -490,19 +456,15 @@ export async function startRepl(
       return
     }
     if (trimmed === ':s' || trimmed === ':session') {
-      process.stdout.write(formatSession(state.session) + '\n')
+      process.stdout.write(formatSession(state.client.getSession()) + '\n')
       return
     }
     if (trimmed === ':r' || trimmed === ':reset') {
       state.telemetry?.beginCycle()
 
-      const result = await executeCommand(
-        { kind: 'cancel_execution' },
-        buildVMContext(state),
-      )
+      await state.client.cancel()
 
       state.telemetry?.endCycle(false)
-      state.session = result.session
       process.stdout.write('Session reset.\n\n')
       return
     }

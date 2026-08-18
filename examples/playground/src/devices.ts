@@ -1,7 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import { DeviceRegistry } from '@opennest/devices'
-import type { PromptDefinitions } from '@opennest/devices'
-import type { Device } from '@opennest/vm'
+import type { Device } from '@opennest/sdk'
 
 let registry: DeviceRegistry | undefined
 
@@ -12,10 +11,10 @@ function getRegistry(): DeviceRegistry {
   return registry
 }
 
-export function createPlaygroundDevices(): Device[] {
-  return getRegistry().getDevices()
+export function createPlaygroundRegistry(): DeviceRegistry {
+  return getRegistry()
 }
 
-export function createPlaygroundPromptDefinitions(): PromptDefinitions {
-  return getRegistry().getPromptDefinitions()
+export function createPlaygroundDevices(): Device[] {
+  return getRegistry().getDevices()
 }

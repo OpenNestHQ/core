@@ -17,7 +17,7 @@ Natural Language → HomeAgent (LLM) → HomeDSL → VM (executeCommand) → Dev
 | [lang-core](./packages/lang-core/) | `@opennest/lang-core` | Parser (HomeDSL → AST), prompt generator, AST types |
 | [devices](./packages/devices/) | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers |
 | [vm](./packages/vm/) | `@opennest/vm` | Interpreter: resolution, middleware, interactions, validation, tracing |
-| [playground](./packages/playground/) | `@opennest/playground` | Interactive TUI REPL with 14 mock devices + NL→DSL AI agent |
+| [playground](./examples/playground/) | `@opennest/playground` | Interactive TUI REPL with 14 mock devices + NL→DSL AI agent |
 | [sdk](./packages/sdk/) | `@opennest/sdk` | High-level `OpenNestClient` facade over parser + VM + devices |
 
 ---
@@ -398,16 +398,20 @@ packages/
       collections.ts  # @all, @first expansion
       validate.ts     # Pre-execution static validation
     __fixtures__/     # Sample inventory.yaml
+  sdk/               # High-level client facade
+    src/
+      client.ts       # OpenNestClient (parse/execute/runDsl/resume/cancel/getSession)
+      index.ts        # Public exports
+examples/
   playground/        # Interactive TUI REPL
     src/
       repl.ts         # Readline-based REPL with tab-completion
       agent.ts        # NL→DSL AI translator (OpenAI via ai-sdk)
       devices.ts      # 14 mock devices across 4 rooms
       format.ts       # Colored terminal output
-  sdk/               # High-level client facade
-    src/
-      client.ts       # OpenNestClient (parse/execute/runDsl/resume/cancel/getSession)
-      index.ts        # Public exports
+  web-playground/    # Next.js web UI
+    lib/vm/           # VM adapter + device fixtures
+    hooks/            # use-vm() React context + reducer
 ```
 
 ---

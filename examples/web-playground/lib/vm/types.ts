@@ -5,7 +5,7 @@ import type {
   VMError,
   UserInteraction,
   VMEvent,
-} from '@opennest/vm'
+} from '@opennest/sdk'
 
 export interface PolicyInfo {
   name: string

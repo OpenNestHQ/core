@@ -1,6 +1,6 @@
-import { createConfirmationMiddleware } from '@opennest/vm'
-import type { PlannedAction, Middleware } from '@opennest/vm'
-import { createPlaygroundDevices } from './devices.js'
+import { OpenNestClient, createConfirmationMiddleware } from '@opennest/sdk'
+import type { PlannedAction, Middleware } from '@opennest/sdk'
+import { createPlaygroundRegistry } from './devices.js'
 import { startRepl } from './repl.js'
 import { initTelemetry } from './telemetry.js'
 
@@ -8,7 +8,7 @@ async function main(): Promise<void> {
   process.loadEnvFile()
 
   const telemetry = initTelemetry()
-  const devices = createPlaygroundDevices()
+  const registry = createPlaygroundRegistry()
 
   const confirmThermostat = createConfirmationMiddleware({
     requireConfirmation(action: PlannedAction) {
@@ -22,7 +22,13 @@ async function main(): Promise<void> {
 
   const middleware: Middleware[] = [confirmThermostat]
 
-  await startRepl(devices, middleware, telemetry ?? undefined)
+  const client = new OpenNestClient({
+    devices: registry,
+    middleware,
+    ...(telemetry ? { eventBus: telemetry.eventBus } : {}),
+  })
+
+  await startRepl(client, registry.getDevices(), telemetry ?? undefined)
 }
 
 main().catch(console.error)

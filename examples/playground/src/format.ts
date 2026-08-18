@@ -7,7 +7,7 @@ import type {
   Session,
   UserInteraction,
   DeviceSelectionInteraction,
-} from '@opennest/vm'
+} from '@opennest/sdk'
 
 const G = '\x1b[32m'
 const Y = '\x1b[33m'

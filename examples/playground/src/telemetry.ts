@@ -5,12 +5,12 @@ import {
 } from '@opentelemetry/sdk-trace-base'
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { Resource } from '@opentelemetry/resources'
-import { DefaultVMEventBus } from '@opennest/vm'
+import { DefaultVMEventBus } from '@opennest/sdk'
 import {
   ExecutionEventNormalizer,
   OpenTelemetryTraceSink,
 } from '@opennest/vm-opentelemetry'
-import type { VMEventBus } from '@opennest/vm'
+import type { VMEventBus } from '@opennest/sdk'
 import type { SpanContext } from '@opentelemetry/api'
 
 export interface TelemetryHandle {

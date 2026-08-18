@@ -1,5 +1,4 @@
-import { parseHomeDSL } from '@opennest/lang-core'
-import type { Program } from '@opennest/lang-core'
+import type { OpenNestClient, Program } from '@opennest/sdk'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
 import { createPlaygroundSystemPrompt } from './prompt.js'
@@ -37,9 +36,10 @@ export type AttemptCallback = (
 
 export async function translateNlToDsl(
   input: string,
+  client: OpenNestClient,
   onAttempt?: AttemptCallback,
 ): Promise<NlTranslateResult> {
-  const systemPrompt = createPlaygroundSystemPrompt()
+  const systemPrompt = createPlaygroundSystemPrompt(client)
   const modelId = getModelId()
   const apiKey = process.env['OPENAI_API_KEY']
   const baseURL = process.env['OPENAI_BASE_URL']
@@ -83,22 +83,23 @@ export async function translateNlToDsl(
       }
     }
 
-    const parseResult = parseHomeDSL(dsl)
+    const feedback = client.analyze(dsl)
 
     if (
-      parseResult.errors.length === 0 &&
-      parseResult.program.statements.length > 0
+      feedback.parseErrors.length === 0 &&
+      feedback.program !== null &&
+      feedback.program.statements.length > 0
     ) {
       onAttempt?.(attempt + 1, dsl, null)
       return {
-        program: parseResult.program,
+        program: feedback.program,
         dsl,
         attempts: attempt + 1,
         failed: false,
       }
     }
 
-    const errorMessages = parseResult.errors.map(e => e.message)
+    const errorMessages = feedback.parseErrors.map(e => e.message)
     onAttempt?.(attempt + 1, dsl, errorMessages)
 
     const errorText = `The HomeDSL you generated has parse errors:\n${errorMessages.join('\n')}\n\nPlease fix the HomeDSL and output ONLY valid code.`
