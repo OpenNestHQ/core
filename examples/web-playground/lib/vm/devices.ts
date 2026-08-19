@@ -140,7 +140,7 @@ export function createPlaygroundDevices(): PlaygroundFixture {
     room: spec.room,
     name: spec.name,
     driver,
-    driverConfig: {},
+    driverConfig: { properties: spec.initialState },
   }))
 
   return { driver, devices }
