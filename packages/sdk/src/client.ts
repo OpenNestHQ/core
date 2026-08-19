@@ -28,6 +28,11 @@ export interface OpenNestClientOptions {
   onInteractionError?: (error: unknown, interaction: UserInteraction) => void
 }
 
+export type OpenNestClientFromYamlOptions = Omit<
+  OpenNestClientOptions,
+  'devices'
+>
+
 export interface DSLFeedback {
   program: Program | null
   parseErrors: ParseErrorInfo[]
@@ -61,6 +66,17 @@ export class OpenNestClient {
     this.onInteraction = options.onInteraction
     this.onInteractionError = options.onInteractionError
     this.session = createSession()
+  }
+
+  static async fromYaml(
+    path: string,
+    options: OpenNestClientFromYamlOptions = {},
+  ): Promise<OpenNestClient> {
+    const { DeviceRegistry } = await import(
+      /* webpackIgnore: true */ '@opennest/devices'
+    )
+    const registry = DeviceRegistry.fromYaml(path)
+    return new OpenNestClient({ devices: registry, ...options })
   }
 
   parse(dsl: string): Program {

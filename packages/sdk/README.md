@@ -18,6 +18,18 @@ import { OpenNestClient } from '@opennest/sdk'
 const client = new OpenNestClient({ devices }) // Device[] or DeviceRegistry
 ```
 
+A client can also be built from a YAML inventory file (the same format consumed by
+`DeviceRegistry.fromYaml`):
+
+```ts
+const client = await OpenNestClient.fromYaml('./inventory.yaml', {
+  middleware,
+  onInteraction,
+})
+```
+
+The extra options are the usual `OpenNestClientOptions` minus `devices`.
+
 | Method                  | Description                                                         |
 | ----------------------- | ------------------------------------------------------------------- |
 | `parse(dsl)`            | Parse HomeDSL into a `Program`. Throws `ParseError` on invalid DSL. |

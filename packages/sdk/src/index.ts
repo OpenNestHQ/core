@@ -1,5 +1,9 @@
 export { OpenNestClient } from './client.js'
-export type { OpenNestClientOptions, DSLFeedback } from './client.js'
+export type {
+  OpenNestClientOptions,
+  OpenNestClientFromYamlOptions,
+  DSLFeedback,
+} from './client.js'
 
 export { ParseError } from '@opennest/lang-core'
 export type {

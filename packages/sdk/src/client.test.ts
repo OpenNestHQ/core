@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
+import { writeFileSync, unlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { MockDriver, DeviceRegistry } from '@opennest/devices'
-import { createConfirmationMiddleware } from '@opennest/vm'
+import { createConfirmationMiddleware, DefaultVMEventBus } from '@opennest/vm'
 import { OpenNestClient } from './client.js'
 import type { Device, Middleware, UserInteraction } from '@opennest/vm'
 
@@ -307,6 +310,108 @@ describe('OpenNestClient', () => {
 
     expect(result.status).toBe('success')
     expect(result.executed[0]!.changes[0]!.newValue).toBe(true)
+  })
+})
+
+const FROM_YAML = `
+drivers:
+  mock:
+    latency: 0
+rooms:
+  - salon
+devices:
+  - id: tv_salon
+    type: tv
+    room: salon
+    name: Salon TV
+    driver: mock
+    properties:
+      power:
+        type: boolean
+    actions: []
+`
+
+function writeTempYaml(name: string): string {
+  const path = join(
+    tmpdir(),
+    `opennest-sdk-${name}-${process.pid}-${Math.random().toString(36).slice(2)}.yaml`,
+  )
+  writeFileSync(path, FROM_YAML, 'utf-8')
+  return path
+}
+
+describe('OpenNestClient.fromYaml', () => {
+  it('builds a client from a YAML inventory file', async () => {
+    const path = writeTempYaml('client')
+    try {
+      const client = await OpenNestClient.fromYaml(path)
+
+      const result = await client.runDsl('tv[salon].power = on')
+
+      expect(result.status).toBe('success')
+      expect(result.errors).toHaveLength(0)
+      expect(result.executed).toHaveLength(1)
+    } finally {
+      unlinkSync(path)
+    }
+  })
+
+  it('forwards middleware and interaction callbacks', async () => {
+    const path = writeTempYaml('options')
+    try {
+      const interactions: UserInteraction[] = []
+      const client = await OpenNestClient.fromYaml(path, {
+        middleware: [
+          createConfirmationMiddleware({ requireConfirmation: () => true }),
+        ],
+        onInteraction: interaction => interactions.push(interaction),
+      })
+
+      const result = await client.runDsl('tv[salon].power = on')
+
+      expect(result.status).toBe('awaiting_interaction')
+      expect(result.interaction!.type).toBe('confirmation')
+      expect(interactions).toHaveLength(1)
+      expect(interactions[0]!.id).toBe(result.interaction!.id)
+    } finally {
+      unlinkSync(path)
+    }
+  })
+
+  it('forwards the eventBus through fromYaml', async () => {
+    const path = writeTempYaml('event-bus')
+    try {
+      const events: string[] = []
+      const eventBus = new DefaultVMEventBus()
+      eventBus.subscribe(event => events.push(event.kind))
+
+      const client = await OpenNestClient.fromYaml(path, { eventBus })
+
+      const result = await client.runDsl('tv[salon].power = on')
+
+      expect(result.status).toBe('success')
+      expect(events).toContain('program:begin')
+      expect(events).toContain('program:end')
+    } finally {
+      unlinkSync(path)
+    }
+  })
+
+  it('forwards promptDefinitions through fromYaml', async () => {
+    const path = writeTempYaml('prompt-defs')
+    try {
+      const registry = new DeviceRegistry(makeInventory())
+      const client = await OpenNestClient.fromYaml(path, {
+        promptDefinitions: registry.getPromptDefinitions(),
+      })
+
+      const prompt = client.buildPrompt()
+
+      expect(prompt).toContain('- tv')
+      expect(prompt).toContain('- salon')
+    } finally {
+      unlinkSync(path)
+    }
   })
 })
 
