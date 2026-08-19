@@ -1,6 +1,6 @@
 import type { OpenNestClient, Program } from '@opennest/sdk'
 import { createOpenAI } from '@ai-sdk/openai'
-import { generateText } from 'ai'
+import { generateText, type ModelMessage } from 'ai'
 import { createPlaygroundSystemPrompt } from './prompt.js'
 
 const MAX_RETRIES = 5
@@ -52,10 +52,7 @@ export async function translateNlToDsl(
 
   const model = createModel(modelId, apiKey, baseURL)
 
-  const messages: Array<{
-    role: 'system' | 'user' | 'assistant'
-    content: string
-  }> = [
+  const messages: ModelMessage[] = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: input },
   ]
@@ -66,8 +63,7 @@ export async function translateNlToDsl(
     const { text } = await generateText({
       model,
       allowSystemInMessages: true,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      messages: messages as any,
+      messages,
     })
 
     const dsl = text.trim()
