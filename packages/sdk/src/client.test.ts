@@ -513,4 +513,15 @@ describe('OpenNestClient.analyze', () => {
       "No device of type 'camera' found",
     )
   })
+
+  it('validates $it against the current session', async () => {
+    const { client } = await makeClient()
+
+    await client.runDsl('tv[salon].power = on')
+
+    const feedback = client.analyze('$it.power = off')
+
+    expect(feedback.ok).toBe(true)
+    expect(feedback.validationErrors).toHaveLength(0)
+  })
 })

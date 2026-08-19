@@ -108,7 +108,7 @@ export class OpenNestClient {
     if (parseErrors.length > 0) {
       return { program: null, parseErrors, validationErrors: [], ok: false }
     }
-    const validationErrors = validateProgram(program, this.devices)
+    const validationErrors = validateProgram(program, this.devices, this.session)
     return {
       program,
       parseErrors,
