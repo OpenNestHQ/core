@@ -302,6 +302,9 @@ The `@opennest/sdk` package exposes a single `OpenNestClient` facade over the wh
 import { OpenNestClient } from "@opennest/sdk";
 import { MockDriver } from "@opennest/devices";
 
+const driver = new MockDriver();
+await driver.init({});
+
 const client = new OpenNestClient({
   devices: [
     {
@@ -309,7 +312,7 @@ const client = new OpenNestClient({
       type: "tv",
       room: "salon",
       name: "Salon TV",
-      driver: new MockDriver(),
+      driver,
       driverConfig: {},
     },
   ],

@@ -30,6 +30,9 @@ const client = await OpenNestClient.fromYaml('./inventory.yaml', {
 
 The extra options are the usual `OpenNestClientOptions` minus `devices`.
 
+`fromYaml` reads the inventory file synchronously with `readFileSync`, so it is
+Node-only and not available in the browser bundle.
+
 | Method                  | Description                                                         |
 | ----------------------- | ------------------------------------------------------------------- |
 | `parse(dsl)`            | Parse HomeDSL into a `Program`. Throws `ParseError` on invalid DSL. |
@@ -114,6 +117,12 @@ union — `device_selection`, `confirmation`, `text_input`, `number_input`,
 `choice`, `action_parameter` — each carrying an `id` to pass back verbatim in
 the matching `UserResponse`.
 
+`run()` (and therefore `execute` / `runDsl` / `resume` / `cancel`) is
+non-reentrant: each call mutates the client's single `session` in place, so a
+client must not run two executions concurrently. `await` the previous call
+before starting the next one; for parallel executions, use one `OpenNestClient`
+per execution.
+
 ## Example
 
 ```ts
@@ -121,6 +130,7 @@ import { OpenNestClient } from '@opennest/sdk'
 import { MockDriver } from '@opennest/devices'
 
 const driver = new MockDriver()
+await driver.init({})
 const client = new OpenNestClient({
   devices: [
     {
