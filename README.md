@@ -1,5 +1,8 @@
 # OpenNest
 
+[![CI](https://github.com/OpenNestHQ/core/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenNestHQ/core/actions/workflows/ci.yml)
+[![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](./LICENSE)
+
 > A DSL runtime for smart environments — also known as ClawNest.
 
 OpenNest is a language, virtual machine, and agent runtime designed to control and reason about smart environments through a structured DSL called **HomeDSL**.
@@ -435,3 +438,17 @@ examples/
 > "The world is not controlled by prompts, but by languages."
 
 OpenNest turns intent into execution through a structured, deterministic language layer.
+
+---
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md) for the
+development setup and guidelines, and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
+for our community standards.
+
+---
+
+## License
+
+This project is licensed under the ISC License — see [LICENSE](./LICENSE).
