@@ -2,6 +2,10 @@
   "name": "opennest",
   "type": "module",
   "private": true,
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=24"
+  },
   "description": "OpenNest monorepo — DSL runtime for smart environments",
   "license": "ISC",
   "author": "Zepoze",
