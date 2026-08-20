@@ -2,6 +2,8 @@
   "name": "@opennest/web-playground",
   "version": "0.1.0",
   "private": true,
+  "license": "ISC",
+  "author": "Zepoze",
   "type": "module",
   "scripts": {
     "dev": "next dev --turbopack --port 3100",

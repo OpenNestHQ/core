@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "description": "OpenNest VM (interpreter) — device resolution, ambiguity handling, state management, and execution engine for HomeDSL",
   "license": "ISC",
-  "author": "",
+  "author": "Zepoze",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenNestHQ/core.git"
+  },
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

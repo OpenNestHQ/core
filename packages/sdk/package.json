@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "description": "OpenNest SDK — deterministic execution facade over the HomeDSL parser, device registry, and VM",
   "license": "ISC",
-  "author": "",
+  "author": "Zepoze",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenNestHQ/core.git"
+  },
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

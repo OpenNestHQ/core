@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "description": "Framework-agnostic core for OpenNest Lang: parser, prompt generation, validation, and type definitions",
   "license": "ISC",
-  "author": "",
+  "author": "Zepoze",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenNestHQ/core.git"
+  },
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

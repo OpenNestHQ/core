@@ -3,6 +3,12 @@
   "type": "module",
   "private": true,
   "description": "OpenNest monorepo — DSL runtime for smart environments",
+  "license": "ISC",
+  "author": "Zepoze",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenNestHQ/core.git"
+  },
   "scripts": {
     "build": "pnpm -r run build",
     "build:prompt": "pnpm --filter @opennest/lang-core run build:prompt",
