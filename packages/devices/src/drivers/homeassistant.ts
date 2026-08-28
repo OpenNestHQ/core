@@ -1,17 +1,15 @@
 import type { DeviceDriver, DriverRuntimeContext } from './interface.js'
-
-interface HAPropertyConfig {
-  entity: string
-  attribute?: string
-  set_service?: string
-  set_value_key?: string
-}
-
-interface HAActionConfig {
-  service: string
-  target?: Record<string, unknown>
-  data?: Record<string, unknown>
-}
+import {
+  normalizeActionConfig,
+  normalizePropertyConfig,
+  splitService,
+} from './ha/binding.js'
+import type {
+  HAActionStrategy,
+  HABinding,
+  HARawActionConfig,
+  HARawPropertyConfig,
+} from './ha/binding.js'
 
 const DOMAIN_SERVICES: Record<string, { on: string; off: string }> = {
   switch: { on: 'turn_on', off: 'turn_off' },
@@ -34,6 +32,14 @@ export class HADriver implements DeviceDriver {
     { at: number; state: Record<string, unknown> }
   >()
   private cacheProgramId: string | undefined = undefined
+  private propertyBindings = new WeakMap<
+    Record<string, unknown>,
+    Map<string, HABinding>
+  >()
+  private actionStrategies = new WeakMap<
+    Record<string, unknown>,
+    Map<string, HAActionStrategy>
+  >()
 
   async init(
     globalConfig: Record<string, unknown>,
@@ -60,19 +66,20 @@ export class HADriver implements DeviceDriver {
     deviceConfig: Record<string, unknown>,
     runtime?: DriverRuntimeContext,
   ): Promise<unknown> {
-    const props = deviceConfig['properties'] as
-      Record<string, HAPropertyConfig> | undefined
-    const propConfig = props?.[property]
-    if (!propConfig) return null
+    const entry = this.propertyEntry(deviceConfig, property)
+    if (!entry) return null
 
-    const state = await this.fetchState(propConfig.entity, runtime)
+    const state = await this.fetchState(entry.raw.entity, runtime)
 
-    if (propConfig.attribute) {
+    const get = entry.binding.get
+    if (get.kind === 'attribute') {
       const attrs = state['attributes'] as Record<string, unknown> | undefined
-      return attrs?.[propConfig.attribute] ?? null
+      return attrs?.[get.attribute] ?? null
     }
-
-    return parseHaState(state['state'])
+    if (get.kind === 'state') {
+      return parseHaState(state['state'])
+    }
+    throw new Error(`HA get strategy "${get.kind}" is not supported`)
   }
 
   async setProperty(
@@ -81,37 +88,38 @@ export class HADriver implements DeviceDriver {
     value: unknown,
     deviceConfig: Record<string, unknown>,
   ): Promise<void> {
-    const props = deviceConfig['properties'] as
-      Record<string, HAPropertyConfig> | undefined
-    const propConfig = props?.[property]
-    if (!propConfig) return
+    const entry = this.propertyEntry(deviceConfig, property)
+    if (!entry) return
 
-    const boolValue: boolean | null = typeof value === 'boolean' ? value : null
+    const entity = entry.raw.entity
+    const set = entry.binding.set
+
+    const payload: Record<string, unknown> = {
+      entity_id: entity,
+    }
 
     let domain: string
     let service: string
 
-    if (propConfig.set_service && boolValue !== null) {
-      ;[domain, service] = this.resolveBoolService(
-        propConfig.set_service,
-        boolValue,
-      )
-    } else if (propConfig.set_service) {
-      ;[domain, service] = splitService(propConfig.set_service)
-    } else if (boolValue !== null) {
-      ;[domain, service] = this.inferBoolService(propConfig.entity, boolValue)
-    } else {
-      ;[domain, service] = splitService(
-        `${extractDomain(propConfig.entity)}.unknown`,
-      )
-    }
-
-    const payload: Record<string, unknown> = {
-      entity_id: propConfig.entity,
-    }
-
-    if (propConfig.set_value_key) {
-      payload[propConfig.set_value_key] = value
+    switch (set.kind) {
+      case 'inferred': {
+        const boolValue = typeof value === 'boolean' ? value : null
+        if (boolValue !== null) {
+          ;[domain, service] = this.inferBoolService(entity, boolValue)
+        } else {
+          ;[domain, service] = splitService(`${extractDomain(entity)}.unknown`)
+        }
+        break
+      }
+      case 'service': {
+        ;[domain, service] = splitService(set.service)
+        if (set.key !== undefined) {
+          payload[set.key] = value
+        }
+        break
+      }
+      default:
+        throw new Error(`HA set strategy "${set.kind}" is not supported`)
     }
 
     await this.callService(domain, service, payload)
@@ -125,24 +133,70 @@ export class HADriver implements DeviceDriver {
     deviceConfig: Record<string, unknown>,
   ): Promise<void> {
     const actions = deviceConfig['actions'] as
-      Record<string, HAActionConfig> | undefined
-    const actionConfig = actions?.[action]
-    if (!actionConfig) return
+      Record<string, HARawActionConfig> | undefined
+    const raw = actions?.[action]
+    if (!raw) return
 
-    const [domain, service] = splitService(actionConfig.service)
+    const strategy = this.actionStrategy(deviceConfig, action, raw)
+
+    if (strategy.kind !== 'service') {
+      throw new Error(`HA action strategy "${strategy.kind}" is not supported`)
+    }
+
+    const [domain, service] = splitService(strategy.service)
 
     const payload: Record<string, unknown> = {}
 
-    if (actionConfig.target) {
-      Object.assign(payload, actionConfig.target)
+    if (strategy.target) {
+      Object.assign(payload, strategy.target)
     }
-    if (actionConfig.data) {
-      Object.assign(payload, actionConfig.data)
+    if (strategy.data) {
+      Object.assign(payload, strategy.data)
     }
     Object.assign(payload, args)
 
     await this.callService(domain, service, payload)
     this.stateCache.clear()
+  }
+
+  private propertyEntry(
+    deviceConfig: Record<string, unknown>,
+    property: string,
+  ): { raw: HARawPropertyConfig; binding: HABinding } | undefined {
+    const props = deviceConfig['properties'] as
+      Record<string, HARawPropertyConfig> | undefined
+    const raw = props?.[property]
+    if (!raw) return undefined
+
+    let bindings = this.propertyBindings.get(deviceConfig)
+    if (!bindings) {
+      bindings = new Map()
+      this.propertyBindings.set(deviceConfig, bindings)
+    }
+    let binding = bindings.get(property)
+    if (!binding) {
+      binding = normalizePropertyConfig(raw)
+      bindings.set(property, binding)
+    }
+    return { raw, binding }
+  }
+
+  private actionStrategy(
+    deviceConfig: Record<string, unknown>,
+    action: string,
+    raw: HARawActionConfig,
+  ): HAActionStrategy {
+    let strategies = this.actionStrategies.get(deviceConfig)
+    if (!strategies) {
+      strategies = new Map()
+      this.actionStrategies.set(deviceConfig, strategies)
+    }
+    let strategy = strategies.get(action)
+    if (!strategy) {
+      strategy = normalizeActionConfig(raw)
+      strategies.set(action, strategy)
+    }
+    return strategy
   }
 
   private async fetchState(
@@ -215,24 +269,6 @@ export class HADriver implements DeviceDriver {
     }
   }
 
-  private resolveBoolService(
-    serviceTemplate: string,
-    value: boolean,
-  ): [string, string] {
-    const dotIdx = serviceTemplate.indexOf('.')
-    const domain = dotIdx === -1 ? '' : serviceTemplate.slice(0, dotIdx)
-    const mapping = DOMAIN_SERVICES[domain]
-    const boolWord = mapping
-      ? value
-        ? mapping.on
-        : mapping.off
-      : value
-        ? 'on'
-        : 'off'
-    const resolved = serviceTemplate.replace(/\{value\}/g, boolWord)
-    return splitService(resolved)
-  }
-
   private inferBoolService(entityId: string, value: boolean): [string, string] {
     const domain = extractDomain(entityId)
     const mapping = DOMAIN_SERVICES[domain]
@@ -241,15 +277,6 @@ export class HADriver implements DeviceDriver {
     }
     return [domain, value ? 'turn_on' : 'turn_off']
   }
-}
-
-function splitService(service: string): [string, string] {
-  const dot = service.indexOf('.')
-  if (dot === -1)
-    throw new Error(
-      `Invalid service format: "${service}". Expected "domain.service".`,
-    )
-  return [service.slice(0, dot), service.slice(dot + 1)]
 }
 
 function extractDomain(entityId: string): string {
