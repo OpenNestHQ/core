@@ -50,6 +50,11 @@ class MockWebSocket {
     this.onerror?.()
   }
 
+  serverClose(): void {
+    this.readyState = 3
+    this.onclose?.()
+  }
+
   lastSent(): Record<string, unknown> {
     return JSON.parse(this.sent[this.sent.length - 1]!) as Record<
       string,
@@ -128,13 +133,32 @@ describe('HAWebSocketClient', () => {
       expect(MockWebSocket.instances).toHaveLength(1)
     })
 
-    it('should reject when the socket fails during the handshake', async () => {
-      vi.stubGlobal('WebSocket', MockWebSocket)
-      const { ready } = await startHandshake()
+    it('should retry when the socket fails during the handshake', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const client = new HAWebSocketClient({
+          url: URL,
+          token: TOKEN,
+          reconnectBaseMs: 1000,
+        })
+        const ready = client.whenReady()
+        client.start()
 
-      MockWebSocket.last().serverError()
+        MockWebSocket.last().serverError()
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(MockWebSocket.instances).toHaveLength(2)
 
-      await expect(ready).rejects.toThrow(/connection failed/)
+        const ws2 = MockWebSocket.last()
+        ws2.serverOpen()
+        ws2.serverMessage({ type: 'auth_required' })
+        ws2.serverMessage({ type: 'auth_ok' })
+
+        await expect(ready).resolves.toBeUndefined()
+        await client.close()
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('should reject whenReady after the client is closed', async () => {
@@ -280,6 +304,187 @@ describe('HAWebSocketClient', () => {
       await expect(client.callService('switch', 'turn_on', {})).rejects.toThrow(
         /closed/,
       )
+    })
+  })
+
+  describe('reconnection and heartbeat', () => {
+    it('should reconnect with backoff and re-authenticate after a disconnect', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient()
+
+        ws.serverClose()
+        await vi.advanceTimersByTimeAsync(999)
+        expect(MockWebSocket.instances).toHaveLength(1)
+
+        await vi.advanceTimersByTimeAsync(1)
+        expect(MockWebSocket.instances).toHaveLength(2)
+
+        const ws2 = MockWebSocket.last()
+        expect(ws2).not.toBe(ws)
+        ws2.serverOpen()
+        ws2.serverMessage({ type: 'auth_required' })
+        expect(ws2.lastSent()).toEqual({
+          type: 'auth',
+          access_token: TOKEN,
+        })
+        ws2.serverMessage({ type: 'auth_ok' })
+
+        await expect(client.whenReady()).resolves.toBeUndefined()
+        await client.close()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should grow the backoff exponentially up to the cap', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client } = await connectClient({
+          reconnectBaseMs: 1000,
+          reconnectMaxMs: 3000,
+        })
+
+        MockWebSocket.last().serverClose()
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(MockWebSocket.instances).toHaveLength(2)
+        MockWebSocket.last().serverError()
+
+        await vi.advanceTimersByTimeAsync(1999)
+        expect(MockWebSocket.instances).toHaveLength(2)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(MockWebSocket.instances).toHaveLength(3)
+        MockWebSocket.last().serverError()
+
+        await vi.advanceTimersByTimeAsync(2999)
+        expect(MockWebSocket.instances).toHaveLength(3)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(MockWebSocket.instances).toHaveLength(4)
+        await client.close()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should reset the backoff after a successful reconnection', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client } = await connectClient({ reconnectBaseMs: 1000 })
+
+        MockWebSocket.last().serverClose()
+        await vi.advanceTimersByTimeAsync(1000)
+        const ws2 = MockWebSocket.last()
+        ws2.serverOpen()
+        ws2.serverMessage({ type: 'auth_required' })
+        ws2.serverMessage({ type: 'auth_ok' })
+        await client.whenReady()
+
+        ws2.serverClose()
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(MockWebSocket.instances).toHaveLength(3)
+        await client.close()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should send a heartbeat ping and survive the pong', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient()
+
+        await vi.advanceTimersByTimeAsync(30_000)
+        expect(ws.lastSent()).toMatchObject({ id: 1, type: 'ping' })
+        ws.serverMessage({ id: 1, type: 'pong' })
+
+        await vi.advanceTimersByTimeAsync(30_000)
+        expect(ws.lastSent()).toMatchObject({ id: 2, type: 'ping' })
+        ws.serverMessage({ id: 2, type: 'pong' })
+
+        await vi.advanceTimersByTimeAsync(30_000)
+        expect(MockWebSocket.instances).toHaveLength(1)
+        await client.close()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should reconnect when a heartbeat ping goes unanswered', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient({
+          commandTimeoutMs: 5000,
+          heartbeatIntervalMs: 10_000,
+          reconnectBaseMs: 1000,
+        })
+
+        await vi.advanceTimersByTimeAsync(10_000)
+        expect(ws.lastSent()).toMatchObject({ type: 'ping' })
+
+        await vi.advanceTimersByTimeAsync(5000)
+        await vi.advanceTimersByTimeAsync(1000)
+
+        expect(MockWebSocket.instances).toHaveLength(2)
+        const ws2 = MockWebSocket.last()
+        ws2.serverOpen()
+        ws2.serverMessage({ type: 'auth_required' })
+        ws2.serverMessage({ type: 'auth_ok' })
+        await expect(client.whenReady()).resolves.toBeUndefined()
+        await client.close()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should close cleanly while waiting in the backoff', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient()
+
+        ws.serverClose()
+        const closing = client.close()
+        await vi.advanceTimersByTimeAsync(0)
+
+        await expect(closing).resolves.toBeUndefined()
+        expect(MockWebSocket.instances).toHaveLength(1)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should stop retrying and reject commands when re-auth is refused', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient()
+
+        ws.serverClose()
+        await vi.advanceTimersByTimeAsync(1000)
+
+        const ws2 = MockWebSocket.last()
+        ws2.serverOpen()
+        ws2.serverMessage({ type: 'auth_required' })
+        ws2.serverMessage({
+          type: 'auth_invalid',
+          message: 'Invalid access token',
+        })
+
+        await vi.advanceTimersByTimeAsync(60_000)
+        expect(MockWebSocket.instances).toHaveLength(2)
+
+        await expect(
+          client.callService('switch', 'turn_on', {}),
+        ).rejects.toThrow(/Invalid access token/)
+        await expect(client.whenReady()).rejects.toThrow(/Invalid access token/)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

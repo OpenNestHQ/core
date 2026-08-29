@@ -51,10 +51,12 @@ export class HAWebSocketClient {
   private fatalError: Error | null = null
   private loop: Promise<void> | null = null
   private nextId = 1
+  private attempts = 0
 
   private readonly pending = new Map<number, PendingCommand>()
   private readonly readyWaiters: Array<(error?: Error) => void> = []
   private readonly closeWaiters: Array<() => void> = []
+  private connectFail: ((error: Error) => void) | null = null
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined
 
   constructor(options: HAWebSocketClientOptions) {
@@ -96,17 +98,29 @@ export class HAWebSocketClient {
   }
 
   private async runLoop(): Promise<void> {
-    try {
-      await this.connectAndAuth()
-      this.state = 'ready'
-      this.notifyReady()
-      await this.awaitClose()
-    } catch (error) {
-      this.fail(
-        error instanceof Error
-          ? error
-          : new Error('HA websocket connection failed'),
+    while (!this.stopped) {
+      try {
+        await this.connectAndAuth()
+        this.attempts = 0
+        this.state = 'ready'
+        this.notifyReady()
+        this.startHeartbeat()
+        await this.awaitClose()
+      } catch (error) {
+        if (error instanceof HAWsAuthError) {
+          this.fail(error)
+          return
+        }
+      } finally {
+        this.stopHeartbeat()
+      }
+      if (this.stopped) return
+      const delay = Math.min(
+        this.reconnectBaseMs * 2 ** this.attempts,
+        this.reconnectMaxMs,
       )
+      this.attempts++
+      await Promise.race([sleep(delay), this.awaitClose()])
     }
   }
 
@@ -121,8 +135,10 @@ export class HAWebSocketClient {
       const fail = (error: Error): void => {
         if (settled) return
         settled = true
+        this.connectFail = null
         reject(error)
       }
+      this.connectFail = fail
 
       ws.onmessage = event => {
         if (this.authenticated) {
@@ -138,6 +154,7 @@ export class HAWebSocketClient {
         if (message.type === 'auth_ok') {
           this.authenticated = true
           settled = true
+          this.connectFail = null
           resolve()
           return
         }
@@ -154,6 +171,7 @@ export class HAWebSocketClient {
       }
       ws.onclose = () => {
         if (this.ws === ws) this.ws = null
+        if (this.state === 'ready') this.state = 'connecting'
         fail(new Error('HA websocket connection closed during handshake'))
         this.rejectPending(new Error('HA websocket connection lost'))
         this.notifyClosed()
@@ -226,6 +244,9 @@ export class HAWebSocketClient {
     this.stopHeartbeat()
     this.rejectReadyWaiters(reason)
     this.teardownSocket()
+    const connectFail = this.connectFail
+    this.connectFail = null
+    connectFail?.(reason)
     this.notifyClosed()
   }
 
@@ -300,6 +321,18 @@ export class HAWebSocketClient {
     for (const waiter of this.readyWaiters.splice(0)) waiter(error)
   }
 
+  private startHeartbeat(): void {
+    this.stopHeartbeat()
+    this.heartbeatTimer = setInterval(() => {
+      this.send({ type: 'ping' }).catch(() => this.forceClose())
+    }, this.heartbeatIntervalMs)
+    unrefTimer(this.heartbeatTimer)
+  }
+
+  private forceClose(): void {
+    this.ws?.close()
+  }
+
   private stopHeartbeat(): void {
     if (this.heartbeatTimer !== undefined) {
       clearInterval(this.heartbeatTimer)
@@ -320,6 +353,13 @@ function parseMessage(data: unknown): HAIncomingMessage | null {
   const message = parsed as HAIncomingMessage
   if (typeof message.type !== 'string') return null
   return message
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => {
+    const timer = setTimeout(resolve, ms)
+    unrefTimer(timer)
+  })
 }
 
 function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
