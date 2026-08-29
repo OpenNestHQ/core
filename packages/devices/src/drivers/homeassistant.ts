@@ -150,7 +150,7 @@ export class HADriver implements DeviceDriver {
     }
 
     await this.callService(domain, service, payload)
-    this.entityStates.clear()
+    this.invalidateEntityState([entity])
     this.stateCache.clear()
   }
 
@@ -184,7 +184,7 @@ export class HADriver implements DeviceDriver {
     Object.assign(payload, args)
 
     await this.callService(domain, service, payload)
-    this.entityStates.clear()
+    this.invalidateEntityState(targetEntityIds(strategy.target))
     this.stateCache.clear()
   }
 
@@ -281,6 +281,20 @@ export class HADriver implements DeviceDriver {
     return this.fetchState(entityId, runtime)
   }
 
+  // The push feed can lag behind HA right after a write, so drop only the
+  // entities the call may have touched from the live store. When the scope
+  // cannot be determined (action without an entity_id target), fall back to
+  // dropping everything to guarantee no stale read.
+  private invalidateEntityState(entityIds: string[]): void {
+    if (entityIds.length === 0) {
+      this.entityStates.clear()
+      return
+    }
+    for (const entityId of entityIds) {
+      this.entityStates.delete(entityId)
+    }
+  }
+
   private async fetchState(
     entityId: string,
     runtime?: DriverRuntimeContext,
@@ -364,6 +378,18 @@ export class HADriver implements DeviceDriver {
 function extractDomain(entityId: string): string {
   const dot = entityId.indexOf('.')
   return dot === -1 ? entityId : entityId.slice(0, dot)
+}
+
+function targetEntityIds(
+  target: Record<string, unknown> | undefined,
+): string[] {
+  if (!target) return []
+  const value = target['entity_id']
+  if (typeof value === 'string') return [value]
+  if (Array.isArray(value)) {
+    return value.filter((id): id is string => typeof id === 'string')
+  }
+  return []
 }
 
 // Translation of the compressed state keys used by subscribe_entities

@@ -1154,16 +1154,44 @@ describe('HADriver', () => {
       await driver.close()
     })
 
+    it('should keep unrelated store entries after setProperty', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'switch.test': compressed('off'),
+        'switch.other': compressed('on'),
+      })
+
+      let fetchCount = 0
+      mockFetch(url => {
+        if (!url.includes('/states/')) return jsonResponse([])
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      await driver.setProperty('d1', 'power', true, deviceConfig)
+
+      const otherConfig = {
+        properties: { power: { entity: 'switch.other' } },
+      }
+      expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
+      expect(fetchCount).toBe(0)
+      await driver.close()
+    })
+
     it('should not serve a stale store value after executeAction', async () => {
       vi.stubGlobal('WebSocket', RealtimeWs)
       const { driver, ws, subId } = await initRealtimeDriver()
-      ws.addEntities(subId, { 'switch.test': compressed('off') })
+      ws.addEntities(subId, {
+        'switch.test': compressed('off'),
+        'switch.other': compressed('on'),
+      })
 
+      let fetchCount = 0
       mockFetch(url => {
-        if (url.includes('/states/')) {
-          return jsonResponse({ state: 'on', attributes: {} })
-        }
-        return jsonResponse([])
+        if (!url.includes('/states/')) return jsonResponse([])
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
       })
 
       const actionConfig = {
@@ -1180,6 +1208,13 @@ describe('HADriver', () => {
       await driver.executeAction('d1', 'boost', {}, actionConfig)
 
       expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(fetchCount).toBe(1)
+
+      const otherConfig = {
+        properties: { power: { entity: 'switch.other' } },
+      }
+      expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
+      expect(fetchCount).toBe(1)
       await driver.close()
     })
 
