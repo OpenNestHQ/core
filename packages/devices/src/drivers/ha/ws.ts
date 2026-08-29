@@ -252,7 +252,7 @@ export class HAWebSocketClient {
       unrefTimer(pending.timer)
       this.pending.set(id, pending)
       try {
-        ws.send(JSON.stringify({ id, ...message }))
+        ws.send(JSON.stringify({ ...message, id }))
       } catch (error) {
         this.pending.delete(id)
         this.clearPendingTimer(pending)
@@ -279,6 +279,7 @@ export class HAWebSocketClient {
     if (fatal) this.fatalError = reason
     this.stopHeartbeat()
     this.rejectReadyWaiters(reason)
+    this.rejectPending(reason)
     this.rejectQueue(reason)
     this.teardownSocket()
     const connectFail = this.connectFail

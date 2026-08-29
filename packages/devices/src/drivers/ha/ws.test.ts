@@ -299,6 +299,24 @@ describe('HAWebSocketClient', () => {
       await client.close()
     })
 
+    it('should keep the command id authoritative over an id payload key', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client, ws } = await connectClient()
+
+      const result = client.callService('switch', 'turn_on', { id: 42 })
+
+      expect(ws.lastSent()).toEqual({
+        id: 1,
+        type: 'call_service',
+        domain: 'switch',
+        service: 'turn_on',
+      })
+
+      ws.serverMessage({ id: 1, type: 'result', success: true, result: 'ok' })
+      await expect(result).resolves.toBe('ok')
+      await client.close()
+    })
+
     it('should correlate responses by command id', async () => {
       vi.stubGlobal('WebSocket', MockWebSocket)
       const { client, ws } = await connectClient()
@@ -447,6 +465,23 @@ describe('HAWebSocketClient', () => {
       await client.close()
 
       await expect(result).rejects.toThrow(/closed/)
+    })
+
+    it('should reject in-flight commands immediately on close', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient()
+
+        const result = client.callService('switch', 'turn_on', {})
+        const expectation = expect(result).rejects.toThrow(/closed/)
+
+        ws.serverMessage({ type: 'pong', id: 999 })
+        await client.close()
+        await expectation
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('should reject queued commands when re-auth is refused', async () => {
