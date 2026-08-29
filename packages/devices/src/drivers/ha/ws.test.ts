@@ -146,4 +146,140 @@ describe('HAWebSocketClient', () => {
       await expect(client.whenReady()).rejects.toThrow(/closed/)
     })
   })
+
+  describe('callService', () => {
+    it('should send a call_service command and resolve with the result', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client, ws } = await connectClient()
+
+      const result = client.callService('switch', 'turn_on', {
+        entity_id: 'switch.test',
+      })
+      expect(ws.lastSent()).toEqual({
+        id: 1,
+        type: 'call_service',
+        domain: 'switch',
+        service: 'turn_on',
+        entity_id: 'switch.test',
+      })
+      expect('return_response' in ws.lastSent()).toBe(false)
+
+      ws.serverMessage({ id: 1, type: 'result', success: true, result: null })
+      await expect(result).resolves.toBeNull()
+      await client.close()
+    })
+
+    it('should request and resolve the service response with returnResponse', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client, ws } = await connectClient()
+
+      const result = client.callService(
+        'weather',
+        'get_forecasts',
+        { entity_id: 'weather.home' },
+        { returnResponse: true },
+      )
+      expect(ws.lastSent()).toMatchObject({
+        id: 1,
+        type: 'call_service',
+        domain: 'weather',
+        service: 'get_forecasts',
+        entity_id: 'weather.home',
+        return_response: true,
+      })
+
+      const response = { 'weather.home': { forecast: [] } }
+      ws.serverMessage({
+        id: 1,
+        type: 'result',
+        success: true,
+        result: response,
+      })
+      await expect(result).resolves.toEqual(response)
+      await client.close()
+    })
+
+    it('should reject with the error code and message on failure', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client, ws } = await connectClient()
+
+      const result = client.callService('switch', 'turn_on', {})
+      ws.serverMessage({
+        id: 1,
+        type: 'result',
+        success: false,
+        error: { code: 'unknown_service', message: 'Service not found' },
+      })
+
+      await expect(result).rejects.toThrow(
+        /unknown_service.*Service not found/s,
+      )
+      await client.close()
+    })
+
+    it('should reject cleanly when the response times out', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient({ commandTimeoutMs: 5000 })
+
+        const result = client.callService('switch', 'turn_on', {})
+        const expectation = expect(result).rejects.toThrow(
+          /timed out after 5000ms/,
+        )
+        await vi.advanceTimersByTimeAsync(5000)
+        await expectation
+
+        expect(ws.sent).toHaveLength(2)
+        expect(ws.lastSent()).toMatchObject({ id: 1, type: 'call_service' })
+        await client.close()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should correlate responses by command id', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client, ws } = await connectClient()
+
+      const first = client.callService('switch', 'turn_on', {})
+      const second = client.callService('light', 'turn_off', {})
+
+      ws.serverMessage({
+        id: 2,
+        type: 'result',
+        success: true,
+        result: 'second',
+      })
+      ws.serverMessage({
+        id: 1,
+        type: 'result',
+        success: true,
+        result: 'first',
+      })
+
+      await expect(first).resolves.toBe('first')
+      await expect(second).resolves.toBe('second')
+      await client.close()
+    })
+
+    it('should reject callService when the client is not connected', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const client = new HAWebSocketClient({ url: URL, token: TOKEN })
+
+      await expect(client.callService('switch', 'turn_on', {})).rejects.toThrow(
+        /not connected/,
+      )
+    })
+
+    it('should reject callService after the client is closed', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client } = await connectClient()
+      await client.close()
+
+      await expect(client.callService('switch', 'turn_on', {})).rejects.toThrow(
+        /closed/,
+      )
+    })
+  })
 })

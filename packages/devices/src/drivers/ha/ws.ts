@@ -28,6 +28,12 @@ interface HAIncomingMessage {
   message?: string
 }
 
+interface PendingCommand {
+  resolve: (value: unknown) => void
+  reject: (error: Error) => void
+  timer: ReturnType<typeof setTimeout> | undefined
+}
+
 type WsState = 'idle' | 'connecting' | 'ready' | 'stopped'
 
 export class HAWebSocketClient {
@@ -44,7 +50,9 @@ export class HAWebSocketClient {
   private stopped = false
   private fatalError: Error | null = null
   private loop: Promise<void> | null = null
+  private nextId = 1
 
+  private readonly pending = new Map<number, PendingCommand>()
   private readonly readyWaiters: Array<(error?: Error) => void> = []
   private readonly closeWaiters: Array<() => void> = []
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined
@@ -117,7 +125,10 @@ export class HAWebSocketClient {
       }
 
       ws.onmessage = event => {
-        if (this.authenticated) return
+        if (this.authenticated) {
+          this.routeMessage(event.data)
+          return
+        }
         const message = parseMessage(event.data)
         if (!message) return
         if (message.type === 'auth_required') {
@@ -144,7 +155,66 @@ export class HAWebSocketClient {
       ws.onclose = () => {
         if (this.ws === ws) this.ws = null
         fail(new Error('HA websocket connection closed during handshake'))
+        this.rejectPending(new Error('HA websocket connection lost'))
         this.notifyClosed()
+      }
+    })
+  }
+
+  async callService(
+    domain: string,
+    service: string,
+    payload: Record<string, unknown> = {},
+    options: { returnResponse?: boolean } = {},
+  ): Promise<unknown> {
+    const message: Record<string, unknown> = {
+      type: 'call_service',
+      domain,
+      service,
+      ...payload,
+    }
+    if (options.returnResponse === true) {
+      message['return_response'] = true
+    }
+    return this.command(message)
+  }
+
+  private command(message: Record<string, unknown>): Promise<unknown> {
+    if (this.stopped) {
+      return Promise.reject(
+        this.fatalError ?? new Error('HA websocket client is closed'),
+      )
+    }
+    if (this.state === 'ready') {
+      return this.send(message)
+    }
+    return Promise.reject(new Error('HA websocket is not connected'))
+  }
+
+  private send(message: Record<string, unknown>): Promise<unknown> {
+    const ws = this.ws
+    if (!ws || this.state !== 'ready') {
+      return Promise.reject(new Error('HA websocket is not connected'))
+    }
+    const id = this.nextId++
+    return new Promise((resolve, reject) => {
+      const pending: PendingCommand = { resolve, reject, timer: undefined }
+      pending.timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(
+          new Error(
+            `HA websocket command "${String(message['type'])}" timed out after ${this.commandTimeoutMs}ms`,
+          ),
+        )
+      }, this.commandTimeoutMs)
+      unrefTimer(pending.timer)
+      this.pending.set(id, pending)
+      try {
+        ws.send(JSON.stringify({ id, ...message }))
+      } catch (error) {
+        this.pending.delete(id)
+        this.clearPendingTimer(pending)
+        reject(error instanceof Error ? error : new Error(String(error)))
       }
     })
   }
@@ -173,6 +243,43 @@ export class HAWebSocketClient {
     ws.onerror = null
     ws.onclose = null
     ws.close()
+  }
+
+  private routeMessage(data: unknown): void {
+    const message = parseMessage(data)
+    if (!message || message.id === undefined) return
+    const pending = this.pending.get(message.id)
+    if (!pending) return
+    this.pending.delete(message.id)
+    this.clearPendingTimer(pending)
+    if (message.type === 'result') {
+      if (message.success === true) {
+        pending.resolve(message.result)
+      } else {
+        const code = message.error?.code ?? 'unknown_error'
+        const detail = message.error?.message ?? 'no details'
+        pending.reject(
+          new Error(`HA websocket command failed: ${code} — ${detail}`),
+        )
+      }
+      return
+    }
+    pending.resolve(message)
+  }
+
+  private rejectPending(error: Error): void {
+    for (const pending of this.pending.values()) {
+      this.clearPendingTimer(pending)
+      pending.reject(error)
+    }
+    this.pending.clear()
+  }
+
+  private clearPendingTimer(pending: PendingCommand): void {
+    if (pending.timer !== undefined) {
+      clearTimeout(pending.timer)
+      pending.timer = undefined
+    }
   }
 
   private awaitClose(): Promise<void> {
@@ -213,4 +320,11 @@ function parseMessage(data: unknown): HAIncomingMessage | null {
   const message = parsed as HAIncomingMessage
   if (typeof message.type !== 'string') return null
   return message
+}
+
+function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
+  const t = timer as { unref?: () => void }
+  if (typeof t.unref === 'function') {
+    t.unref()
+  }
 }
