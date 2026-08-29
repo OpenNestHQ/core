@@ -79,16 +79,18 @@ export class DeviceRegistry {
   }
 
   private buildDevice(entry: DeviceEntry, driver: DeviceDriver): Device {
+    const driverConfig: Record<string, unknown> = {
+      properties: entry.properties,
+      actions: entry.actions,
+    }
+    driver.validateDeviceConfig?.(entry.id, driverConfig)
     return {
       id: entry.id,
       type: entry.type,
       room: entry.room,
       name: entry.name,
       driver,
-      driverConfig: {
-        properties: entry.properties,
-        actions: entry.actions,
-      },
+      driverConfig,
       ...(entry.owners ? { owners: entry.owners } : {}),
       ...(entry.tags ? { tags: entry.tags } : {}),
     }

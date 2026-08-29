@@ -44,7 +44,8 @@ export class HADriver implements DeviceDriver {
 
   async init(
     globalConfig: Record<string, unknown>,
-    deviceInitConfigs?: Record<string, Record<string, unknown>>,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _deviceInitConfigs?: Record<string, Record<string, unknown>>,
   ): Promise<void> {
     const url = globalConfig['url']
     const token = globalConfig['token']
@@ -58,9 +59,13 @@ export class HADriver implements DeviceDriver {
     }
     this.baseUrl = url.replace(/\/+$/, '')
     this.token = token
-    for (const [deviceId, config] of Object.entries(deviceInitConfigs ?? {})) {
-      validateDeviceBindings(deviceId, config)
-    }
+  }
+
+  validateDeviceConfig(
+    deviceId: string,
+    deviceConfig: Record<string, unknown>,
+  ): void {
+    validateDeviceBindings(deviceId, deviceConfig)
   }
 
   async getProperty(

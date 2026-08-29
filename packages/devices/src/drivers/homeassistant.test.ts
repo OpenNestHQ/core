@@ -675,140 +675,126 @@ describe('HADriver', () => {
     })
   })
 
-  describe('init binding validation', () => {
-    it('should reject an unknown get kind at init', async () => {
+  describe('validateDeviceConfig', () => {
+    it('should reject an unknown get kind', () => {
       const driver = makeDriver()
-      await expect(
-        driver.init(GLOBAL_CONFIG, {
-          d1: {
-            properties: {
-              power: {
-                type: 'boolean',
-                entity: 'switch.test',
-                get: { kind: 'levitate' },
-              },
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          properties: {
+            power: {
+              type: 'boolean',
+              entity: 'switch.test',
+              get: { kind: 'levitate' },
             },
           },
         }),
-      ).rejects.toThrow(
+      ).toThrow(
         /Invalid HA binding for device "d1", property "power": unknown get kind "levitate"/,
       )
     })
 
-    it('should reject a malformed set service at init', async () => {
+    it('should reject a malformed set service', () => {
       const driver = makeDriver()
-      await expect(
-        driver.init(GLOBAL_CONFIG, {
-          d1: {
-            properties: {
-              volume: {
-                type: 'number',
-                entity: 'media_player.test',
-                set: { kind: 'service', service: 'volume_set' },
-              },
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          properties: {
+            volume: {
+              type: 'number',
+              entity: 'media_player.test',
+              set: { kind: 'service', service: 'volume_set' },
             },
           },
         }),
-      ).rejects.toThrow(
+      ).toThrow(
         /device "d1", property "volume".*invalid service format "volume_set"/,
       )
     })
 
-    it('should reject an orphan placeholder in an action at init', async () => {
+    it('should reject an orphan placeholder in an action', () => {
       const driver = makeDriver()
-      await expect(
-        driver.init(GLOBAL_CONFIG, {
-          d1: {
-            actions: {
-              boost: {
-                kind: 'script',
-                script: 'script.boost',
-                fields: { minutes: '$minuts' },
-                parameters: [{ name: 'minutes' }],
-              },
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          actions: {
+            boost: {
+              kind: 'script',
+              script: 'script.boost',
+              fields: { minutes: '$minuts' },
+              parameters: [{ name: 'minutes' }],
             },
           },
         }),
-      ).rejects.toThrow(
-        /device "d1", action "boost".*orphan placeholder "\$minuts"/,
-      )
+      ).toThrow(/device "d1", action "boost".*orphan placeholder "\$minuts"/)
     })
 
-    it('should reject an inevitable domain.unknown at init', async () => {
+    it('should reject an inevitable domain.unknown', () => {
       const driver = makeDriver()
-      await expect(
-        driver.init(GLOBAL_CONFIG, {
-          d1: {
-            properties: {
-              volume: {
-                type: 'number',
-                entity: 'media_player.test',
-                set: { kind: 'inferred' },
-              },
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          properties: {
+            volume: {
+              type: 'number',
+              entity: 'media_player.test',
+              set: { kind: 'inferred' },
             },
           },
         }),
-      ).rejects.toThrow(
+      ).toThrow(
         /property "volume".*set strategy "inferred".*media_player\.unknown/,
       )
     })
 
-    it('should accept valid new format configs at init', async () => {
+    it('should accept valid new format configs', () => {
       const driver = makeDriver()
-      await expect(
-        driver.init(GLOBAL_CONFIG, {
-          d1: {
-            properties: {
-              power: {
-                type: 'boolean',
-                entity: 'switch.test',
-                get: { kind: 'state' },
-                set: { kind: 'inferred' },
-              },
-              away: {
-                set: {
-                  kind: 'script',
-                  script: 'script.set_away',
-                  fields: { mode: '$value' },
-                },
-              },
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          properties: {
+            power: {
+              type: 'boolean',
+              entity: 'switch.test',
+              get: { kind: 'state' },
+              set: { kind: 'inferred' },
             },
-            actions: {
-              boost: {
+            away: {
+              set: {
                 kind: 'script',
-                script: 'script.boost',
-                fields: { minutes: '$minutes' },
-                parameters: [{ name: 'minutes', type: 'number' }],
-              },
-              play: {
-                kind: 'service',
-                service: 'media_player.media_play',
-                target: { entity_id: 'media_player.test' },
+                script: 'script.set_away',
+                fields: { mode: '$value' },
               },
             },
           },
+          actions: {
+            boost: {
+              kind: 'script',
+              script: 'script.boost',
+              fields: { minutes: '$minutes' },
+              parameters: [{ name: 'minutes', type: 'number' }],
+            },
+            play: {
+              kind: 'service',
+              service: 'media_player.media_play',
+              target: { entity_id: 'media_player.test' },
+            },
+          },
         }),
-      ).resolves.toBeUndefined()
+      ).not.toThrow()
     })
 
-    it('should leave old flat format configs unvalidated at init', async () => {
+    it('should leave old flat format configs unvalidated', () => {
       const driver = makeDriver()
-      await expect(
-        driver.init(GLOBAL_CONFIG, {
-          d1: {
-            properties: {
-              power: { entity: 'switch.test' },
-              broken: {
-                entity: 'switch.test',
-                set_service: 'bad_format_no_dot',
-              },
-            },
-            actions: {
-              play: { service: 'media_player.media_play' },
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          properties: {
+            power: { entity: 'switch.test' },
+            broken: {
+              entity: 'switch.test',
+              set_service: 'bad_format_no_dot',
             },
           },
+          actions: {
+            play: { service: 'media_player.media_play' },
+          },
         }),
-      ).resolves.toBeUndefined()
+      ).not.toThrow()
     })
   })
 })
