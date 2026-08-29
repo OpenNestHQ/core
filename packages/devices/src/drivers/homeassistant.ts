@@ -6,6 +6,7 @@ import {
 } from './ha/binding.js'
 import { validateDeviceBindings } from './ha/validate.js'
 import { HAWebSocketClient, toHaWsUrl } from './ha/ws.js'
+import type { HAIncomingMessage } from './ha/ws.js'
 import type {
   HAActionStrategy,
   HABinding,
@@ -30,6 +31,7 @@ export class HADriver implements DeviceDriver {
   private baseUrl = ''
   private token = ''
   private wsClient: HAWebSocketClient | null = null
+  private entityStates = new Map<string, Record<string, unknown>>()
   private stateCache = new Map<
     string,
     { at: number; state: Record<string, unknown> }
@@ -65,6 +67,10 @@ export class HADriver implements DeviceDriver {
       url: toHaWsUrl(this.baseUrl),
       token: this.token,
     })
+    this.wsClient.onReady(() => {
+      this.entityStates.clear()
+      this.subscribeEntityStates()
+    })
     this.wsClient.start()
   }
 
@@ -90,7 +96,7 @@ export class HADriver implements DeviceDriver {
     const entry = this.propertyEntry(deviceConfig, property)
     if (!entry) return null
 
-    const state = await this.fetchState(entry.raw.entity, runtime)
+    const state = await this.resolveState(entry.raw.entity, runtime)
 
     const get = entry.binding.get
     if (get.kind === 'attribute') {
@@ -144,6 +150,7 @@ export class HADriver implements DeviceDriver {
     }
 
     await this.callService(domain, service, payload)
+    this.entityStates.clear()
     this.stateCache.clear()
   }
 
@@ -177,6 +184,7 @@ export class HADriver implements DeviceDriver {
     Object.assign(payload, args)
 
     await this.callService(domain, service, payload)
+    this.entityStates.clear()
     this.stateCache.clear()
   }
 
@@ -217,6 +225,67 @@ export class HADriver implements DeviceDriver {
     let value = byKey.get(key)
     if (!value) byKey.set(key, (value = create()))
     return value
+  }
+
+  private subscribeEntityStates(): void {
+    this.wsClient
+      ?.subscribe({ type: 'subscribe_entities' }, message =>
+        this.handleStateEvent(message),
+      )
+      .catch(() => {})
+  }
+
+  private handleStateEvent(message: HAIncomingMessage): void {
+    const event = message.event
+    if (!isRecord(event)) return
+    if (event['type'] === 'subscribe_entities_complete') {
+      const entities = event['entities']
+      this.entityStates = isRecord(entities)
+        ? new Map(
+            Object.entries(entities).filter(
+              (entry): entry is [string, Record<string, unknown>] =>
+                isRecord(entry[1]),
+            ),
+          )
+        : new Map()
+      return
+    }
+    const add = event['add']
+    const update = event['update']
+    const remove = event['remove']
+    if (isRecord(add)) {
+      for (const [entityId, state] of Object.entries(add)) {
+        if (isRecord(state)) this.entityStates.set(entityId, state)
+      }
+    }
+    if (isRecord(update)) {
+      for (const [entityId, state] of Object.entries(update)) {
+        if (isRecord(state)) this.entityStates.set(entityId, state)
+      }
+    }
+    if (Array.isArray(remove)) {
+      for (const entityId of remove) {
+        if (typeof entityId === 'string') this.entityStates.delete(entityId)
+      }
+    }
+  }
+
+  // State resolution chain, most to least preferred:
+  // 1. live store fed by `subscribe_entities` push events (read only while the
+  //    websocket is ready; `unavailable`/`unknown` states are stored as-is)
+  // 2. REST fetchState fallback, for a socket that is down or an entity that
+  //    is missing from the store
+  // 3. per-program TTL cache inside fetchState — last resort before the HA
+  //    REST API is hit
+  private resolveState(
+    entityId: string,
+    runtime?: DriverRuntimeContext,
+  ): Promise<Record<string, unknown>> {
+    if (this.wsClient?.isReady()) {
+      const live = this.entityStates.get(entityId)
+      if (live) return Promise.resolve(live)
+    }
+    return this.fetchState(entityId, runtime)
   }
 
   private async fetchState(
@@ -302,6 +371,10 @@ export class HADriver implements DeviceDriver {
 function extractDomain(entityId: string): string {
   const dot = entityId.indexOf('.')
   return dot === -1 ? entityId : entityId.slice(0, dot)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function parseHaState(state: unknown): unknown {

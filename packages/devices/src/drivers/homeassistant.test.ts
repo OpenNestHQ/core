@@ -894,4 +894,291 @@ describe('HADriver', () => {
       await expect(driver.close()).resolves.toBeUndefined()
     })
   })
+
+  describe('realtime state store', () => {
+    class RealtimeWs {
+      static instances: RealtimeWs[] = []
+
+      static reset(): void {
+        RealtimeWs.instances = []
+      }
+
+      static last(): RealtimeWs {
+        return RealtimeWs.instances[RealtimeWs.instances.length - 1]!
+      }
+
+      readonly url: string
+      readyState = 0
+      sent: string[] = []
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: unknown }) => void) | null = null
+      onerror: (() => void) | null = null
+      onclose: (() => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        RealtimeWs.instances.push(this)
+      }
+
+      send(data: string): void {
+        this.sent.push(data)
+      }
+
+      close(): void {
+        this.readyState = 3
+        this.onclose?.()
+      }
+
+      serverOpen(): void {
+        this.readyState = 1
+        this.onopen?.()
+      }
+
+      serverMessage(message: unknown): void {
+        this.onmessage?.({ data: JSON.stringify(message) })
+      }
+
+      connect(): void {
+        this.serverOpen()
+        this.serverMessage({ type: 'auth_required' })
+        this.serverMessage({ type: 'auth_ok' })
+      }
+
+      subscribeId(): number | null {
+        for (const raw of this.sent) {
+          const message = JSON.parse(raw) as { type?: string; id?: number }
+          if (message.type === 'subscribe_entities') {
+            return message.id ?? null
+          }
+        }
+        return null
+      }
+
+      completeDump(
+        id: number,
+        entities: Record<string, Record<string, unknown>>,
+      ): void {
+        this.serverMessage({ id, type: 'result', success: true, result: null })
+        this.serverMessage({
+          id,
+          type: 'event',
+          event: { type: 'subscribe_entities_complete', entities },
+        })
+      }
+    }
+
+    afterEach(() => {
+      RealtimeWs.reset()
+    })
+
+    async function initRealtimeDriver(): Promise<{
+      driver: HADriver
+      ws: RealtimeWs
+      subId: number
+    }> {
+      const driver = makeDriver()
+      await driver.init(GLOBAL_CONFIG)
+      const ws = RealtimeWs.last()
+      ws.connect()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      const subId = ws.subscribeId()
+      expect(subId).not.toBeNull()
+      return { driver, ws, subId: subId! }
+    }
+
+    const deviceConfig = {
+      properties: { power: { entity: 'switch.test' } },
+    }
+
+    it('should serve the next get from the store after a push update without fetching', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.completeDump(subId, {
+        'switch.test': { state: 'off', attributes: {} },
+      })
+
+      let fetchCount = 0
+      mockFetch(() => {
+        fetchCount++
+        return jsonResponse({ state: 'off', attributes: {} })
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(false)
+
+      ws.serverMessage({
+        id: subId,
+        type: 'event',
+        event: {
+          add: {},
+          update: { 'switch.test': { state: 'on', attributes: {} } },
+          remove: [],
+        },
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(fetchCount).toBe(0)
+      await driver.close()
+    })
+
+    it('should fall back to REST when the socket is down', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.completeDump(subId, {
+        'switch.test': { state: 'off', attributes: {} },
+      })
+
+      let fetchCount = 0
+      mockFetch(() => {
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(false)
+      expect(fetchCount).toBe(0)
+
+      ws.close()
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(fetchCount).toBe(1)
+      await driver.close()
+    })
+
+    it('should fall back to REST when the entity is missing from the store', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.completeDump(subId, {
+        'switch.other': { state: 'off', attributes: {} },
+      })
+
+      mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      await driver.close()
+    })
+
+    it('should store unavailable and unknown states as-is', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.completeDump(subId, {
+        'switch.test': { state: 'unavailable', attributes: {} },
+      })
+
+      mockFetch(() => {
+        throw new Error('REST fallback should not be used')
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(
+        'unavailable',
+      )
+
+      ws.serverMessage({
+        id: subId,
+        type: 'event',
+        event: {
+          update: { 'switch.test': { state: 'unknown', attributes: {} } },
+        },
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(
+        'unknown',
+      )
+      await driver.close()
+    })
+
+    it('should not serve a stale store value after setProperty', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.completeDump(subId, {
+        'switch.test': { state: 'off', attributes: {} },
+      })
+
+      mockFetch(url => {
+        if (url.includes('/states/')) {
+          return jsonResponse({ state: 'on', attributes: {} })
+        }
+        return jsonResponse([])
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(false)
+
+      await driver.setProperty('d1', 'power', true, deviceConfig)
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      await driver.close()
+    })
+
+    it('should not serve a stale store value after executeAction', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.completeDump(subId, {
+        'switch.test': { state: 'off', attributes: {} },
+      })
+
+      mockFetch(url => {
+        if (url.includes('/states/')) {
+          return jsonResponse({ state: 'on', attributes: {} })
+        }
+        return jsonResponse([])
+      })
+
+      const actionConfig = {
+        actions: {
+          boost: {
+            service: 'switch.turn_on',
+            target: { entity_id: 'switch.test' },
+          },
+        },
+      }
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(false)
+
+      await driver.executeAction('d1', 'boost', {}, actionConfig)
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      await driver.close()
+    })
+
+    it('should re-subscribe and rebuild the store after a reconnection', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', RealtimeWs)
+        const driver = makeDriver()
+        await driver.init(GLOBAL_CONFIG)
+        const ws = RealtimeWs.last()
+        ws.connect()
+        await vi.advanceTimersByTimeAsync(0)
+        const subId = ws.subscribeId()
+        expect(subId).not.toBeNull()
+        ws.completeDump(subId!, {
+          'switch.test': { state: 'off', attributes: {} },
+        })
+
+        ws.close()
+        await vi.advanceTimersByTimeAsync(1000)
+
+        const ws2 = RealtimeWs.last()
+        expect(ws2).not.toBe(ws)
+        ws2.connect()
+        await vi.advanceTimersByTimeAsync(0)
+        const subId2 = ws2.subscribeId()
+        expect(subId2).not.toBeNull()
+        expect(subId2).not.toBe(subId)
+        ws2.completeDump(subId2!, {
+          'switch.test': { state: 'on', attributes: {} },
+        })
+
+        let fetchCount = 0
+        mockFetch(() => {
+          fetchCount++
+          return jsonResponse({ state: 'on', attributes: {} })
+        })
+
+        expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+        expect(fetchCount).toBe(0)
+        await driver.close()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
 })
