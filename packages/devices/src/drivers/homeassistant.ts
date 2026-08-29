@@ -421,10 +421,7 @@ function decompressState(
 }
 
 // Merges a `+`/`-` change delta onto a previously stored decompressed state.
-function applyStateDiff(
-  state: Record<string, unknown>,
-  diff: unknown,
-): void {
+function applyStateDiff(state: Record<string, unknown>, diff: unknown): void {
   if (!isRecord(diff)) return
   const additions = diff['+']
   if (isRecord(additions)) {
