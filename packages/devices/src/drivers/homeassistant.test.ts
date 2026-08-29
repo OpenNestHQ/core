@@ -242,6 +242,129 @@ describe('HADriver', () => {
     })
   })
 
+  describe('getProperty — template strategy', () => {
+    const templateConfig = (template: string) => ({
+      properties: {
+        label: { get: { kind: 'template', template } },
+      },
+    })
+
+    it('should POST the template to /api/template and return the rendered text', async () => {
+      mockFetch((url, init) => {
+        expect(url).toBe('http://ha.local:8123/api/template')
+        expect(init?.method).toBe('POST')
+        expect(init?.headers).toMatchObject({
+          Authorization: 'Bearer test-token-123',
+        })
+        expect(JSON.parse(String(init?.body))).toEqual({
+          template: '{{ states("switch.test") }}',
+        })
+        return new Response('on', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const value = await driver.getProperty(
+        'd1',
+        'label',
+        templateConfig('{{ states("switch.test") }}'),
+      )
+
+      expect(value).toBe('on')
+    })
+
+    it('should cache template reads per program by template', async () => {
+      const renderedTemplates: string[] = []
+      mockFetch((url, init) => {
+        expect(url).toBe('http://ha.local:8123/api/template')
+        renderedTemplates.push(
+          (JSON.parse(String(init?.body)) as { template: string }).template,
+        )
+        return new Response('rendered', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const runtime = { programId: 'program-1' }
+
+      const first = await driver.getProperty(
+        'd1',
+        'label',
+        templateConfig('{{ a }}'),
+        runtime,
+      )
+      const second = await driver.getProperty(
+        'd1',
+        'label',
+        templateConfig('{{ a }}'),
+        runtime,
+      )
+      const third = await driver.getProperty(
+        'd1',
+        'label',
+        templateConfig('{{ b }}'),
+        runtime,
+      )
+
+      expect(first).toBe('rendered')
+      expect(second).toBe('rendered')
+      expect(third).toBe('rendered')
+      expect(renderedTemplates).toEqual(['{{ a }}', '{{ b }}'])
+    })
+
+    it('should refetch template reads when programId changes', async () => {
+      let fetchCount = 0
+      mockFetch(() => {
+        fetchCount++
+        return new Response('rendered', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const config = templateConfig('{{ a }}')
+
+      await driver.getProperty('d1', 'label', config, {
+        programId: 'program-1',
+      })
+      await driver.getProperty('d1', 'label', config, {
+        programId: 'program-2',
+      })
+
+      expect(fetchCount).toBe(2)
+    })
+
+    it('should refetch once a template cache entry has expired', async () => {
+      vi.useFakeTimers()
+      try {
+        let fetchCount = 0
+        mockFetch(() => {
+          fetchCount++
+          return new Response('rendered', { status: 200 })
+        })
+
+        const driver = await initDriver()
+        const config = templateConfig('{{ a }}')
+        const runtime = { programId: 'program-1' }
+
+        await driver.getProperty('d1', 'label', config, runtime)
+        expect(fetchCount).toBe(1)
+
+        vi.advanceTimersByTime(STATE_CACHE_TTL_MS + 1)
+
+        await driver.getProperty('d1', 'label', config, runtime)
+        expect(fetchCount).toBe(2)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should throw with the HA response body on template failure', async () => {
+      mockFetch(() => textResponse('template error', 400))
+
+      const driver = await initDriver()
+      await expect(
+        driver.getProperty('d1', 'label', templateConfig('{{ a }}')),
+      ).rejects.toThrow(/renderTemplate failed.*template error/s)
+    })
+  })
+
   describe('per-program state caching', () => {
     const deviceConfig = {
       properties: { power: { entity: 'switch.test' } },

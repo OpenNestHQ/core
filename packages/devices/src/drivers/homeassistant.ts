@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { DeviceDriver, DriverRuntimeContext } from './interface.js'
 import {
   normalizeActionConfig,
@@ -37,6 +38,8 @@ export class HADriver implements DeviceDriver {
     { at: number; state: Record<string, unknown> }
   >()
   private cacheProgramId: string | undefined = undefined
+  private templateCache = new Map<string, { at: number; value: string }>()
+  private templateCacheProgramId: string | undefined = undefined
   private propertyBindings = new WeakMap<
     Record<string, unknown>,
     Map<string, HABinding>
@@ -109,6 +112,8 @@ export class HADriver implements DeviceDriver {
         }
         return parseHaState(state['state'])
       }
+      case 'template':
+        return this.renderTemplate(get.template, runtime)
       default:
         throw new Error(`HA get strategy "${get.kind}" is not supported`)
     }
@@ -353,6 +358,59 @@ export class HADriver implements DeviceDriver {
     return (await res.json()) as Record<string, unknown>
   }
 
+  // Template renders follow the per-program TTL pattern of the state cache
+  // (same STATE_CACHE_TTL_MS) keyed by the template hash. Unlike entity
+  // states they are not invalidated on writes: a template targets no entity,
+  // so the TTL alone bounds staleness.
+  private async renderTemplate(
+    template: string,
+    runtime?: DriverRuntimeContext,
+  ): Promise<string> {
+    if (runtime?.programId) {
+      if (this.templateCacheProgramId !== runtime.programId) {
+        this.templateCache = new Map()
+        this.templateCacheProgramId = runtime.programId
+      }
+      this.evictExpiredTemplates()
+      const key = templateCacheKey(template)
+      const cached = this.templateCache.get(key)
+      if (cached !== undefined) {
+        return cached.value
+      }
+      const value = await this.renderTemplateRemote(template)
+      this.templateCache.set(key, { at: Date.now(), value })
+      return value
+    }
+    return this.renderTemplateRemote(template)
+  }
+
+  private evictExpiredTemplates(): void {
+    const now = Date.now()
+    for (const [key, entry] of this.templateCache) {
+      if (now - entry.at >= STATE_CACHE_TTL_MS) {
+        this.templateCache.delete(key)
+      }
+    }
+  }
+
+  private async renderTemplateRemote(template: string): Promise<string> {
+    const res = await fetch(`${this.baseUrl}/api/template`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ template }),
+    })
+    if (!res.ok) {
+      const body = await res.text()
+      throw new Error(
+        `HA renderTemplate failed: ${res.status} ${res.statusText} — ${body}`,
+      )
+    }
+    return res.text()
+  }
+
   private async callService(
     domain: string,
     service: string,
@@ -388,6 +446,10 @@ export class HADriver implements DeviceDriver {
 function extractDomain(entityId: string): string {
   const dot = entityId.indexOf('.')
   return dot === -1 ? entityId : entityId.slice(0, dot)
+}
+
+function templateCacheKey(template: string): string {
+  return createHash('sha256').update(template).digest('hex')
 }
 
 function targetEntityIds(
