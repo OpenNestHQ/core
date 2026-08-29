@@ -41,6 +41,10 @@ interface QueuedCommand {
 
 type WsState = 'idle' | 'connecting' | 'ready' | 'stopped'
 
+export function toHaWsUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/^http/, 'ws')}/api/websocket`
+}
+
 export class HAWebSocketClient {
   private readonly url: string
   private readonly token: string
@@ -107,6 +111,7 @@ export class HAWebSocketClient {
     while (!this.stopped) {
       try {
         await this.connectAndAuth()
+        if (this.stopped) return
         this.attempts = 0
         this.state = 'ready'
         this.notifyReady()

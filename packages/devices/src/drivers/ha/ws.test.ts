@@ -169,6 +169,24 @@ describe('HAWebSocketClient', () => {
       expect(ws.readyState).toBe(3)
       await expect(client.whenReady()).rejects.toThrow(/closed/)
     })
+
+    it('should stop cleanly when close races with the handshake completion', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const client = new HAWebSocketClient({ url: URL, token: TOKEN })
+      client.start()
+
+      const ws = MockWebSocket.last()
+      ws.serverOpen()
+      ws.serverMessage({ type: 'auth_required' })
+      ws.serverMessage({ type: 'auth_ok' })
+
+      const closing = client.close()
+      await Promise.resolve()
+      await Promise.resolve()
+
+      await expect(closing).resolves.toBeUndefined()
+      expect(ws.readyState).toBe(3)
+    })
   })
 
   describe('callService', () => {

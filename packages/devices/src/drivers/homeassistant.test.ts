@@ -797,4 +797,101 @@ describe('HADriver', () => {
       ).not.toThrow()
     })
   })
+
+  describe('websocket lifecycle', () => {
+    class LifecycleWs {
+      static instances: LifecycleWs[] = []
+
+      static reset(): void {
+        LifecycleWs.instances = []
+      }
+
+      static last(): LifecycleWs {
+        return LifecycleWs.instances[LifecycleWs.instances.length - 1]!
+      }
+
+      readonly url: string
+      readyState = 0
+      sent: string[] = []
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: unknown }) => void) | null = null
+      onerror: (() => void) | null = null
+      onclose: (() => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        LifecycleWs.instances.push(this)
+      }
+
+      send(data: string): void {
+        this.sent.push(data)
+      }
+
+      close(): void {
+        this.readyState = 3
+        this.onclose?.()
+      }
+
+      serverOpen(): void {
+        this.readyState = 1
+        this.onopen?.()
+      }
+
+      serverMessage(message: unknown): void {
+        this.onmessage?.({ data: JSON.stringify(message) })
+      }
+
+      lastSent(): Record<string, unknown> {
+        return JSON.parse(this.sent[this.sent.length - 1]!) as Record<
+          string,
+          unknown
+        >
+      }
+    }
+
+    afterEach(() => {
+      LifecycleWs.reset()
+    })
+
+    it('should start the websocket client with the derived url on init', async () => {
+      vi.stubGlobal('WebSocket', LifecycleWs)
+      const driver = makeDriver()
+      await driver.init(GLOBAL_CONFIG)
+
+      const ws = LifecycleWs.last()
+      expect(ws.url).toBe('ws://ha.local:8123/api/websocket')
+
+      ws.serverOpen()
+      ws.serverMessage({ type: 'auth_required' })
+      expect(ws.lastSent()).toEqual({
+        type: 'auth',
+        access_token: 'test-token-123',
+      })
+      ws.serverMessage({ type: 'auth_ok' })
+      await driver.close()
+    })
+
+    it('should normalize trailing slashes and derive wss from https', async () => {
+      vi.stubGlobal('WebSocket', LifecycleWs)
+      const driver = makeDriver()
+      await driver.init({ url: 'https://ha.local:8123///', token: 'x' })
+
+      expect(LifecycleWs.last().url).toBe('wss://ha.local:8123/api/websocket')
+      await driver.close()
+    })
+
+    it('should close the websocket client on driver close', async () => {
+      vi.stubGlobal('WebSocket', LifecycleWs)
+      const driver = makeDriver()
+      await driver.init(GLOBAL_CONFIG)
+      const ws = LifecycleWs.last()
+      ws.serverOpen()
+      ws.serverMessage({ type: 'auth_required' })
+      ws.serverMessage({ type: 'auth_ok' })
+
+      await driver.close()
+      expect(ws.readyState).toBe(3)
+      await expect(driver.close()).resolves.toBeUndefined()
+    })
+  })
 })

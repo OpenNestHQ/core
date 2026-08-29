@@ -5,6 +5,7 @@ import {
   splitService,
 } from './ha/binding.js'
 import { validateDeviceBindings } from './ha/validate.js'
+import { HAWebSocketClient, toHaWsUrl } from './ha/ws.js'
 import type {
   HAActionStrategy,
   HABinding,
@@ -28,6 +29,7 @@ export class HADriver implements DeviceDriver {
   readonly name = 'homeassistant'
   private baseUrl = ''
   private token = ''
+  private wsClient: HAWebSocketClient | null = null
   private stateCache = new Map<
     string,
     { at: number; state: Record<string, unknown> }
@@ -59,6 +61,17 @@ export class HADriver implements DeviceDriver {
     }
     this.baseUrl = url.replace(/\/+$/, '')
     this.token = token
+    this.wsClient = new HAWebSocketClient({
+      url: toHaWsUrl(this.baseUrl),
+      token: this.token,
+    })
+    this.wsClient.start()
+  }
+
+  async close(): Promise<void> {
+    const client = this.wsClient
+    this.wsClient = null
+    await client?.close()
   }
 
   validateDeviceConfig(
