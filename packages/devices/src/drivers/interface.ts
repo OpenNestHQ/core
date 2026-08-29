@@ -8,6 +8,13 @@ export interface DeviceDriver {
     globalConfig: Record<string, unknown>,
     deviceInitConfigs?: Record<string, Record<string, unknown>>,
   ): Promise<void>
+  // Optional load-time check of the device config the driver will consume at
+  // call time; DeviceRegistry calls it with the built driverConfig. Drivers
+  // that do not implement it skip validation.
+  validateDeviceConfig?(
+    deviceId: string,
+    deviceConfig: Record<string, unknown>,
+  ): void
   getProperty(
     deviceId: string,
     property: string,

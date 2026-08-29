@@ -200,4 +200,128 @@ devices:
       cleanup(path)
     })
   })
+
+  describe('HA binding validation at load', () => {
+    const HA_YAML_HEADER = `
+drivers:
+  homeassistant:
+    url: http://ha.local:8123
+    token: test-token
+
+rooms:
+  - salon
+`
+
+    it('should throw at load on an invalid new format binding', () => {
+      const yaml = `${HA_YAML_HEADER}
+devices:
+  - id: ha_switch
+    type: switch
+    room: salon
+    name: HA Switch
+    driver: homeassistant
+    properties:
+      power:
+        type: boolean
+        entity: switch.salon
+        get:
+          kind: levitate
+    actions: []
+`
+      const path = writeTempYaml(yaml)
+      expect(() => DeviceRegistry.fromYaml(path)).toThrow(
+        /Invalid HA binding for device "ha_switch", property "power": unknown get kind "levitate"/,
+      )
+      cleanup(path)
+    })
+
+    it('should throw at load on an orphan action placeholder', () => {
+      const yaml = `${HA_YAML_HEADER}
+devices:
+  - id: ha_thermostat
+    type: thermostat
+    room: salon
+    name: HA Thermostat
+    driver: homeassistant
+    properties:
+      power:
+        type: boolean
+        entity: switch.salon
+    actions:
+      boost:
+        kind: script
+        script: script.boost
+        fields:
+          minutes: $minuts
+        parameters:
+          - name: minutes
+            type: number
+`
+      const path = writeTempYaml(yaml)
+      expect(() => DeviceRegistry.fromYaml(path)).toThrow(
+        /device "ha_thermostat", action "boost".*orphan placeholder "\$minuts"/,
+      )
+      cleanup(path)
+    })
+
+    it('should load a registry with valid new format bindings', () => {
+      const yaml = `${HA_YAML_HEADER}
+devices:
+  - id: ha_switch
+    type: switch
+    room: salon
+    name: HA Switch
+    driver: homeassistant
+    properties:
+      power:
+        type: boolean
+        entity: switch.salon
+        get:
+          kind: state
+        set:
+          kind: inferred
+      away:
+        set:
+          kind: script
+          script: script.set_away
+          fields:
+            mode: $value
+    actions:
+      boost:
+        kind: script
+        script: script.boost
+        fields:
+          minutes: $minutes
+        parameters:
+          - name: minutes
+            type: number
+`
+      const path = writeTempYaml(yaml)
+      const registry = DeviceRegistry.fromYaml(path)
+      expect(registry.getDevice('ha_switch')).toBeDefined()
+      cleanup(path)
+    })
+
+    it('should not validate old flat format bindings at load', () => {
+      const yaml = `${HA_YAML_HEADER}
+devices:
+  - id: ha_switch
+    type: switch
+    room: salon
+    name: HA Switch
+    driver: homeassistant
+    properties:
+      power:
+        type: boolean
+        entity: switch.salon
+        set_service: bad_format_no_dot
+    actions:
+      play:
+        service: media_player.media_play
+`
+      const path = writeTempYaml(yaml)
+      expect(() => DeviceRegistry.fromYaml(path)).not.toThrow()
+      cleanup(path)
+    })
+  })
 })

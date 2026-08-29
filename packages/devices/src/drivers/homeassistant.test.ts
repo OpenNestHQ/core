@@ -176,6 +176,425 @@ describe('HADriver', () => {
         }),
       ).rejects.toThrow(/fetchState.*failed/)
     })
+
+    it('should honor a nested get strategy on new-format property configs', async () => {
+      mockFetch(url => {
+        expect(url).toContain('/api/states/media_player.test')
+        return jsonResponse({
+          state: 'playing',
+          attributes: { volume_level: 0.5 },
+        })
+      })
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'volume', {
+        properties: {
+          volume: {
+            entity: 'media_player.test',
+            get: { kind: 'attribute', attribute: 'volume_level' },
+          },
+        },
+      })
+
+      expect(value).toBe(0.5)
+    })
+
+    it('should default new-format properties to the state strategy', async () => {
+      mockFetch(url => {
+        expect(url).toContain('/api/states/switch.test')
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'power', {
+        properties: {
+          power: { entity: 'switch.test', set: { kind: 'inferred' } },
+        },
+      })
+
+      expect(value).toBe(true)
+    })
+
+    it('should keep the flat attribute field as the get fallback on new-format properties', async () => {
+      mockFetch(() =>
+        jsonResponse({
+          state: 'playing',
+          attributes: { volume_level: 0.7 },
+        }),
+      )
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'volume', {
+        properties: {
+          volume: {
+            entity: 'media_player.test',
+            attribute: 'volume_level',
+            set: {
+              kind: 'service',
+              service: 'media_player.volume_set',
+              key: 'volume_level',
+            },
+          },
+        },
+      })
+
+      expect(value).toBe(0.7)
+    })
+  })
+
+  describe('getProperty — template strategy', () => {
+    const templateConfig = (template: string) => ({
+      properties: {
+        label: { get: { kind: 'template', template } },
+      },
+    })
+
+    it('should POST the template to /api/template and return the rendered text', async () => {
+      mockFetch((url, init) => {
+        expect(url).toBe('http://ha.local:8123/api/template')
+        expect(init?.method).toBe('POST')
+        expect(init?.headers).toMatchObject({
+          Authorization: 'Bearer test-token-123',
+        })
+        expect(JSON.parse(String(init?.body))).toEqual({
+          template: '{{ states("switch.test") }}',
+        })
+        return new Response('on', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const value = await driver.getProperty(
+        'd1',
+        'label',
+        templateConfig('{{ states("switch.test") }}'),
+      )
+
+      expect(value).toBe('on')
+    })
+
+    it('should cache template reads per program by template', async () => {
+      const renderedTemplates: string[] = []
+      mockFetch((url, init) => {
+        expect(url).toBe('http://ha.local:8123/api/template')
+        renderedTemplates.push(
+          (JSON.parse(String(init?.body)) as { template: string }).template,
+        )
+        return new Response('rendered', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const runtime = { programId: 'program-1' }
+
+      const first = await driver.getProperty(
+        'd1',
+        'label',
+        templateConfig('{{ a }}'),
+        runtime,
+      )
+      const second = await driver.getProperty(
+        'd1',
+        'label',
+        templateConfig('{{ a }}'),
+        runtime,
+      )
+      const third = await driver.getProperty(
+        'd1',
+        'label',
+        templateConfig('{{ b }}'),
+        runtime,
+      )
+
+      expect(first).toBe('rendered')
+      expect(second).toBe('rendered')
+      expect(third).toBe('rendered')
+      expect(renderedTemplates).toEqual(['{{ a }}', '{{ b }}'])
+    })
+
+    it('should refetch template reads when programId changes', async () => {
+      let fetchCount = 0
+      mockFetch(() => {
+        fetchCount++
+        return new Response('rendered', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const config = templateConfig('{{ a }}')
+
+      await driver.getProperty('d1', 'label', config, {
+        programId: 'program-1',
+      })
+      await driver.getProperty('d1', 'label', config, {
+        programId: 'program-2',
+      })
+
+      expect(fetchCount).toBe(2)
+    })
+
+    it('should refetch once a template cache entry has expired', async () => {
+      vi.useFakeTimers()
+      try {
+        let fetchCount = 0
+        mockFetch(() => {
+          fetchCount++
+          return new Response('rendered', { status: 200 })
+        })
+
+        const driver = await initDriver()
+        const config = templateConfig('{{ a }}')
+        const runtime = { programId: 'program-1' }
+
+        await driver.getProperty('d1', 'label', config, runtime)
+        expect(fetchCount).toBe(1)
+
+        vi.advanceTimersByTime(STATE_CACHE_TTL_MS + 1)
+
+        await driver.getProperty('d1', 'label', config, runtime)
+        expect(fetchCount).toBe(2)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should throw with the HA response body on template failure', async () => {
+      mockFetch(() => textResponse('template error', 400))
+
+      const driver = await initDriver()
+      await expect(
+        driver.getProperty('d1', 'label', templateConfig('{{ a }}')),
+      ).rejects.toThrow(/renderTemplate failed.*template error/s)
+    })
+  })
+
+  describe('getProperty — websocket strategies', () => {
+    class ServiceWs {
+      static instances: ServiceWs[] = []
+
+      static reset(): void {
+        ServiceWs.instances = []
+      }
+
+      static last(): ServiceWs {
+        return ServiceWs.instances[ServiceWs.instances.length - 1]!
+      }
+
+      readonly url: string
+      readyState = 0
+      sent: string[] = []
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: unknown }) => void) | null = null
+      onerror: (() => void) | null = null
+      onclose: (() => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        ServiceWs.instances.push(this)
+      }
+
+      send(data: string): void {
+        this.sent.push(data)
+      }
+
+      close(): void {
+        this.readyState = 3
+        this.onclose?.()
+      }
+
+      serverOpen(): void {
+        this.readyState = 1
+        this.onopen?.()
+      }
+
+      serverMessage(message: unknown): void {
+        this.onmessage?.({ data: JSON.stringify(message) })
+      }
+
+      connect(): void {
+        this.serverOpen()
+        this.serverMessage({ type: 'auth_required' })
+        this.serverMessage({ type: 'auth_ok' })
+      }
+
+      subscribeId(): number | null {
+        return this.lastMessageId('subscribe_entities')
+      }
+
+      callId(): number | null {
+        return this.lastMessageId('call_service')
+      }
+
+      respond(id: number, result: unknown): void {
+        this.serverMessage({ id, type: 'result', success: true, result })
+      }
+
+      lastSent(): Record<string, unknown> {
+        return JSON.parse(this.sent[this.sent.length - 1]!) as Record<
+          string,
+          unknown
+        >
+      }
+
+      private lastMessageId(type: string): number | null {
+        let id: number | null = null
+        for (const raw of this.sent) {
+          const message = JSON.parse(raw) as { type?: string; id?: number }
+          if (message.type === type) id = message.id ?? null
+        }
+        return id
+      }
+    }
+
+    afterEach(() => {
+      ServiceWs.reset()
+    })
+
+    async function initServiceDriver(): Promise<{
+      driver: HADriver
+      ws: ServiceWs
+    }> {
+      const driver = makeDriver()
+      await driver.init(GLOBAL_CONFIG)
+      const ws = ServiceWs.last()
+      ws.connect()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      const subId = ws.subscribeId()
+      expect(subId).not.toBeNull()
+      ws.respond(subId!, null)
+      return { driver, ws }
+    }
+
+    it('should return the script response variable over the websocket', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+      mockFetch(() => {
+        throw new Error('no REST fallback for service responses')
+      })
+
+      const config = {
+        properties: {
+          summary: {
+            get: { kind: 'script', script: 'script.daily_summary' },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'summary', config)
+
+      const callId = ws.callId()
+      expect(callId).not.toBeNull()
+      expect(ws.lastSent()).toEqual({
+        id: callId,
+        type: 'call_service',
+        domain: 'script',
+        service: 'turn_on',
+        entity_id: 'script.daily_summary',
+        return_response: true,
+      })
+      ws.respond(callId!, { summary: { total: 3 } })
+
+      await expect(pending).resolves.toEqual({ total: 3 })
+      await driver.close()
+    })
+
+    it('should return the raw script response when it is not a single response variable', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+
+      const config = {
+        properties: {
+          summary: {
+            get: { kind: 'script', script: 'script.daily_summary' },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'summary', config)
+      ws.respond(ws.callId()!, { a: 1, b: 2 })
+
+      await expect(pending).resolves.toEqual({ a: 1, b: 2 })
+      await driver.close()
+    })
+
+    it('should call the declared service and return its response', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+      mockFetch(() => {
+        throw new Error('no REST fallback for service responses')
+      })
+
+      const config = {
+        properties: {
+          forecast: {
+            get: {
+              kind: 'service_response',
+              service: 'weather.get_forecasts',
+              fields: { entity_id: 'weather.home' },
+            },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'forecast', config)
+
+      const callId = ws.callId()
+      expect(callId).not.toBeNull()
+      expect(ws.lastSent()).toEqual({
+        id: callId,
+        type: 'call_service',
+        domain: 'weather',
+        service: 'get_forecasts',
+        entity_id: 'weather.home',
+        return_response: true,
+      })
+      const response = { 'weather.home': { forecast: ['sunny'] } }
+      ws.respond(callId!, response)
+
+      await expect(pending).resolves.toEqual(response)
+      await driver.close()
+    })
+
+    it('should throw an explicit error when the socket is down for a script get', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const driver = makeDriver()
+      await driver.init(GLOBAL_CONFIG)
+      mockFetch(() => {
+        throw new Error('no REST fallback for service responses')
+      })
+
+      const config = {
+        properties: {
+          summary: {
+            get: { kind: 'script', script: 'script.daily_summary' },
+          },
+        },
+      }
+      await expect(driver.getProperty('d1', 'summary', config)).rejects.toThrow(
+        /strategy "script".*device "d1".*property "summary".*websocket.*not connected.*no REST fallback/s,
+      )
+      await driver.close()
+    })
+
+    it('should throw an explicit error when the socket is down for a service_response get', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const driver = makeDriver()
+      await driver.init(GLOBAL_CONFIG)
+      mockFetch(() => {
+        throw new Error('no REST fallback for service responses')
+      })
+
+      const config = {
+        properties: {
+          forecast: {
+            get: {
+              kind: 'service_response',
+              service: 'weather.get_forecasts',
+            },
+          },
+        },
+      }
+      await expect(
+        driver.getProperty('d1', 'forecast', config),
+      ).rejects.toThrow(
+        /strategy "service_response".*device "d1".*property "forecast".*websocket.*not connected/s,
+      )
+      await driver.close()
+    })
   })
 
   describe('per-program state caching', () => {
@@ -672,6 +1091,589 @@ describe('HADriver', () => {
           },
         }),
       ).rejects.toThrow(/Invalid service format/)
+    })
+  })
+
+  describe('validateDeviceConfig', () => {
+    it('should reject an unknown get kind', () => {
+      const driver = makeDriver()
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          properties: {
+            power: {
+              type: 'boolean',
+              entity: 'switch.test',
+              get: { kind: 'levitate' },
+            },
+          },
+        }),
+      ).toThrow(
+        /Invalid HA binding for device "d1", property "power": unknown get kind "levitate"/,
+      )
+    })
+
+    it('should reject a malformed set service', () => {
+      const driver = makeDriver()
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          properties: {
+            volume: {
+              type: 'number',
+              entity: 'media_player.test',
+              set: { kind: 'service', service: 'volume_set' },
+            },
+          },
+        }),
+      ).toThrow(
+        /device "d1", property "volume".*invalid service format "volume_set"/,
+      )
+    })
+
+    it('should reject an orphan placeholder in an action', () => {
+      const driver = makeDriver()
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          actions: {
+            boost: {
+              kind: 'script',
+              script: 'script.boost',
+              fields: { minutes: '$minuts' },
+              parameters: [{ name: 'minutes' }],
+            },
+          },
+        }),
+      ).toThrow(/device "d1", action "boost".*orphan placeholder "\$minuts"/)
+    })
+
+    it('should reject an inevitable domain.unknown', () => {
+      const driver = makeDriver()
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          properties: {
+            volume: {
+              type: 'number',
+              entity: 'media_player.test',
+              set: { kind: 'inferred' },
+            },
+          },
+        }),
+      ).toThrow(
+        /property "volume".*set strategy "inferred".*media_player\.unknown/,
+      )
+    })
+
+    it('should accept valid new format configs', () => {
+      const driver = makeDriver()
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          properties: {
+            power: {
+              type: 'boolean',
+              entity: 'switch.test',
+              get: { kind: 'state' },
+              set: { kind: 'inferred' },
+            },
+            away: {
+              set: {
+                kind: 'script',
+                script: 'script.set_away',
+                fields: { mode: '$value' },
+              },
+            },
+          },
+          actions: {
+            boost: {
+              kind: 'script',
+              script: 'script.boost',
+              fields: { minutes: '$minutes' },
+              parameters: [{ name: 'minutes', type: 'number' }],
+            },
+            play: {
+              kind: 'service',
+              service: 'media_player.media_play',
+              target: { entity_id: 'media_player.test' },
+            },
+          },
+        }),
+      ).not.toThrow()
+    })
+
+    it('should leave old flat format configs unvalidated', () => {
+      const driver = makeDriver()
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          properties: {
+            power: { entity: 'switch.test' },
+            broken: {
+              entity: 'switch.test',
+              set_service: 'bad_format_no_dot',
+            },
+          },
+          actions: {
+            play: { service: 'media_player.media_play' },
+          },
+        }),
+      ).not.toThrow()
+    })
+  })
+
+  describe('websocket lifecycle', () => {
+    class LifecycleWs {
+      static instances: LifecycleWs[] = []
+
+      static reset(): void {
+        LifecycleWs.instances = []
+      }
+
+      static last(): LifecycleWs {
+        return LifecycleWs.instances[LifecycleWs.instances.length - 1]!
+      }
+
+      readonly url: string
+      readyState = 0
+      sent: string[] = []
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: unknown }) => void) | null = null
+      onerror: (() => void) | null = null
+      onclose: (() => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        LifecycleWs.instances.push(this)
+      }
+
+      send(data: string): void {
+        this.sent.push(data)
+      }
+
+      close(): void {
+        this.readyState = 3
+        this.onclose?.()
+      }
+
+      serverOpen(): void {
+        this.readyState = 1
+        this.onopen?.()
+      }
+
+      serverMessage(message: unknown): void {
+        this.onmessage?.({ data: JSON.stringify(message) })
+      }
+
+      lastSent(): Record<string, unknown> {
+        return JSON.parse(this.sent[this.sent.length - 1]!) as Record<
+          string,
+          unknown
+        >
+      }
+    }
+
+    afterEach(() => {
+      LifecycleWs.reset()
+    })
+
+    it('should start the websocket client with the derived url on init', async () => {
+      vi.stubGlobal('WebSocket', LifecycleWs)
+      const driver = makeDriver()
+      await driver.init(GLOBAL_CONFIG)
+
+      const ws = LifecycleWs.last()
+      expect(ws.url).toBe('ws://ha.local:8123/api/websocket')
+
+      ws.serverOpen()
+      ws.serverMessage({ type: 'auth_required' })
+      expect(ws.lastSent()).toEqual({
+        type: 'auth',
+        access_token: 'test-token-123',
+      })
+      ws.serverMessage({ type: 'auth_ok' })
+      await driver.close()
+    })
+
+    it('should normalize trailing slashes and derive wss from https', async () => {
+      vi.stubGlobal('WebSocket', LifecycleWs)
+      const driver = makeDriver()
+      await driver.init({ url: 'https://ha.local:8123///', token: 'x' })
+
+      expect(LifecycleWs.last().url).toBe('wss://ha.local:8123/api/websocket')
+      await driver.close()
+    })
+
+    it('should close the websocket client on driver close', async () => {
+      vi.stubGlobal('WebSocket', LifecycleWs)
+      const driver = makeDriver()
+      await driver.init(GLOBAL_CONFIG)
+      const ws = LifecycleWs.last()
+      ws.serverOpen()
+      ws.serverMessage({ type: 'auth_required' })
+      ws.serverMessage({ type: 'auth_ok' })
+
+      await driver.close()
+      expect(ws.readyState).toBe(3)
+      await expect(driver.close()).resolves.toBeUndefined()
+    })
+  })
+
+  describe('realtime state store', () => {
+    class RealtimeWs {
+      static instances: RealtimeWs[] = []
+
+      static reset(): void {
+        RealtimeWs.instances = []
+      }
+
+      static last(): RealtimeWs {
+        return RealtimeWs.instances[RealtimeWs.instances.length - 1]!
+      }
+
+      readonly url: string
+      readyState = 0
+      sent: string[] = []
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: unknown }) => void) | null = null
+      onerror: (() => void) | null = null
+      onclose: (() => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        RealtimeWs.instances.push(this)
+      }
+
+      send(data: string): void {
+        this.sent.push(data)
+      }
+
+      close(): void {
+        this.readyState = 3
+        this.onclose?.()
+      }
+
+      serverOpen(): void {
+        this.readyState = 1
+        this.onopen?.()
+      }
+
+      serverMessage(message: unknown): void {
+        this.onmessage?.({ data: JSON.stringify(message) })
+      }
+
+      connect(): void {
+        this.serverOpen()
+        this.serverMessage({ type: 'auth_required' })
+        this.serverMessage({ type: 'auth_ok' })
+      }
+
+      subscribeId(): number | null {
+        for (const raw of this.sent) {
+          const message = JSON.parse(raw) as { type?: string; id?: number }
+          if (message.type === 'subscribe_entities') {
+            return message.id ?? null
+          }
+        }
+        return null
+      }
+
+      addEntities(
+        id: number,
+        entities: Record<string, Record<string, unknown>>,
+      ): void {
+        this.serverMessage({ id, type: 'result', success: true, result: null })
+        this.serverMessage({ id, type: 'event', event: { a: entities } })
+      }
+
+      changeEntities(
+        id: number,
+        changes: Record<string, Record<string, unknown>>,
+      ): void {
+        this.serverMessage({ id, type: 'event', event: { c: changes } })
+      }
+
+      removeEntities(id: number, entityIds: string[]): void {
+        this.serverMessage({ id, type: 'event', event: { r: entityIds } })
+      }
+    }
+
+    afterEach(() => {
+      RealtimeWs.reset()
+    })
+
+    async function initRealtimeDriver(): Promise<{
+      driver: HADriver
+      ws: RealtimeWs
+      subId: number
+    }> {
+      const driver = makeDriver()
+      await driver.init(GLOBAL_CONFIG)
+      const ws = RealtimeWs.last()
+      ws.connect()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      const subId = ws.subscribeId()
+      expect(subId).not.toBeNull()
+      return { driver, ws, subId: subId! }
+    }
+
+    const deviceConfig = {
+      properties: { power: { entity: 'switch.test' } },
+    }
+
+    function compressed(
+      state: string,
+      attributes: Record<string, unknown> = {},
+    ): Record<string, unknown> {
+      return { s: state, a: attributes, c: 'ctx-1', lc: 1000, lu: 1000 }
+    }
+
+    it('should serve the next get from the store after a push update without fetching', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, { 'switch.test': compressed('off') })
+
+      let fetchCount = 0
+      mockFetch(() => {
+        fetchCount++
+        return jsonResponse({ state: 'off', attributes: {} })
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(false)
+
+      ws.changeEntities(subId, {
+        'switch.test': { '+': { s: 'on', lc: 2000, lu: 2000 } },
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(fetchCount).toBe(0)
+      await driver.close()
+    })
+
+    it('should merge attribute changes and removals from change deltas', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'media_player.test': compressed('playing', { volume_level: 0.7 }),
+      })
+
+      mockFetch(() => {
+        throw new Error('REST fallback should not be used')
+      })
+
+      const config = {
+        properties: {
+          volume: { entity: 'media_player.test', attribute: 'volume_level' },
+          source: { entity: 'media_player.test', attribute: 'source' },
+        },
+      }
+
+      expect(await driver.getProperty('d1', 'volume', config)).toBe(0.7)
+
+      ws.changeEntities(subId, {
+        'media_player.test': {
+          '+': { a: { volume_level: 0.9 } },
+          '-': { a: ['source'] },
+        },
+      })
+
+      expect(await driver.getProperty('d1', 'volume', config)).toBe(0.9)
+      expect(await driver.getProperty('d1', 'source', config)).toBeNull()
+      await driver.close()
+    })
+
+    it('should drop removed entities from the store and fall back to REST', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, { 'switch.test': compressed('off') })
+
+      let fetchCount = 0
+      mockFetch(() => {
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(false)
+      expect(fetchCount).toBe(0)
+
+      ws.removeEntities(subId, ['switch.test'])
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(fetchCount).toBe(1)
+      await driver.close()
+    })
+
+    it('should fall back to REST when the socket is down', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, { 'switch.test': compressed('off') })
+
+      let fetchCount = 0
+      mockFetch(() => {
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(false)
+      expect(fetchCount).toBe(0)
+
+      ws.close()
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(fetchCount).toBe(1)
+      await driver.close()
+    })
+
+    it('should fall back to REST when the entity is missing from the store', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, { 'switch.other': compressed('off') })
+
+      mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      await driver.close()
+    })
+
+    it('should store unavailable and unknown states as-is', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, { 'switch.test': compressed('unavailable') })
+
+      mockFetch(() => {
+        throw new Error('REST fallback should not be used')
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(
+        'unavailable',
+      )
+
+      ws.changeEntities(subId, {
+        'switch.test': { '+': { s: 'unknown' } },
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(
+        'unknown',
+      )
+      await driver.close()
+    })
+
+    it('should not serve a stale store value after setProperty', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, { 'switch.test': compressed('off') })
+
+      mockFetch(url => {
+        if (url.includes('/states/')) {
+          return jsonResponse({ state: 'on', attributes: {} })
+        }
+        return jsonResponse([])
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(false)
+
+      await driver.setProperty('d1', 'power', true, deviceConfig)
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      await driver.close()
+    })
+
+    it('should keep unrelated store entries after setProperty', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'switch.test': compressed('off'),
+        'switch.other': compressed('on'),
+      })
+
+      let fetchCount = 0
+      mockFetch(url => {
+        if (!url.includes('/states/')) return jsonResponse([])
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      await driver.setProperty('d1', 'power', true, deviceConfig)
+
+      const otherConfig = {
+        properties: { power: { entity: 'switch.other' } },
+      }
+      expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
+      expect(fetchCount).toBe(0)
+      await driver.close()
+    })
+
+    it('should not serve a stale store value after executeAction', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'switch.test': compressed('off'),
+        'switch.other': compressed('on'),
+      })
+
+      let fetchCount = 0
+      mockFetch(url => {
+        if (!url.includes('/states/')) return jsonResponse([])
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const actionConfig = {
+        actions: {
+          boost: {
+            service: 'switch.turn_on',
+            target: { entity_id: 'switch.test' },
+          },
+        },
+      }
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(false)
+
+      await driver.executeAction('d1', 'boost', {}, actionConfig)
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(fetchCount).toBe(1)
+
+      const otherConfig = {
+        properties: { power: { entity: 'switch.other' } },
+      }
+      expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
+      expect(fetchCount).toBe(1)
+      await driver.close()
+    })
+
+    it('should re-subscribe and rebuild the store after a reconnection', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', RealtimeWs)
+        const driver = makeDriver()
+        await driver.init(GLOBAL_CONFIG)
+        const ws = RealtimeWs.last()
+        ws.connect()
+        await vi.advanceTimersByTimeAsync(0)
+        const subId = ws.subscribeId()
+        expect(subId).not.toBeNull()
+        ws.addEntities(subId!, { 'switch.test': compressed('off') })
+
+        ws.close()
+        await vi.advanceTimersByTimeAsync(1000)
+
+        const ws2 = RealtimeWs.last()
+        expect(ws2).not.toBe(ws)
+        ws2.connect()
+        await vi.advanceTimersByTimeAsync(0)
+        const subId2 = ws2.subscribeId()
+        expect(subId2).not.toBeNull()
+        expect(subId2).not.toBe(subId)
+        ws2.addEntities(subId2!, { 'switch.test': compressed('on') })
+
+        let fetchCount = 0
+        mockFetch(() => {
+          fetchCount++
+          return jsonResponse({ state: 'on', attributes: {} })
+        })
+
+        expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+        expect(fetchCount).toBe(0)
+        await driver.close()
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

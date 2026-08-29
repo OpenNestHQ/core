@@ -1,17 +1,20 @@
+import { createHash } from 'node:crypto'
 import type { DeviceDriver, DriverRuntimeContext } from './interface.js'
-
-interface HAPropertyConfig {
-  entity: string
-  attribute?: string
-  set_service?: string
-  set_value_key?: string
-}
-
-interface HAActionConfig {
-  service: string
-  target?: Record<string, unknown>
-  data?: Record<string, unknown>
-}
+import {
+  normalizeActionConfig,
+  normalizePropertyBinding,
+  splitService,
+} from './ha/binding.js'
+import { isRecord, validateDeviceBindings } from './ha/validate.js'
+import { HAWebSocketClient, toHaWsUrl } from './ha/ws.js'
+import type { HAIncomingMessage } from './ha/ws.js'
+import type {
+  HAActionStrategy,
+  HABinding,
+  HAGetStrategy,
+  HARawActionConfig,
+  HARawPropertyConfig,
+} from './ha/binding.js'
 
 const DOMAIN_SERVICES: Record<string, { on: string; off: string }> = {
   switch: { on: 'turn_on', off: 'turn_off' },
@@ -29,11 +32,23 @@ export class HADriver implements DeviceDriver {
   readonly name = 'homeassistant'
   private baseUrl = ''
   private token = ''
+  private wsClient: HAWebSocketClient | null = null
+  private entityStates = new Map<string, Record<string, unknown>>()
   private stateCache = new Map<
     string,
     { at: number; state: Record<string, unknown> }
   >()
   private cacheProgramId: string | undefined = undefined
+  private templateCache = new Map<string, { at: number; value: string }>()
+  private templateCacheProgramId: string | undefined = undefined
+  private propertyBindings = new WeakMap<
+    Record<string, unknown>,
+    Map<string, HABinding>
+  >()
+  private actionStrategies = new WeakMap<
+    Record<string, unknown>,
+    Map<string, HAActionStrategy>
+  >()
 
   async init(
     globalConfig: Record<string, unknown>,
@@ -52,27 +67,80 @@ export class HADriver implements DeviceDriver {
     }
     this.baseUrl = url.replace(/\/+$/, '')
     this.token = token
+    this.wsClient = new HAWebSocketClient({
+      url: toHaWsUrl(this.baseUrl),
+      token: this.token,
+    })
+    this.wsClient.onReady(() => {
+      this.entityStates.clear()
+      this.subscribeEntityStates()
+    })
+    this.wsClient.start()
+  }
+
+  async close(): Promise<void> {
+    const client = this.wsClient
+    this.wsClient = null
+    await client?.close()
+  }
+
+  validateDeviceConfig(
+    deviceId: string,
+    deviceConfig: Record<string, unknown>,
+  ): void {
+    validateDeviceBindings(deviceId, deviceConfig)
   }
 
   async getProperty(
-    _deviceId: string,
+    deviceId: string,
     property: string,
     deviceConfig: Record<string, unknown>,
     runtime?: DriverRuntimeContext,
   ): Promise<unknown> {
-    const props = deviceConfig['properties'] as
-      Record<string, HAPropertyConfig> | undefined
-    const propConfig = props?.[property]
-    if (!propConfig) return null
+    const entry = this.propertyEntry(deviceConfig, property)
+    if (!entry) return null
 
-    const state = await this.fetchState(propConfig.entity, runtime)
-
-    if (propConfig.attribute) {
-      const attrs = state['attributes'] as Record<string, unknown> | undefined
-      return attrs?.[propConfig.attribute] ?? null
+    const get = entry.binding.get
+    switch (get.kind) {
+      case 'state':
+      case 'attribute': {
+        const state = await this.resolveState(entry.raw.entity, runtime)
+        if (get.kind === 'attribute') {
+          const attrs = state['attributes'] as
+            Record<string, unknown> | undefined
+          return attrs?.[get.attribute] ?? null
+        }
+        return parseHaState(state['state'])
+      }
+      case 'template':
+        return this.renderTemplate(get.template, runtime)
+      case 'script': {
+        const result = await this.wsServiceResponse(
+          'script',
+          'turn_on',
+          { entity_id: get.script },
+          'script',
+          deviceId,
+          property,
+        )
+        return unwrapResponseVariable(result)
+      }
+      case 'service_response': {
+        const [domain, service] = splitService(get.service)
+        return this.wsServiceResponse(
+          domain,
+          service,
+          get.fields ?? {},
+          'service_response',
+          deviceId,
+          property,
+        )
+      }
+      default: {
+        const unknownKind = (get as HAGetStrategy).kind
+        throw new Error(`HA get strategy "${unknownKind}" is not supported`)
+      }
     }
-
-    return parseHaState(state['state'])
   }
 
   async setProperty(
@@ -81,40 +149,42 @@ export class HADriver implements DeviceDriver {
     value: unknown,
     deviceConfig: Record<string, unknown>,
   ): Promise<void> {
-    const props = deviceConfig['properties'] as
-      Record<string, HAPropertyConfig> | undefined
-    const propConfig = props?.[property]
-    if (!propConfig) return
+    const entry = this.propertyEntry(deviceConfig, property)
+    if (!entry) return
 
-    const boolValue: boolean | null = typeof value === 'boolean' ? value : null
+    const entity = entry.raw.entity
+    const set = entry.binding.set
+
+    const payload: Record<string, unknown> = {
+      entity_id: entity,
+    }
 
     let domain: string
     let service: string
 
-    if (propConfig.set_service && boolValue !== null) {
-      ;[domain, service] = this.resolveBoolService(
-        propConfig.set_service,
-        boolValue,
-      )
-    } else if (propConfig.set_service) {
-      ;[domain, service] = splitService(propConfig.set_service)
-    } else if (boolValue !== null) {
-      ;[domain, service] = this.inferBoolService(propConfig.entity, boolValue)
-    } else {
-      ;[domain, service] = splitService(
-        `${extractDomain(propConfig.entity)}.unknown`,
-      )
-    }
-
-    const payload: Record<string, unknown> = {
-      entity_id: propConfig.entity,
-    }
-
-    if (propConfig.set_value_key) {
-      payload[propConfig.set_value_key] = value
+    switch (set.kind) {
+      case 'inferred': {
+        const boolValue = typeof value === 'boolean' ? value : null
+        if (boolValue !== null) {
+          ;[domain, service] = this.inferBoolService(entity, boolValue)
+        } else {
+          ;[domain, service] = splitService(`${extractDomain(entity)}.unknown`)
+        }
+        break
+      }
+      case 'service': {
+        ;[domain, service] = splitService(set.service)
+        if (set.key !== undefined) {
+          payload[set.key] = value
+        }
+        break
+      }
+      default:
+        throw new Error(`HA set strategy "${set.kind}" is not supported`)
     }
 
     await this.callService(domain, service, payload)
+    this.invalidateEntityState([entity])
     this.stateCache.clear()
   }
 
@@ -125,24 +195,164 @@ export class HADriver implements DeviceDriver {
     deviceConfig: Record<string, unknown>,
   ): Promise<void> {
     const actions = deviceConfig['actions'] as
-      Record<string, HAActionConfig> | undefined
-    const actionConfig = actions?.[action]
-    if (!actionConfig) return
+      Record<string, HARawActionConfig> | undefined
+    const raw = actions?.[action]
+    if (!raw) return
 
-    const [domain, service] = splitService(actionConfig.service)
+    const strategy = this.actionStrategy(deviceConfig, action, raw)
+
+    if (strategy.kind !== 'service') {
+      throw new Error(`HA action strategy "${strategy.kind}" is not supported`)
+    }
+
+    const [domain, service] = splitService(strategy.service)
 
     const payload: Record<string, unknown> = {}
 
-    if (actionConfig.target) {
-      Object.assign(payload, actionConfig.target)
+    if (strategy.target) {
+      Object.assign(payload, strategy.target)
     }
-    if (actionConfig.data) {
-      Object.assign(payload, actionConfig.data)
+    if (strategy.data) {
+      Object.assign(payload, strategy.data)
     }
     Object.assign(payload, args)
 
     await this.callService(domain, service, payload)
+    this.invalidateEntityState(targetEntityIds(strategy.target))
     this.stateCache.clear()
+  }
+
+  private propertyEntry(
+    deviceConfig: Record<string, unknown>,
+    property: string,
+  ): { raw: HARawPropertyConfig; binding: HABinding } | undefined {
+    const props = deviceConfig['properties'] as
+      Record<string, HARawPropertyConfig> | undefined
+    const raw = props?.[property]
+    if (!raw) return undefined
+    return {
+      raw,
+      binding: this.cached(this.propertyBindings, deviceConfig, property, () =>
+        normalizePropertyBinding(raw),
+      ),
+    }
+  }
+
+  private actionStrategy(
+    deviceConfig: Record<string, unknown>,
+    action: string,
+    raw: HARawActionConfig,
+  ): HAActionStrategy {
+    return this.cached(this.actionStrategies, deviceConfig, action, () =>
+      normalizeActionConfig(raw),
+    )
+  }
+
+  private cached<T>(
+    cache: WeakMap<Record<string, unknown>, Map<string, T>>,
+    deviceConfig: Record<string, unknown>,
+    key: string,
+    create: () => T,
+  ): T {
+    let byKey = cache.get(deviceConfig)
+    if (!byKey) cache.set(deviceConfig, (byKey = new Map()))
+    let value = byKey.get(key)
+    if (!value) byKey.set(key, (value = create()))
+    return value
+  }
+
+  private subscribeEntityStates(): void {
+    this.wsClient
+      ?.subscribe({ type: 'subscribe_entities' }, message =>
+        this.handleStateEvent(message),
+      )
+      .catch((error: Error) => {
+        // The store stays empty and reads fall back to REST until the next
+        // reconnection re-subscribes; a retry would only matter if HA ever
+        // rejected subscribe_entities while keeping the socket up.
+        console.warn(`HA subscribe_entities failed: ${error.message}`)
+      })
+  }
+
+  private handleStateEvent(message: HAIncomingMessage): void {
+    const event = message.event
+    if (!isRecord(event)) return
+    // Real HA subscribe_entities protocol (see processEvent in
+    // home-assistant-js-websocket): the initial dump and additions come as
+    // `a` (compressed states), changes as `c` (a `+`/`-` delta to merge onto
+    // the previous state, not a full state) and removals as `r` (id list).
+    if (isRecord(event['a'])) {
+      for (const [entityId, compressed] of Object.entries(event['a'])) {
+        if (isRecord(compressed)) {
+          this.entityStates.set(entityId, decompressState(compressed))
+        }
+      }
+    }
+    if (isRecord(event['c'])) {
+      for (const [entityId, diff] of Object.entries(event['c'])) {
+        const current = this.entityStates.get(entityId)
+        if (!current) continue
+        applyStateDiff(current, diff)
+      }
+    }
+    if (Array.isArray(event['r'])) {
+      for (const entityId of event['r']) {
+        if (typeof entityId === 'string') this.entityStates.delete(entityId)
+      }
+    }
+  }
+
+  // Service responses only exist over the websocket (`return_response`), so a
+  // down socket fails explicitly instead of falling back to REST like reads.
+  private wsServiceResponse(
+    domain: string,
+    service: string,
+    payload: Record<string, unknown>,
+    strategy: string,
+    deviceId: string,
+    property: string,
+  ): Promise<unknown> {
+    const client = this.wsClient
+    if (!client || !client.isReady()) {
+      throw new Error(
+        `HA get strategy "${strategy}" for device "${deviceId}", property "${property}" requires the HA websocket, which is not connected (service responses have no REST fallback)`,
+      )
+    }
+    return client.callService(domain, service, payload, {
+      returnResponse: true,
+    })
+  }
+
+  // State resolution chain, most to least preferred:
+  // 1. live store fed by `subscribe_entities` push events (read only while the
+  //    websocket is ready; `unavailable`/`unknown` states are stored as-is)
+  // 2. REST fetchState fallback, for a socket that is down or an entity that
+  //    is missing from the store
+  // 3. per-program TTL cache inside fetchState — last resort before the HA
+  //    REST API is hit
+  private resolveState(
+    entityId: string,
+    runtime?: DriverRuntimeContext,
+  ): Promise<Record<string, unknown>> {
+    if (this.wsClient?.isReady()) {
+      const live = this.entityStates.get(entityId)
+      if (live) return Promise.resolve(live)
+    }
+    return this.fetchState(entityId, runtime)
+  }
+
+  // The push feed can lag behind HA right after a write, so drop only the
+  // entities the call may have touched from the live store. When the scope
+  // cannot be determined (action without an entity_id target), fall back to
+  // dropping everything to guarantee no stale read.
+  private invalidateEntityState(entityIds: string[]): void {
+    if (entityIds.length === 0) {
+      this.entityStates.clear()
+      return
+    }
+    for (const entityId of entityIds) {
+      this.entityStates.delete(entityId)
+    }
   }
 
   private async fetchState(
@@ -193,6 +403,59 @@ export class HADriver implements DeviceDriver {
     return (await res.json()) as Record<string, unknown>
   }
 
+  // Template renders follow the per-program TTL pattern of the state cache
+  // (same STATE_CACHE_TTL_MS) keyed by the template hash. Unlike entity
+  // states they are not invalidated on writes: a template targets no entity,
+  // so the TTL alone bounds staleness.
+  private async renderTemplate(
+    template: string,
+    runtime?: DriverRuntimeContext,
+  ): Promise<string> {
+    if (runtime?.programId) {
+      if (this.templateCacheProgramId !== runtime.programId) {
+        this.templateCache = new Map()
+        this.templateCacheProgramId = runtime.programId
+      }
+      this.evictExpiredTemplates()
+      const key = templateCacheKey(template)
+      const cached = this.templateCache.get(key)
+      if (cached !== undefined) {
+        return cached.value
+      }
+      const value = await this.renderTemplateRemote(template)
+      this.templateCache.set(key, { at: Date.now(), value })
+      return value
+    }
+    return this.renderTemplateRemote(template)
+  }
+
+  private evictExpiredTemplates(): void {
+    const now = Date.now()
+    for (const [key, entry] of this.templateCache) {
+      if (now - entry.at >= STATE_CACHE_TTL_MS) {
+        this.templateCache.delete(key)
+      }
+    }
+  }
+
+  private async renderTemplateRemote(template: string): Promise<string> {
+    const res = await fetch(`${this.baseUrl}/api/template`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ template }),
+    })
+    if (!res.ok) {
+      const body = await res.text()
+      throw new Error(
+        `HA renderTemplate failed: ${res.status} ${res.statusText} — ${body}`,
+      )
+    }
+    return res.text()
+  }
+
   private async callService(
     domain: string,
     service: string,
@@ -215,24 +478,6 @@ export class HADriver implements DeviceDriver {
     }
   }
 
-  private resolveBoolService(
-    serviceTemplate: string,
-    value: boolean,
-  ): [string, string] {
-    const dotIdx = serviceTemplate.indexOf('.')
-    const domain = dotIdx === -1 ? '' : serviceTemplate.slice(0, dotIdx)
-    const mapping = DOMAIN_SERVICES[domain]
-    const boolWord = mapping
-      ? value
-        ? mapping.on
-        : mapping.off
-      : value
-        ? 'on'
-        : 'off'
-    const resolved = serviceTemplate.replace(/\{value\}/g, boolWord)
-    return splitService(resolved)
-  }
-
   private inferBoolService(entityId: string, value: boolean): [string, string] {
     const domain = extractDomain(entityId)
     const mapping = DOMAIN_SERVICES[domain]
@@ -243,18 +488,92 @@ export class HADriver implements DeviceDriver {
   }
 }
 
-function splitService(service: string): [string, string] {
-  const dot = service.indexOf('.')
-  if (dot === -1)
-    throw new Error(
-      `Invalid service format: "${service}". Expected "domain.service".`,
-    )
-  return [service.slice(0, dot), service.slice(dot + 1)]
-}
-
 function extractDomain(entityId: string): string {
   const dot = entityId.indexOf('.')
   return dot === -1 ? entityId : entityId.slice(0, dot)
+}
+
+function templateCacheKey(template: string): string {
+  return createHash('sha256').update(template).digest('hex')
+}
+
+// A script called with return_response answers as
+// `{ <response_variable>: value }`; the variable name belongs to the script,
+// so a single-entry response is unwrapped to its value.
+function unwrapResponseVariable(result: unknown): unknown {
+  if (!isRecord(result)) return result
+  const keys = Object.keys(result)
+  if (keys.length === 1) return result[keys[0]!]
+  return result
+}
+
+function targetEntityIds(
+  target: Record<string, unknown> | undefined,
+): string[] {
+  if (!target) return []
+  const value = target['entity_id']
+  if (typeof value === 'string') return [value]
+  if (Array.isArray(value)) {
+    return value.filter((id): id is string => typeof id === 'string')
+  }
+  return []
+}
+
+// Translation of the compressed state keys used by subscribe_entities
+// (see processEvent in home-assistant-js-websocket) to REST state object keys.
+const COMPRESSED_STATE_KEYS: Record<string, string> = {
+  s: 'state',
+  a: 'attributes',
+  c: 'context',
+  lc: 'last_changed',
+  lu: 'last_updated',
+}
+
+function decompressState(
+  compressed: Record<string, unknown>,
+): Record<string, unknown> {
+  const state: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(compressed)) {
+    const target = COMPRESSED_STATE_KEYS[key]
+    if (target !== undefined) {
+      state[target] = value
+    }
+  }
+  return state
+}
+
+// Merges a `+`/`-` change delta onto a previously stored decompressed state.
+function applyStateDiff(state: Record<string, unknown>, diff: unknown): void {
+  if (!isRecord(diff)) return
+  const additions = diff['+']
+  if (isRecord(additions)) {
+    for (const [key, value] of Object.entries(additions)) {
+      const target = COMPRESSED_STATE_KEYS[key]
+      if (target === undefined) continue
+      if (target === 'attributes') {
+        if (!isRecord(value)) continue
+        const attributes = state['attributes']
+        state['attributes'] = {
+          ...(isRecord(attributes) ? attributes : {}),
+          ...value,
+        }
+      } else {
+        state[target] = value
+      }
+    }
+  }
+  const removals = diff['-']
+  if (isRecord(removals)) {
+    const attributeKeys = removals['a']
+    if (Array.isArray(attributeKeys)) {
+      const attributes = state['attributes']
+      if (isRecord(attributes)) {
+        for (const key of attributeKeys) {
+          if (typeof key === 'string') delete attributes[key]
+        }
+      }
+    }
+  }
 }
 
 function parseHaState(state: unknown): unknown {
