@@ -167,18 +167,12 @@ export class HADriver implements DeviceDriver {
       Record<string, HARawPropertyConfig> | undefined
     const raw = props?.[property]
     if (!raw) return undefined
-
-    let bindings = this.propertyBindings.get(deviceConfig)
-    if (!bindings) {
-      bindings = new Map()
-      this.propertyBindings.set(deviceConfig, bindings)
+    return {
+      raw,
+      binding: this.cached(this.propertyBindings, deviceConfig, property, () =>
+        normalizePropertyConfig(raw),
+      ),
     }
-    let binding = bindings.get(property)
-    if (!binding) {
-      binding = normalizePropertyConfig(raw)
-      bindings.set(property, binding)
-    }
-    return { raw, binding }
   }
 
   private actionStrategy(
@@ -186,17 +180,22 @@ export class HADriver implements DeviceDriver {
     action: string,
     raw: HARawActionConfig,
   ): HAActionStrategy {
-    let strategies = this.actionStrategies.get(deviceConfig)
-    if (!strategies) {
-      strategies = new Map()
-      this.actionStrategies.set(deviceConfig, strategies)
-    }
-    let strategy = strategies.get(action)
-    if (!strategy) {
-      strategy = normalizeActionConfig(raw)
-      strategies.set(action, strategy)
-    }
-    return strategy
+    return this.cached(this.actionStrategies, deviceConfig, action, () =>
+      normalizeActionConfig(raw),
+    )
+  }
+
+  private cached<T>(
+    cache: WeakMap<Record<string, unknown>, Map<string, T>>,
+    deviceConfig: Record<string, unknown>,
+    key: string,
+    create: () => T,
+  ): T {
+    let byKey = cache.get(deviceConfig)
+    if (!byKey) cache.set(deviceConfig, (byKey = new Map()))
+    let value = byKey.get(key)
+    if (!value) byKey.set(key, (value = create()))
+    return value
   }
 
   private async fetchState(
