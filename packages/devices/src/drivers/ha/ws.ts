@@ -83,6 +83,7 @@ export class HAWebSocketClient {
   start(): void {
     if (this.loop) return
     this.stopped = false
+    this.fatalError = null
     this.loop = this.runLoop().catch(() => {})
   }
 
@@ -160,7 +161,11 @@ export class HAWebSocketClient {
         const message = parseMessage(event.data)
         if (!message) return
         if (message.type === 'auth_required') {
-          ws.send(JSON.stringify({ type: 'auth', access_token: this.token }))
+          try {
+            ws.send(JSON.stringify({ type: 'auth', access_token: this.token }))
+          } catch {
+            fail(new Error('HA websocket connection lost during auth'))
+          }
           return
         }
         if (message.type === 'auth_ok') {
@@ -198,10 +203,10 @@ export class HAWebSocketClient {
     options: { returnResponse?: boolean } = {},
   ): Promise<unknown> {
     const message: Record<string, unknown> = {
+      ...payload,
       type: 'call_service',
       domain,
       service,
-      ...payload,
     }
     if (options.returnResponse === true) {
       message['return_response'] = true

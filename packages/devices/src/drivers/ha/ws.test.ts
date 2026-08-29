@@ -280,6 +280,25 @@ describe('HAWebSocketClient', () => {
       }
     })
 
+    it('should keep command fields stable against payload keys', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client, ws } = await connectClient()
+
+      const result = client.callService('notify', 'send', {
+        type: 'flow',
+        service: 'override',
+      })
+
+      expect(ws.lastSent()).toMatchObject({
+        type: 'call_service',
+        domain: 'notify',
+        service: 'send',
+      })
+      ws.serverMessage({ id: 1, type: 'result', success: true, result: null })
+      await expect(result).resolves.toBeNull()
+      await client.close()
+    })
+
     it('should correlate responses by command id', async () => {
       vi.stubGlobal('WebSocket', MockWebSocket)
       const { client, ws } = await connectClient()
