@@ -79,7 +79,9 @@ export function normalizePropertyBinding(raw: HARawPropertyConfig): HABinding {
     (typeof attribute === 'string' && attribute !== ''
       ? { kind: 'attribute', attribute }
       : { kind: 'state' })
-  const set = (record['set'] as HASetStrategy | undefined) ?? { kind: 'inferred' }
+  const set = (record['set'] as HASetStrategy | undefined) ?? {
+    kind: 'inferred',
+  }
   return { get, set }
 }
 

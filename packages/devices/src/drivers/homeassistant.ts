@@ -107,8 +107,7 @@ export class HADriver implements DeviceDriver {
         const state = await this.resolveState(entry.raw.entity, runtime)
         if (get.kind === 'attribute') {
           const attrs = state['attributes'] as
-            | Record<string, unknown>
-            | undefined
+            Record<string, unknown> | undefined
           return attrs?.[get.attribute] ?? null
         }
         return parseHaState(state['state'])
