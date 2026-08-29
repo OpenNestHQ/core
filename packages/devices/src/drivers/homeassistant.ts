@@ -4,7 +4,7 @@ import {
   normalizePropertyConfig,
   splitService,
 } from './ha/binding.js'
-import { validateDeviceBindings } from './ha/validate.js'
+import { isRecord, validateDeviceBindings } from './ha/validate.js'
 import { HAWebSocketClient, toHaWsUrl } from './ha/ws.js'
 import type { HAIncomingMessage } from './ha/ws.js'
 import type {
@@ -455,10 +455,6 @@ function applyStateDiff(
       }
     }
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function parseHaState(state: unknown): unknown {

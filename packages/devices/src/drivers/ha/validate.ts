@@ -275,6 +275,6 @@ function quote(value: unknown): string {
   return typeof value === 'string' ? `"${value}"` : String(value)
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

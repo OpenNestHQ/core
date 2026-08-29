@@ -378,11 +378,7 @@ export class HAWebSocketClient {
         if (message.success === true) {
           pending.resolve(message.result)
         } else {
-          const code = message.error?.code ?? 'unknown_error'
-          const detail = message.error?.message ?? 'no details'
-          pending.reject(
-            new Error(`HA websocket command failed: ${code} — ${detail}`),
-          )
+          pending.reject(commandError(message))
         }
         return
       }
@@ -395,11 +391,7 @@ export class HAWebSocketClient {
       if (message.success === true) {
         subscription.ack()
       } else {
-        const code = message.error?.code ?? 'unknown_error'
-        const detail = message.error?.message ?? 'no details'
-        subscription.ack(
-          new Error(`HA websocket command failed: ${code} — ${detail}`),
-        )
+        subscription.ack(commandError(message))
       }
       return
     }
@@ -478,6 +470,12 @@ function parseMessage(data: unknown): HAIncomingMessage | null {
   const message = parsed as HAIncomingMessage
   if (typeof message.type !== 'string') return null
   return message
+}
+
+function commandError(message: HAIncomingMessage): Error {
+  const code = message.error?.code ?? 'unknown_error'
+  const detail = message.error?.message ?? 'no details'
+  return new Error(`HA websocket command failed: ${code} — ${detail}`)
 }
 
 function sleep(ms: number): Promise<void> {
