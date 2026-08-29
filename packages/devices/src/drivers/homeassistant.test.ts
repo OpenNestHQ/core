@@ -674,4 +674,141 @@ describe('HADriver', () => {
       ).rejects.toThrow(/Invalid service format/)
     })
   })
+
+  describe('init binding validation', () => {
+    it('should reject an unknown get kind at init', async () => {
+      const driver = makeDriver()
+      await expect(
+        driver.init(GLOBAL_CONFIG, {
+          d1: {
+            properties: {
+              power: {
+                type: 'boolean',
+                entity: 'switch.test',
+                get: { kind: 'levitate' },
+              },
+            },
+          },
+        }),
+      ).rejects.toThrow(
+        /Invalid HA binding for device "d1", property "power": unknown get kind "levitate"/,
+      )
+    })
+
+    it('should reject a malformed set service at init', async () => {
+      const driver = makeDriver()
+      await expect(
+        driver.init(GLOBAL_CONFIG, {
+          d1: {
+            properties: {
+              volume: {
+                type: 'number',
+                entity: 'media_player.test',
+                set: { kind: 'service', service: 'volume_set' },
+              },
+            },
+          },
+        }),
+      ).rejects.toThrow(
+        /device "d1", property "volume".*invalid service format "volume_set"/,
+      )
+    })
+
+    it('should reject an orphan placeholder in an action at init', async () => {
+      const driver = makeDriver()
+      await expect(
+        driver.init(GLOBAL_CONFIG, {
+          d1: {
+            actions: {
+              boost: {
+                kind: 'script',
+                script: 'script.boost',
+                fields: { minutes: '$minuts' },
+                parameters: [{ name: 'minutes' }],
+              },
+            },
+          },
+        }),
+      ).rejects.toThrow(
+        /device "d1", action "boost".*orphan placeholder "\$minuts"/,
+      )
+    })
+
+    it('should reject an inevitable domain.unknown at init', async () => {
+      const driver = makeDriver()
+      await expect(
+        driver.init(GLOBAL_CONFIG, {
+          d1: {
+            properties: {
+              volume: {
+                type: 'number',
+                entity: 'media_player.test',
+                set: { kind: 'inferred' },
+              },
+            },
+          },
+        }),
+      ).rejects.toThrow(
+        /property "volume".*set strategy "inferred".*media_player\.unknown/,
+      )
+    })
+
+    it('should accept valid new format configs at init', async () => {
+      const driver = makeDriver()
+      await expect(
+        driver.init(GLOBAL_CONFIG, {
+          d1: {
+            properties: {
+              power: {
+                type: 'boolean',
+                entity: 'switch.test',
+                get: { kind: 'state' },
+                set: { kind: 'inferred' },
+              },
+              away: {
+                set: {
+                  kind: 'script',
+                  script: 'script.set_away',
+                  fields: { mode: '$value' },
+                },
+              },
+            },
+            actions: {
+              boost: {
+                kind: 'script',
+                script: 'script.boost',
+                fields: { minutes: '$minutes' },
+                parameters: [{ name: 'minutes', type: 'number' }],
+              },
+              play: {
+                kind: 'service',
+                service: 'media_player.media_play',
+                target: { entity_id: 'media_player.test' },
+              },
+            },
+          },
+        }),
+      ).resolves.toBeUndefined()
+    })
+
+    it('should leave old flat format configs unvalidated at init', async () => {
+      const driver = makeDriver()
+      await expect(
+        driver.init(GLOBAL_CONFIG, {
+          d1: {
+            properties: {
+              power: { entity: 'switch.test' },
+              broken: {
+                entity: 'switch.test',
+                set_service: 'bad_format_no_dot',
+              },
+            },
+            actions: {
+              play: { service: 'media_player.media_play' },
+            },
+          },
+        }),
+      ).resolves.toBeUndefined()
+    })
+  })
 })
