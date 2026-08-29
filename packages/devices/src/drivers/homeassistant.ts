@@ -1,7 +1,7 @@
 import type { DeviceDriver, DriverRuntimeContext } from './interface.js'
 import {
   normalizeActionConfig,
-  normalizePropertyConfig,
+  normalizePropertyBinding,
   splitService,
 } from './ha/binding.js'
 import { isRecord, validateDeviceBindings } from './ha/validate.js'
@@ -96,17 +96,22 @@ export class HADriver implements DeviceDriver {
     const entry = this.propertyEntry(deviceConfig, property)
     if (!entry) return null
 
-    const state = await this.resolveState(entry.raw.entity, runtime)
-
     const get = entry.binding.get
-    if (get.kind === 'attribute') {
-      const attrs = state['attributes'] as Record<string, unknown> | undefined
-      return attrs?.[get.attribute] ?? null
+    switch (get.kind) {
+      case 'state':
+      case 'attribute': {
+        const state = await this.resolveState(entry.raw.entity, runtime)
+        if (get.kind === 'attribute') {
+          const attrs = state['attributes'] as
+            | Record<string, unknown>
+            | undefined
+          return attrs?.[get.attribute] ?? null
+        }
+        return parseHaState(state['state'])
+      }
+      default:
+        throw new Error(`HA get strategy "${get.kind}" is not supported`)
     }
-    if (get.kind === 'state') {
-      return parseHaState(state['state'])
-    }
-    throw new Error(`HA get strategy "${get.kind}" is not supported`)
   }
 
   async setProperty(
@@ -199,7 +204,7 @@ export class HADriver implements DeviceDriver {
     return {
       raw,
       binding: this.cached(this.propertyBindings, deviceConfig, property, () =>
-        normalizePropertyConfig(raw),
+        normalizePropertyBinding(raw),
       ),
     }
   }

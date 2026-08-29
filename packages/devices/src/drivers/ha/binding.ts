@@ -63,6 +63,26 @@ export function normalizePropertyConfig(raw: HARawPropertyConfig): HABinding {
   return { get, set }
 }
 
+// Runtime mirror of validate.ts' discriminator: a property entry carrying
+// `get`/`set` keys is the strategy format and its nested strategies win; the
+// flat `attribute` field still feeds the get fallback (target schema keeps it
+// alongside a nested `set`), and missing sides default like the flat format
+// (state / inferred). Anything else is the legacy flat format.
+export function normalizePropertyBinding(raw: HARawPropertyConfig): HABinding {
+  const record = raw as unknown as Record<string, unknown>
+  if (!('get' in record || 'set' in record)) {
+    return normalizePropertyConfig(raw)
+  }
+  const attribute = record['attribute']
+  const get =
+    (record['get'] as HAGetStrategy | undefined) ??
+    (typeof attribute === 'string' && attribute !== ''
+      ? { kind: 'attribute', attribute }
+      : { kind: 'state' })
+  const set = (record['set'] as HASetStrategy | undefined) ?? { kind: 'inferred' }
+  return { get, set }
+}
+
 export function normalizeActionConfig(
   raw: HARawActionConfig,
 ): HAActionStrategy {

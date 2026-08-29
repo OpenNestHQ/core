@@ -176,6 +176,70 @@ describe('HADriver', () => {
         }),
       ).rejects.toThrow(/fetchState.*failed/)
     })
+
+    it('should honor a nested get strategy on new-format property configs', async () => {
+      mockFetch(url => {
+        expect(url).toContain('/api/states/media_player.test')
+        return jsonResponse({
+          state: 'playing',
+          attributes: { volume_level: 0.5 },
+        })
+      })
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'volume', {
+        properties: {
+          volume: {
+            entity: 'media_player.test',
+            get: { kind: 'attribute', attribute: 'volume_level' },
+          },
+        },
+      })
+
+      expect(value).toBe(0.5)
+    })
+
+    it('should default new-format properties to the state strategy', async () => {
+      mockFetch(url => {
+        expect(url).toContain('/api/states/switch.test')
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'power', {
+        properties: {
+          power: { entity: 'switch.test', set: { kind: 'inferred' } },
+        },
+      })
+
+      expect(value).toBe(true)
+    })
+
+    it('should keep the flat attribute field as the get fallback on new-format properties', async () => {
+      mockFetch(() =>
+        jsonResponse({
+          state: 'playing',
+          attributes: { volume_level: 0.7 },
+        }),
+      )
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'volume', {
+        properties: {
+          volume: {
+            entity: 'media_player.test',
+            attribute: 'volume_level',
+            set: {
+              kind: 'service',
+              service: 'media_player.volume_set',
+              key: 'volume_level',
+            },
+          },
+        },
+      })
+
+      expect(value).toBe(0.7)
+    })
   })
 
   describe('per-program state caching', () => {
