@@ -379,7 +379,7 @@ describe('HAWebSocketClient', () => {
       ws.serverMessage({ id: 1, type: 'result', success: true, result: null })
       await expect(subscribed).resolves.toBeUndefined()
 
-      const event = { type: 'subscribe_entities_complete', entities: {} }
+      const event = { a: { 'switch.test': { s: 'on', a: {}, c: 'ctx', lc: 1, lu: 1 } } }
       ws.serverMessage({ id: 1, type: 'event', event })
       expect(events).toHaveLength(1)
       expect(events[0]!.event).toEqual(event)

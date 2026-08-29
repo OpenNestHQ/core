@@ -238,33 +238,26 @@ export class HADriver implements DeviceDriver {
   private handleStateEvent(message: HAIncomingMessage): void {
     const event = message.event
     if (!isRecord(event)) return
-    if (event['type'] === 'subscribe_entities_complete') {
-      const entities = event['entities']
-      this.entityStates = isRecord(entities)
-        ? new Map(
-            Object.entries(entities).filter(
-              (entry): entry is [string, Record<string, unknown>] =>
-                isRecord(entry[1]),
-            ),
-          )
-        : new Map()
-      return
-    }
-    const add = event['add']
-    const update = event['update']
-    const remove = event['remove']
-    if (isRecord(add)) {
-      for (const [entityId, state] of Object.entries(add)) {
-        if (isRecord(state)) this.entityStates.set(entityId, state)
+    // Real HA subscribe_entities protocol (see processEvent in
+    // home-assistant-js-websocket): the initial dump and additions come as
+    // `a` (compressed states), changes as `c` (a `+`/`-` delta to merge onto
+    // the previous state, not a full state) and removals as `r` (id list).
+    if (isRecord(event['a'])) {
+      for (const [entityId, compressed] of Object.entries(event['a'])) {
+        if (isRecord(compressed)) {
+          this.entityStates.set(entityId, decompressState(compressed))
+        }
       }
     }
-    if (isRecord(update)) {
-      for (const [entityId, state] of Object.entries(update)) {
-        if (isRecord(state)) this.entityStates.set(entityId, state)
+    if (isRecord(event['c'])) {
+      for (const [entityId, diff] of Object.entries(event['c'])) {
+        const current = this.entityStates.get(entityId)
+        if (!current) continue
+        applyStateDiff(current, diff)
       }
     }
-    if (Array.isArray(remove)) {
-      for (const entityId of remove) {
+    if (Array.isArray(event['r'])) {
+      for (const entityId of event['r']) {
         if (typeof entityId === 'string') this.entityStates.delete(entityId)
       }
     }
@@ -371,6 +364,66 @@ export class HADriver implements DeviceDriver {
 function extractDomain(entityId: string): string {
   const dot = entityId.indexOf('.')
   return dot === -1 ? entityId : entityId.slice(0, dot)
+}
+
+// Translation of the compressed state keys used by subscribe_entities
+// (see processEvent in home-assistant-js-websocket) to REST state object keys.
+const COMPRESSED_STATE_KEYS: Record<string, string> = {
+  s: 'state',
+  a: 'attributes',
+  c: 'context',
+  lc: 'last_changed',
+  lu: 'last_updated',
+}
+
+function decompressState(
+  compressed: Record<string, unknown>,
+): Record<string, unknown> {
+  const state: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(compressed)) {
+    const target = COMPRESSED_STATE_KEYS[key]
+    if (target !== undefined) {
+      state[target] = value
+    }
+  }
+  return state
+}
+
+// Merges a `+`/`-` change delta onto a previously stored decompressed state.
+function applyStateDiff(
+  state: Record<string, unknown>,
+  diff: unknown,
+): void {
+  if (!isRecord(diff)) return
+  const additions = diff['+']
+  if (isRecord(additions)) {
+    for (const [key, value] of Object.entries(additions)) {
+      const target = COMPRESSED_STATE_KEYS[key]
+      if (target === undefined) continue
+      if (target === 'attributes') {
+        if (!isRecord(value)) continue
+        const attributes = state['attributes']
+        state['attributes'] = {
+          ...(isRecord(attributes) ? attributes : {}),
+          ...value,
+        }
+      } else {
+        state[target] = value
+      }
+    }
+  }
+  const removals = diff['-']
+  if (isRecord(removals)) {
+    const attributeKeys = removals['a']
+    if (Array.isArray(attributeKeys)) {
+      const attributes = state['attributes']
+      if (isRecord(attributes)) {
+        for (const key of attributeKeys) {
+          if (typeof key === 'string') delete attributes[key]
+        }
+      }
+    }
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

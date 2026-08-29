@@ -954,16 +954,23 @@ describe('HADriver', () => {
         return null
       }
 
-      completeDump(
+      addEntities(
         id: number,
         entities: Record<string, Record<string, unknown>>,
       ): void {
         this.serverMessage({ id, type: 'result', success: true, result: null })
-        this.serverMessage({
-          id,
-          type: 'event',
-          event: { type: 'subscribe_entities_complete', entities },
-        })
+        this.serverMessage({ id, type: 'event', event: { a: entities } })
+      }
+
+      changeEntities(
+        id: number,
+        changes: Record<string, Record<string, unknown>>,
+      ): void {
+        this.serverMessage({ id, type: 'event', event: { c: changes } })
+      }
+
+      removeEntities(id: number, entityIds: string[]): void {
+        this.serverMessage({ id, type: 'event', event: { r: entityIds } })
       }
     }
 
@@ -990,12 +997,17 @@ describe('HADriver', () => {
       properties: { power: { entity: 'switch.test' } },
     }
 
+    function compressed(
+      state: string,
+      attributes: Record<string, unknown> = {},
+    ): Record<string, unknown> {
+      return { s: state, a: attributes, c: 'ctx-1', lc: 1000, lu: 1000 }
+    }
+
     it('should serve the next get from the store after a push update without fetching', async () => {
       vi.stubGlobal('WebSocket', RealtimeWs)
       const { driver, ws, subId } = await initRealtimeDriver()
-      ws.completeDump(subId, {
-        'switch.test': { state: 'off', attributes: {} },
-      })
+      ws.addEntities(subId, { 'switch.test': compressed('off') })
 
       let fetchCount = 0
       mockFetch(() => {
@@ -1005,14 +1017,8 @@ describe('HADriver', () => {
 
       expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(false)
 
-      ws.serverMessage({
-        id: subId,
-        type: 'event',
-        event: {
-          add: {},
-          update: { 'switch.test': { state: 'on', attributes: {} } },
-          remove: [],
-        },
+      ws.changeEntities(subId, {
+        'switch.test': { '+': { s: 'on', lc: 2000, lu: 2000 } },
       })
 
       expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
@@ -1020,12 +1026,63 @@ describe('HADriver', () => {
       await driver.close()
     })
 
+    it('should merge attribute changes and removals from change deltas', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'media_player.test': compressed('playing', { volume_level: 0.7 }),
+      })
+
+      mockFetch(() => {
+        throw new Error('REST fallback should not be used')
+      })
+
+      const config = {
+        properties: {
+          volume: { entity: 'media_player.test', attribute: 'volume_level' },
+          source: { entity: 'media_player.test', attribute: 'source' },
+        },
+      }
+
+      expect(await driver.getProperty('d1', 'volume', config)).toBe(0.7)
+
+      ws.changeEntities(subId, {
+        'media_player.test': {
+          '+': { a: { volume_level: 0.9 } },
+          '-': { a: ['source'] },
+        },
+      })
+
+      expect(await driver.getProperty('d1', 'volume', config)).toBe(0.9)
+      expect(await driver.getProperty('d1', 'source', config)).toBeNull()
+      await driver.close()
+    })
+
+    it('should drop removed entities from the store and fall back to REST', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, { 'switch.test': compressed('off') })
+
+      let fetchCount = 0
+      mockFetch(() => {
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(false)
+      expect(fetchCount).toBe(0)
+
+      ws.removeEntities(subId, ['switch.test'])
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(fetchCount).toBe(1)
+      await driver.close()
+    })
+
     it('should fall back to REST when the socket is down', async () => {
       vi.stubGlobal('WebSocket', RealtimeWs)
       const { driver, ws, subId } = await initRealtimeDriver()
-      ws.completeDump(subId, {
-        'switch.test': { state: 'off', attributes: {} },
-      })
+      ws.addEntities(subId, { 'switch.test': compressed('off') })
 
       let fetchCount = 0
       mockFetch(() => {
@@ -1046,9 +1103,7 @@ describe('HADriver', () => {
     it('should fall back to REST when the entity is missing from the store', async () => {
       vi.stubGlobal('WebSocket', RealtimeWs)
       const { driver, ws, subId } = await initRealtimeDriver()
-      ws.completeDump(subId, {
-        'switch.other': { state: 'off', attributes: {} },
-      })
+      ws.addEntities(subId, { 'switch.other': compressed('off') })
 
       mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
 
@@ -1059,9 +1114,7 @@ describe('HADriver', () => {
     it('should store unavailable and unknown states as-is', async () => {
       vi.stubGlobal('WebSocket', RealtimeWs)
       const { driver, ws, subId } = await initRealtimeDriver()
-      ws.completeDump(subId, {
-        'switch.test': { state: 'unavailable', attributes: {} },
-      })
+      ws.addEntities(subId, { 'switch.test': compressed('unavailable') })
 
       mockFetch(() => {
         throw new Error('REST fallback should not be used')
@@ -1071,12 +1124,8 @@ describe('HADriver', () => {
         'unavailable',
       )
 
-      ws.serverMessage({
-        id: subId,
-        type: 'event',
-        event: {
-          update: { 'switch.test': { state: 'unknown', attributes: {} } },
-        },
+      ws.changeEntities(subId, {
+        'switch.test': { '+': { s: 'unknown' } },
       })
 
       expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(
@@ -1088,9 +1137,7 @@ describe('HADriver', () => {
     it('should not serve a stale store value after setProperty', async () => {
       vi.stubGlobal('WebSocket', RealtimeWs)
       const { driver, ws, subId } = await initRealtimeDriver()
-      ws.completeDump(subId, {
-        'switch.test': { state: 'off', attributes: {} },
-      })
+      ws.addEntities(subId, { 'switch.test': compressed('off') })
 
       mockFetch(url => {
         if (url.includes('/states/')) {
@@ -1110,9 +1157,7 @@ describe('HADriver', () => {
     it('should not serve a stale store value after executeAction', async () => {
       vi.stubGlobal('WebSocket', RealtimeWs)
       const { driver, ws, subId } = await initRealtimeDriver()
-      ws.completeDump(subId, {
-        'switch.test': { state: 'off', attributes: {} },
-      })
+      ws.addEntities(subId, { 'switch.test': compressed('off') })
 
       mockFetch(url => {
         if (url.includes('/states/')) {
@@ -1149,9 +1194,7 @@ describe('HADriver', () => {
         await vi.advanceTimersByTimeAsync(0)
         const subId = ws.subscribeId()
         expect(subId).not.toBeNull()
-        ws.completeDump(subId!, {
-          'switch.test': { state: 'off', attributes: {} },
-        })
+        ws.addEntities(subId!, { 'switch.test': compressed('off') })
 
         ws.close()
         await vi.advanceTimersByTimeAsync(1000)
@@ -1163,9 +1206,7 @@ describe('HADriver', () => {
         const subId2 = ws2.subscribeId()
         expect(subId2).not.toBeNull()
         expect(subId2).not.toBe(subId)
-        ws2.completeDump(subId2!, {
-          'switch.test': { state: 'on', attributes: {} },
-        })
+        ws2.addEntities(subId2!, { 'switch.test': compressed('on') })
 
         let fetchCount = 0
         mockFetch(() => {
