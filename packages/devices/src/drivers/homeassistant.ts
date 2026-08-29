@@ -232,7 +232,12 @@ export class HADriver implements DeviceDriver {
       ?.subscribe({ type: 'subscribe_entities' }, message =>
         this.handleStateEvent(message),
       )
-      .catch(() => {})
+      .catch((error: Error) => {
+        // The store stays empty and reads fall back to REST until the next
+        // reconnection re-subscribes; a retry would only matter if HA ever
+        // rejected subscribe_entities while keeping the socket up.
+        console.warn(`HA subscribe_entities failed: ${error.message}`)
+      })
   }
 
   private handleStateEvent(message: HAIncomingMessage): void {
