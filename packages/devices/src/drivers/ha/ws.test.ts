@@ -287,13 +287,30 @@ describe('HAWebSocketClient', () => {
       await client.close()
     })
 
-    it('should reject callService when the client is not connected', async () => {
+    it('should queue callService issued before the first connection', async () => {
       vi.stubGlobal('WebSocket', MockWebSocket)
       const client = new HAWebSocketClient({ url: URL, token: TOKEN })
+      const result = client.callService('switch', 'turn_on', {
+        entity_id: 'switch.test',
+      })
+      client.start()
 
-      await expect(client.callService('switch', 'turn_on', {})).rejects.toThrow(
-        /not connected/,
-      )
+      const ws = MockWebSocket.last()
+      ws.serverOpen()
+      ws.serverMessage({ type: 'auth_required' })
+      ws.serverMessage({ type: 'auth_ok' })
+      await Promise.resolve()
+
+      expect(ws.lastSent()).toMatchObject({
+        id: 1,
+        type: 'call_service',
+        domain: 'switch',
+        service: 'turn_on',
+        entity_id: 'switch.test',
+      })
+      ws.serverMessage({ id: 1, type: 'result', success: true, result: null })
+      await expect(result).resolves.toBeNull()
+      await client.close()
     })
 
     it('should reject callService after the client is closed', async () => {
@@ -304,6 +321,119 @@ describe('HAWebSocketClient', () => {
       await expect(client.callService('switch', 'turn_on', {})).rejects.toThrow(
         /closed/,
       )
+    })
+  })
+
+  describe('command queue', () => {
+    it('should flush commands queued during a reconnection on the new socket', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient({ reconnectBaseMs: 1000 })
+
+        ws.serverClose()
+        const result = client.callService(
+          'weather',
+          'get_forecasts',
+          { entity_id: 'weather.home' },
+          { returnResponse: true },
+        )
+        await vi.advanceTimersByTimeAsync(1000)
+
+        const ws2 = MockWebSocket.last()
+        expect(ws2).not.toBe(ws)
+        ws2.serverOpen()
+        ws2.serverMessage({ type: 'auth_required' })
+        ws2.serverMessage({ type: 'auth_ok' })
+        await Promise.resolve()
+
+        expect(ws2.lastSent()).toMatchObject({
+          id: 1,
+          type: 'call_service',
+          domain: 'weather',
+          service: 'get_forecasts',
+          entity_id: 'weather.home',
+          return_response: true,
+        })
+
+        const response = { 'weather.home': { forecast: [] } }
+        ws2.serverMessage({
+          id: 1,
+          type: 'result',
+          success: true,
+          result: response,
+        })
+        await expect(result).resolves.toEqual(response)
+        await client.close()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should keep queue order across multiple queued commands', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient({ reconnectBaseMs: 1000 })
+
+        ws.serverClose()
+        const first = client.callService('switch', 'turn_on', {})
+        const second = client.callService('light', 'turn_off', {})
+
+        await vi.advanceTimersByTimeAsync(1000)
+        const ws2 = MockWebSocket.last()
+        ws2.serverOpen()
+        ws2.serverMessage({ type: 'auth_required' })
+        ws2.serverMessage({ type: 'auth_ok' })
+        await Promise.resolve()
+
+        expect(ws2.sent.slice(1)).toHaveLength(2)
+        expect(JSON.parse(ws2.sent[1]!)).toMatchObject({ id: 1 })
+        expect(JSON.parse(ws2.sent[2]!)).toMatchObject({ id: 2 })
+
+        ws2.serverMessage({ id: 1, type: 'result', success: true, result: 'a' })
+        ws2.serverMessage({ id: 2, type: 'result', success: true, result: 'b' })
+        await expect(first).resolves.toBe('a')
+        await expect(second).resolves.toBe('b')
+        await client.close()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should reject queued commands when the client is closed', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client, ws } = await connectClient()
+
+      ws.serverClose()
+      const result = client.callService('switch', 'turn_on', {})
+      await client.close()
+
+      await expect(result).rejects.toThrow(/closed/)
+    })
+
+    it('should reject queued commands when re-auth is refused', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient({ reconnectBaseMs: 1000 })
+
+        ws.serverClose()
+        const result = client.callService('switch', 'turn_on', {})
+
+        await vi.advanceTimersByTimeAsync(1000)
+        const ws2 = MockWebSocket.last()
+        ws2.serverOpen()
+        ws2.serverMessage({ type: 'auth_required' })
+        ws2.serverMessage({
+          type: 'auth_invalid',
+          message: 'Invalid access token',
+        })
+
+        await expect(result).rejects.toThrow(/Invalid access token/)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 

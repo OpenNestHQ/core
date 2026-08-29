@@ -34,6 +34,11 @@ interface PendingCommand {
   timer: ReturnType<typeof setTimeout> | undefined
 }
 
+interface QueuedCommand {
+  start: () => void
+  reject: (error: Error) => void
+}
+
 type WsState = 'idle' | 'connecting' | 'ready' | 'stopped'
 
 export class HAWebSocketClient {
@@ -54,6 +59,7 @@ export class HAWebSocketClient {
   private attempts = 0
 
   private readonly pending = new Map<number, PendingCommand>()
+  private readonly queue: QueuedCommand[] = []
   private readonly readyWaiters: Array<(error?: Error) => void> = []
   private readonly closeWaiters: Array<() => void> = []
   private connectFail: ((error: Error) => void) | null = null
@@ -105,6 +111,7 @@ export class HAWebSocketClient {
         this.state = 'ready'
         this.notifyReady()
         this.startHeartbeat()
+        this.flushQueue()
         await this.awaitClose()
       } catch (error) {
         if (error instanceof HAWsAuthError) {
@@ -206,7 +213,14 @@ export class HAWebSocketClient {
     if (this.state === 'ready') {
       return this.send(message)
     }
-    return Promise.reject(new Error('HA websocket is not connected'))
+    return new Promise((resolve, reject) => {
+      this.queue.push({
+        start: () => {
+          this.send(message).then(resolve, reject)
+        },
+        reject,
+      })
+    })
   }
 
   private send(message: Record<string, unknown>): Promise<unknown> {
@@ -237,12 +251,25 @@ export class HAWebSocketClient {
     })
   }
 
+  private flushQueue(): void {
+    for (const queued of this.queue.splice(0)) {
+      queued.start()
+    }
+  }
+
+  private rejectQueue(error: Error): void {
+    for (const queued of this.queue.splice(0)) {
+      queued.reject(error)
+    }
+  }
+
   private teardown(reason: Error, fatal: boolean): void {
     this.stopped = true
     this.state = 'stopped'
     if (fatal) this.fatalError = reason
     this.stopHeartbeat()
     this.rejectReadyWaiters(reason)
+    this.rejectQueue(reason)
     this.teardownSocket()
     const connectFail = this.connectFail
     this.connectFail = null
