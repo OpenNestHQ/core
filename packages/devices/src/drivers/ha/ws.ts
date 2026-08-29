@@ -19,13 +19,14 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
 const DEFAULT_RECONNECT_BASE_MS = 1000
 const DEFAULT_RECONNECT_MAX_MS = 30_000
 
-interface HAIncomingMessage {
+export interface HAIncomingMessage {
   type: string
   id?: number
   success?: boolean
   result?: unknown
   error?: { code: string; message: string }
   message?: string
+  event?: unknown
 }
 
 interface PendingCommand {
@@ -37,6 +38,12 @@ interface PendingCommand {
 interface QueuedCommand {
   start: () => void
   reject: (error: Error) => void
+}
+
+interface Subscription {
+  onEvent: (message: HAIncomingMessage) => void
+  ack: (error?: Error) => void
+  timer: ReturnType<typeof setTimeout> | undefined
 }
 
 type WsState = 'idle' | 'connecting' | 'ready' | 'stopped'
@@ -63,8 +70,10 @@ export class HAWebSocketClient {
   private attempts = 0
 
   private readonly pending = new Map<number, PendingCommand>()
+  private readonly subscriptions = new Map<number, Subscription>()
   private readonly queue: QueuedCommand[] = []
   private readonly readyWaiters: Array<(error?: Error) => void> = []
+  private readonly readyCallbacks: Array<() => void> = []
   private readonly closeWaiters: Array<() => void> = []
   private connectFail: ((error: Error) => void) | null = null
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined
@@ -105,6 +114,59 @@ export class HAWebSocketClient {
         if (error) reject(error)
         else resolve()
       })
+    })
+  }
+
+  isReady(): boolean {
+    return this.state === 'ready'
+  }
+
+  onReady(callback: () => void): void {
+    this.readyCallbacks.push(callback)
+  }
+
+  subscribe(
+    message: Record<string, unknown>,
+    onEvent: (message: HAIncomingMessage) => void,
+  ): Promise<void> {
+    const ws = this.ws
+    if (!ws || this.state !== 'ready') {
+      return Promise.reject(new Error('HA websocket is not connected'))
+    }
+    const id = this.nextId++
+    return new Promise((resolve, reject) => {
+      const subscription: Subscription = {
+        onEvent,
+        timer: undefined,
+        ack: (error?: Error) => {
+          if (subscription.timer !== undefined) {
+            clearTimeout(subscription.timer)
+            subscription.timer = undefined
+          }
+          if (error) {
+            this.subscriptions.delete(id)
+            reject(error)
+          } else {
+            resolve()
+          }
+        },
+      }
+      subscription.timer = setTimeout(() => {
+        subscription.ack(
+          new Error(
+            `HA websocket command "${String(message['type'])}" timed out after ${this.commandTimeoutMs}ms`,
+          ),
+        )
+      }, this.commandTimeoutMs)
+      unrefTimer(subscription.timer)
+      this.subscriptions.set(id, subscription)
+      try {
+        ws.send(JSON.stringify({ id, ...message }))
+      } catch (error) {
+        subscription.ack(
+          error instanceof Error ? error : new Error(String(error)),
+        )
+      }
     })
   }
 
@@ -191,6 +253,7 @@ export class HAWebSocketClient {
         if (this.state === 'ready') this.state = 'connecting'
         fail(new Error('HA websocket connection closed during handshake'))
         this.rejectPending(new Error('HA websocket connection lost'))
+        this.clearSubscriptions(new Error('HA websocket connection lost'))
         this.notifyClosed()
       }
     })
@@ -280,6 +343,7 @@ export class HAWebSocketClient {
     this.stopHeartbeat()
     this.rejectReadyWaiters(reason)
     this.rejectQueue(reason)
+    this.clearSubscriptions(reason)
     this.teardownSocket()
     const connectFail = this.connectFail
     this.connectFail = null
@@ -307,22 +371,45 @@ export class HAWebSocketClient {
     const message = parseMessage(data)
     if (!message || message.id === undefined) return
     const pending = this.pending.get(message.id)
-    if (!pending) return
-    this.pending.delete(message.id)
-    this.clearPendingTimer(pending)
+    if (pending) {
+      this.pending.delete(message.id)
+      this.clearPendingTimer(pending)
+      if (message.type === 'result') {
+        if (message.success === true) {
+          pending.resolve(message.result)
+        } else {
+          const code = message.error?.code ?? 'unknown_error'
+          const detail = message.error?.message ?? 'no details'
+          pending.reject(
+            new Error(`HA websocket command failed: ${code} — ${detail}`),
+          )
+        }
+        return
+      }
+      pending.resolve(message)
+      return
+    }
+    const subscription = this.subscriptions.get(message.id)
+    if (!subscription) return
     if (message.type === 'result') {
       if (message.success === true) {
-        pending.resolve(message.result)
+        subscription.ack()
       } else {
         const code = message.error?.code ?? 'unknown_error'
         const detail = message.error?.message ?? 'no details'
-        pending.reject(
+        subscription.ack(
           new Error(`HA websocket command failed: ${code} — ${detail}`),
         )
       }
       return
     }
-    pending.resolve(message)
+    subscription.onEvent(message)
+  }
+
+  private clearSubscriptions(error: Error): void {
+    for (const subscription of this.subscriptions.values()) {
+      subscription.ack(error)
+    }
   }
 
   private rejectPending(error: Error): void {
@@ -351,6 +438,7 @@ export class HAWebSocketClient {
   }
 
   private notifyReady(): void {
+    for (const callback of this.readyCallbacks) callback()
     for (const waiter of this.readyWaiters.splice(0)) waiter()
   }
 

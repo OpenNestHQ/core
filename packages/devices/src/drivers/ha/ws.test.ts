@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { HAWebSocketClient, HAWsAuthError } from './ws.js'
+import type { HAIncomingMessage } from './ws.js'
 
 const URL = 'ws://ha.local:8123/api/websocket'
 const TOKEN = 'tok-123'
@@ -358,6 +359,105 @@ describe('HAWebSocketClient', () => {
       await expect(client.callService('switch', 'turn_on', {})).rejects.toThrow(
         /closed/,
       )
+    })
+  })
+
+  describe('subscriptions', () => {
+    it('should ack the subscribe command and keep forwarding events', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client, ws } = await connectClient()
+
+      const events: HAIncomingMessage[] = []
+      const subscribed = client.subscribe(
+        { type: 'subscribe_entities' },
+        message => {
+          events.push(message)
+        },
+      )
+      expect(ws.lastSent()).toEqual({ id: 1, type: 'subscribe_entities' })
+
+      ws.serverMessage({ id: 1, type: 'result', success: true, result: null })
+      await expect(subscribed).resolves.toBeUndefined()
+
+      const event = { type: 'subscribe_entities_complete', entities: {} }
+      ws.serverMessage({ id: 1, type: 'event', event })
+      expect(events).toHaveLength(1)
+      expect(events[0]!.event).toEqual(event)
+      await client.close()
+    })
+
+    it('should reject the subscription on an error ack and stop its events', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client, ws } = await connectClient()
+
+      const events: HAIncomingMessage[] = []
+      const subscribed = client.subscribe(
+        { type: 'subscribe_entities' },
+        message => {
+          events.push(message)
+        },
+      )
+      ws.serverMessage({
+        id: 1,
+        type: 'result',
+        success: false,
+        error: { code: 'unknown_command', message: 'nope' },
+      })
+      await expect(subscribed).rejects.toThrow(/unknown_command.*nope/s)
+
+      ws.serverMessage({ id: 1, type: 'event', event: { add: {} } })
+      expect(events).toHaveLength(0)
+      await client.close()
+    })
+
+    it('should reject the subscription when the ack times out', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client } = await connectClient({ commandTimeoutMs: 5000 })
+
+        const subscribed = client.subscribe(
+          { type: 'subscribe_entities' },
+          () => {},
+        )
+        const expectation = expect(subscribed).rejects.toThrow(
+          /timed out after 5000ms/,
+        )
+        await vi.advanceTimersByTimeAsync(5000)
+        await expectation
+        await client.close()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('should stop delivering events once the socket drops', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client, ws } = await connectClient()
+
+      const events: HAIncomingMessage[] = []
+      const subscribed = client.subscribe(
+        { type: 'subscribe_entities' },
+        message => {
+          events.push(message)
+        },
+      )
+      ws.serverMessage({ id: 1, type: 'result', success: true, result: null })
+      await subscribed
+
+      ws.serverClose()
+      ws.serverMessage({ id: 1, type: 'event', event: { add: {} } })
+      expect(events).toHaveLength(0)
+      await client.close()
+    })
+
+    it('should reject subscribe when the client is not connected', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const client = new HAWebSocketClient({ url: URL, token: TOKEN })
+
+      await expect(
+        client.subscribe({ type: 'subscribe_entities' }, () => {}),
+      ).rejects.toThrow(/not connected/)
     })
   })
 
