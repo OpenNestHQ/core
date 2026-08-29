@@ -11,6 +11,7 @@ import type { HAIncomingMessage } from './ha/ws.js'
 import type {
   HAActionStrategy,
   HABinding,
+  HAGetStrategy,
   HARawActionConfig,
   HARawPropertyConfig,
 } from './ha/binding.js'
@@ -91,7 +92,7 @@ export class HADriver implements DeviceDriver {
   }
 
   async getProperty(
-    _deviceId: string,
+    deviceId: string,
     property: string,
     deviceConfig: Record<string, unknown>,
     runtime?: DriverRuntimeContext,
@@ -114,8 +115,32 @@ export class HADriver implements DeviceDriver {
       }
       case 'template':
         return this.renderTemplate(get.template, runtime)
-      default:
-        throw new Error(`HA get strategy "${get.kind}" is not supported`)
+      case 'script': {
+        const result = await this.wsServiceResponse(
+          'script',
+          'turn_on',
+          { entity_id: get.script },
+          'script',
+          deviceId,
+          property,
+        )
+        return unwrapResponseVariable(result)
+      }
+      case 'service_response': {
+        const [domain, service] = splitService(get.service)
+        return this.wsServiceResponse(
+          domain,
+          service,
+          get.fields ?? {},
+          'service_response',
+          deviceId,
+          property,
+        )
+      }
+      default: {
+        const unknownKind = (get as HAGetStrategy).kind
+        throw new Error(`HA get strategy "${unknownKind}" is not supported`)
+      }
     }
   }
 
@@ -276,6 +301,27 @@ export class HADriver implements DeviceDriver {
         if (typeof entityId === 'string') this.entityStates.delete(entityId)
       }
     }
+  }
+
+  // Service responses only exist over the websocket (`return_response`), so a
+  // down socket fails explicitly instead of falling back to REST like reads.
+  private wsServiceResponse(
+    domain: string,
+    service: string,
+    payload: Record<string, unknown>,
+    strategy: string,
+    deviceId: string,
+    property: string,
+  ): Promise<unknown> {
+    const client = this.wsClient
+    if (!client || !client.isReady()) {
+      throw new Error(
+        `HA get strategy "${strategy}" for device "${deviceId}", property "${property}" requires the HA websocket, which is not connected (service responses have no REST fallback)`,
+      )
+    }
+    return client.callService(domain, service, payload, {
+      returnResponse: true,
+    })
   }
 
   // State resolution chain, most to least preferred:
@@ -450,6 +496,16 @@ function extractDomain(entityId: string): string {
 
 function templateCacheKey(template: string): string {
   return createHash('sha256').update(template).digest('hex')
+}
+
+// A script called with return_response answers as
+// `{ <response_variable>: value }`; the variable name belongs to the script,
+// so a single-entry response is unwrapped to its value.
+function unwrapResponseVariable(result: unknown): unknown {
+  if (!isRecord(result)) return result
+  const keys = Object.keys(result)
+  if (keys.length === 1) return result[keys[0]!]
+  return result
 }
 
 function targetEntityIds(

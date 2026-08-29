@@ -365,6 +365,238 @@ describe('HADriver', () => {
     })
   })
 
+  describe('getProperty — websocket strategies', () => {
+    class ServiceWs {
+      static instances: ServiceWs[] = []
+
+      static reset(): void {
+        ServiceWs.instances = []
+      }
+
+      static last(): ServiceWs {
+        return ServiceWs.instances[ServiceWs.instances.length - 1]!
+      }
+
+      readonly url: string
+      readyState = 0
+      sent: string[] = []
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: unknown }) => void) | null = null
+      onerror: (() => void) | null = null
+      onclose: (() => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        ServiceWs.instances.push(this)
+      }
+
+      send(data: string): void {
+        this.sent.push(data)
+      }
+
+      close(): void {
+        this.readyState = 3
+        this.onclose?.()
+      }
+
+      serverOpen(): void {
+        this.readyState = 1
+        this.onopen?.()
+      }
+
+      serverMessage(message: unknown): void {
+        this.onmessage?.({ data: JSON.stringify(message) })
+      }
+
+      connect(): void {
+        this.serverOpen()
+        this.serverMessage({ type: 'auth_required' })
+        this.serverMessage({ type: 'auth_ok' })
+      }
+
+      subscribeId(): number | null {
+        return this.lastMessageId('subscribe_entities')
+      }
+
+      callId(): number | null {
+        return this.lastMessageId('call_service')
+      }
+
+      respond(id: number, result: unknown): void {
+        this.serverMessage({ id, type: 'result', success: true, result })
+      }
+
+      lastSent(): Record<string, unknown> {
+        return JSON.parse(this.sent[this.sent.length - 1]!) as Record<
+          string,
+          unknown
+        >
+      }
+
+      private lastMessageId(type: string): number | null {
+        let id: number | null = null
+        for (const raw of this.sent) {
+          const message = JSON.parse(raw) as { type?: string; id?: number }
+          if (message.type === type) id = message.id ?? null
+        }
+        return id
+      }
+    }
+
+    afterEach(() => {
+      ServiceWs.reset()
+    })
+
+    async function initServiceDriver(): Promise<{
+      driver: HADriver
+      ws: ServiceWs
+    }> {
+      const driver = makeDriver()
+      await driver.init(GLOBAL_CONFIG)
+      const ws = ServiceWs.last()
+      ws.connect()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      const subId = ws.subscribeId()
+      expect(subId).not.toBeNull()
+      ws.respond(subId!, null)
+      return { driver, ws }
+    }
+
+    it('should return the script response variable over the websocket', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+      mockFetch(() => {
+        throw new Error('no REST fallback for service responses')
+      })
+
+      const config = {
+        properties: {
+          summary: {
+            get: { kind: 'script', script: 'script.daily_summary' },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'summary', config)
+
+      const callId = ws.callId()
+      expect(callId).not.toBeNull()
+      expect(ws.lastSent()).toEqual({
+        id: callId,
+        type: 'call_service',
+        domain: 'script',
+        service: 'turn_on',
+        entity_id: 'script.daily_summary',
+        return_response: true,
+      })
+      ws.respond(callId!, { summary: { total: 3 } })
+
+      await expect(pending).resolves.toEqual({ total: 3 })
+      await driver.close()
+    })
+
+    it('should return the raw script response when it is not a single response variable', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+
+      const config = {
+        properties: {
+          summary: {
+            get: { kind: 'script', script: 'script.daily_summary' },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'summary', config)
+      ws.respond(ws.callId()!, { a: 1, b: 2 })
+
+      await expect(pending).resolves.toEqual({ a: 1, b: 2 })
+      await driver.close()
+    })
+
+    it('should call the declared service and return its response', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+      mockFetch(() => {
+        throw new Error('no REST fallback for service responses')
+      })
+
+      const config = {
+        properties: {
+          forecast: {
+            get: {
+              kind: 'service_response',
+              service: 'weather.get_forecasts',
+              fields: { entity_id: 'weather.home' },
+            },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'forecast', config)
+
+      const callId = ws.callId()
+      expect(callId).not.toBeNull()
+      expect(ws.lastSent()).toEqual({
+        id: callId,
+        type: 'call_service',
+        domain: 'weather',
+        service: 'get_forecasts',
+        entity_id: 'weather.home',
+        return_response: true,
+      })
+      const response = { 'weather.home': { forecast: ['sunny'] } }
+      ws.respond(callId!, response)
+
+      await expect(pending).resolves.toEqual(response)
+      await driver.close()
+    })
+
+    it('should throw an explicit error when the socket is down for a script get', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const driver = makeDriver()
+      await driver.init(GLOBAL_CONFIG)
+      mockFetch(() => {
+        throw new Error('no REST fallback for service responses')
+      })
+
+      const config = {
+        properties: {
+          summary: {
+            get: { kind: 'script', script: 'script.daily_summary' },
+          },
+        },
+      }
+      await expect(driver.getProperty('d1', 'summary', config)).rejects.toThrow(
+        /strategy "script".*device "d1".*property "summary".*websocket.*not connected.*no REST fallback/s,
+      )
+      await driver.close()
+    })
+
+    it('should throw an explicit error when the socket is down for a service_response get', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const driver = makeDriver()
+      await driver.init(GLOBAL_CONFIG)
+      mockFetch(() => {
+        throw new Error('no REST fallback for service responses')
+      })
+
+      const config = {
+        properties: {
+          forecast: {
+            get: {
+              kind: 'service_response',
+              service: 'weather.get_forecasts',
+            },
+          },
+        },
+      }
+      await expect(
+        driver.getProperty('d1', 'forecast', config),
+      ).rejects.toThrow(
+        /strategy "service_response".*device "d1".*property "forecast".*websocket.*not connected/s,
+      )
+      await driver.close()
+    })
+  })
+
   describe('per-program state caching', () => {
     const deviceConfig = {
       properties: { power: { entity: 'switch.test' } },
