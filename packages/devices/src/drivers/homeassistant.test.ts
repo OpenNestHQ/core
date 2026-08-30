@@ -355,13 +355,79 @@ describe('HADriver', () => {
       }
     })
 
+    it('should dedupe concurrent renders of the same template into one call', async () => {
+      let fetchCount = 0
+      mockFetch(async () => {
+        fetchCount++
+        await new Promise(resolve => setTimeout(resolve, 5))
+        return new Response('rendered', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const config = templateConfig('{{ a }}')
+
+      const [first, second] = await Promise.all([
+        driver.getProperty('d1', 'label', config),
+        driver.getProperty('d1', 'label', config),
+      ])
+
+      expect(first).toBe('rendered')
+      expect(second).toBe('rendered')
+      expect(fetchCount).toBe(1)
+    })
+
+    it('should retry a template render after a concurrent failure', async () => {
+      let calls = 0
+      mockFetch(async () => {
+        calls++
+        if (calls === 1) return textResponse('boom', 500)
+        return new Response('ok', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const config = templateConfig('{{ a }}')
+
+      const first = driver.getProperty('d1', 'label', config)
+      const second = driver.getProperty('d1', 'label', config)
+      await expect(first).rejects.toThrow(/renderTemplate failed/)
+      await expect(second).rejects.toThrow(/renderTemplate failed/)
+
+      const third = await driver.getProperty('d1', 'label', config)
+      expect(third).toBe('ok')
+      expect(calls).toBe(2)
+    })
+
+    it('should cache a joined render for the caller declaring a program', async () => {
+      let fetchCount = 0
+      mockFetch(async () => {
+        fetchCount++
+        await new Promise(resolve => setTimeout(resolve, 5))
+        return new Response('rendered', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const config = templateConfig('{{ a }}')
+
+      const withoutRuntime = driver.getProperty('d1', 'label', config)
+      const withRuntime = driver.getProperty('d1', 'label', config, {
+        programId: 'program-1',
+      })
+      await Promise.all([withoutRuntime, withRuntime])
+      expect(fetchCount).toBe(1)
+
+      await driver.getProperty('d1', 'label', config, {
+        programId: 'program-1',
+      })
+      expect(fetchCount).toBe(1)
+    })
+
     it('should throw with the HA response body on template failure', async () => {
       mockFetch(() => textResponse('template error', 400))
 
       const driver = await initDriver()
       await expect(
         driver.getProperty('d1', 'label', templateConfig('{{ a }}')),
-      ).rejects.toThrow(/renderTemplate failed.*template error/s)
+      ).rejects.toThrow(/renderTemplate failed for "{{ a }}".*template error/s)
     })
   })
 
@@ -424,6 +490,15 @@ describe('HADriver', () => {
 
       respond(id: number, result: unknown): void {
         this.serverMessage({ id, type: 'result', success: true, result })
+      }
+
+      errorRespond(id: number, code: string, message: string): void {
+        this.serverMessage({
+          id,
+          type: 'result',
+          success: false,
+          error: { code, message },
+        })
       }
 
       lastSent(): Record<string, unknown> {
@@ -593,6 +668,65 @@ describe('HADriver', () => {
       ).rejects.toThrow(
         /strategy "service_response".*device "d1".*property "forecast".*websocket.*not connected/s,
       )
+      await driver.close()
+    })
+
+    it('should wrap mid-flight ws failures with strategy/device/property context', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+
+      const config = {
+        properties: {
+          summary: {
+            get: { kind: 'script', script: 'script.daily_summary' },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'summary', config)
+
+      const callId = ws.callId()
+      expect(callId).not.toBeNull()
+      ws.errorRespond(callId!, 'unauthorized', 'connection lost')
+
+      await expect(pending).rejects.toThrow(
+        /strategy "script".*device "d1".*property "summary".*failed:.*connection lost/s,
+      )
+      await driver.close()
+    })
+
+    it('should call service_response get with empty fields payload when fields is absent', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+      mockFetch(() => {
+        throw new Error('no REST fallback for service responses')
+      })
+
+      const config = {
+        properties: {
+          forecast: {
+            get: {
+              kind: 'service_response',
+              service: 'weather.get_forecasts',
+            },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'forecast', config)
+
+      const callId = ws.callId()
+      expect(callId).not.toBeNull()
+      expect(ws.lastSent()).toEqual({
+        id: callId,
+        type: 'call_service',
+        domain: 'weather',
+        service: 'get_forecasts',
+        return_response: true,
+      })
+      ws.respond(callId!, { 'weather.home': { forecast: ['sunny'] } })
+
+      await expect(pending).resolves.toEqual({
+        'weather.home': { forecast: ['sunny'] },
+      })
       await driver.close()
     })
   })
@@ -911,6 +1045,98 @@ describe('HADriver', () => {
     })
   })
 
+  describe('setProperty — set strategies', () => {
+    it('should call the declared service with the value under the declared key', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: '50' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.setProperty('d1', 'volume', 75, {
+        properties: {
+          volume: {
+            entity: 'media_player.test',
+            set: {
+              kind: 'service',
+              service: 'media_player.volume_set',
+              key: 'volume_level',
+            },
+          },
+        },
+      })
+
+      expect(calls[0]!.url).toContain('/api/services/media_player/volume_set')
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'media_player.test',
+        volume_level: 75,
+      })
+    })
+
+    it('should merge a declared target into the set service payload', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: '50' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.setProperty('d1', 'volume', 40, {
+        properties: {
+          volume: {
+            entity: 'media_player.test',
+            set: {
+              kind: 'service',
+              service: 'media_player.volume_set',
+              key: 'volume_level',
+              target: { entity_id: 'media_player.other' },
+            },
+          },
+        },
+      })
+
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'media_player.other',
+        volume_level: 40,
+      })
+    })
+
+    it('should call the declared script with $value interpolated in fields', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: 'off' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.setProperty('d1', 'away', 'vacation', {
+        properties: {
+          away: {
+            entity: 'climate.salon',
+            set: {
+              kind: 'script',
+              script: 'script.set_away',
+              fields: { mode: '$value', note: 'declared' },
+            },
+          },
+        },
+      })
+
+      expect(calls[0]!.url).toContain('/api/services/script/turn_on')
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'script.set_away',
+        fields: { mode: 'vacation', note: 'declared' },
+      })
+    })
+  })
+
   describe('executeAction', () => {
     it('should call a service from action config', async () => {
       const calls: { url: string; body: string }[] = []
@@ -1008,6 +1234,230 @@ describe('HADriver', () => {
       await expect(
         driver.executeAction('d1', 'play', {}, {}),
       ).resolves.toBeUndefined()
+    })
+  })
+
+  describe('executeAction — script strategy', () => {
+    it('should call the declared script with the args interpolated in fields', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: 'on' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.executeAction(
+        'd1',
+        'boost',
+        { minutes: 5 },
+        {
+          actions: {
+            boost: {
+              kind: 'script',
+              script: 'script.boost',
+              fields: { minutes: '$minutes', mode: 'turbo' },
+            },
+          },
+        },
+      )
+
+      expect(calls).toHaveLength(1)
+      expect(calls[0]!.url).toContain('/api/services/script/turn_on')
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'script.boost',
+        fields: { minutes: 5, mode: 'turbo' },
+      })
+    })
+
+    it('should interpolate nested placeholders and omit missing optional args', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: 'on' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.executeAction(
+        'd1',
+        'boost',
+        { minutes: 5 },
+        {
+          actions: {
+            boost: {
+              kind: 'script',
+              script: 'script.boost',
+              fields: {
+                minutes: '$minutes',
+                opts: { factor: '$factor', fixed: true },
+              },
+            },
+          },
+        },
+      )
+
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'script.boost',
+        fields: { minutes: 5, opts: { fixed: true } },
+      })
+    })
+  })
+
+  describe('executeAction — argument validation', () => {
+    const fetchSentinel = () => {
+      mockFetch(() => {
+        throw new Error('HA must not be called')
+      })
+    }
+
+    it('should reject a missing required argument before any HA call', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'boost',
+          {},
+          {
+            actions: {
+              boost: {
+                kind: 'script',
+                script: 'script.boost',
+                fields: { minutes: '$minutes' },
+                parameters: [
+                  { name: 'minutes', type: 'number', required: true },
+                ],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(
+        /Missing argument "minutes".*action "boost".*device "d1".*required/s,
+      )
+    })
+
+    it('should reject an argument outside the declared values', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'set_mode',
+          { mode: 'turbo' },
+          {
+            actions: {
+              set_mode: {
+                service: 'climate.set_operation_mode',
+                parameters: [
+                  { name: 'mode', type: 'enum', values: ['eco', 'boost'] },
+                ],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(/must be one of "eco", "boost" \(got "turbo"\)/)
+    })
+
+    it('should reject an argument outside the declared range', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'boost',
+          { minutes: 120 },
+          {
+            actions: {
+              boost: {
+                kind: 'script',
+                script: 'script.boost',
+                fields: { minutes: '$minutes' },
+                parameters: [
+                  { name: 'minutes', type: 'number', range: [1, 60] },
+                ],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(/must be between 1 and 60 \(got 120\)/)
+    })
+
+    it('should reject an argument with the wrong type', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'announce',
+          { message: 42 },
+          {
+            actions: {
+              announce: {
+                service: 'tts.speak',
+                parameters: [{ name: 'message', type: 'string' }],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(/"message".*must be a string \(got 42\)/)
+    })
+
+    it('should accept declared arguments that satisfy the contract', async () => {
+      const calls: { url: string }[] = []
+      mockFetch(url => {
+        if (url.includes('/states/')) return jsonResponse({ state: 'on' })
+        calls.push({ url })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.executeAction(
+        'd1',
+        'boost',
+        { on: true, minutes: 5 },
+        {
+          actions: {
+            boost: {
+              service: 'switch.turn_on',
+              target: { entity_id: 'switch.test' },
+              parameters: [
+                { name: 'on', type: 'power', required: true },
+                { name: 'minutes', type: 'number', range: [1, 60] },
+              ],
+            },
+          },
+        },
+      )
+
+      expect(calls).toHaveLength(1)
+    })
+
+    it('should validate args of legacy flat service actions too', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'announce',
+          {},
+          {
+            actions: {
+              announce: {
+                service: 'tts.speak',
+                parameters: [{ name: 'message', required: true }],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(/Missing argument "message"/)
     })
   })
 
@@ -1634,6 +2084,119 @@ describe('HADriver', () => {
       }
       expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
       expect(fetchCount).toBe(1)
+      await driver.close()
+    })
+
+    it('should clear the whole store after a set by script (unknown scope)', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'switch.test': compressed('off'),
+        'switch.other': compressed('on'),
+      })
+
+      let fetchCount = 0
+      mockFetch(url => {
+        if (!url.includes('/states/')) return jsonResponse([])
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const scriptConfig = {
+        properties: {
+          power: {
+            entity: 'switch.test',
+            set: {
+              kind: 'script',
+              script: 'script.set_power',
+              fields: { state: '$value' },
+            },
+          },
+        },
+      }
+      const otherConfig = {
+        properties: { power: { entity: 'switch.other' } },
+      }
+
+      await driver.setProperty('d1', 'power', true, scriptConfig)
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
+      expect(fetchCount).toBe(2)
+      await driver.close()
+    })
+
+    it('should drop the declared target entities of a set service call', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'switch.test': compressed('off'),
+        'switch.other': compressed('on'),
+      })
+
+      let fetchCount = 0
+      mockFetch(url => {
+        if (!url.includes('/states/')) return jsonResponse([])
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const targetConfig = {
+        properties: {
+          power: {
+            entity: 'switch.test',
+            set: {
+              kind: 'service',
+              service: 'switch.turn_on',
+              target: { entity_id: 'switch.other' },
+            },
+          },
+        },
+      }
+      const otherConfig = {
+        properties: { power: { entity: 'switch.other' } },
+      }
+
+      await driver.setProperty('d1', 'power', true, targetConfig)
+
+      expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
+      expect(fetchCount).toBe(1)
+      await driver.close()
+    })
+
+    it('should clear the whole store after an action by script (unknown scope)', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'switch.test': compressed('off'),
+        'switch.other': compressed('on'),
+      })
+
+      let fetchCount = 0
+      mockFetch(url => {
+        if (!url.includes('/states/')) return jsonResponse([])
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const scriptAction = {
+        actions: {
+          boost: {
+            kind: 'script',
+            script: 'script.boost',
+            fields: { minutes: '$minutes' },
+          },
+        },
+      }
+      const otherConfig = {
+        properties: { power: { entity: 'switch.other' } },
+      }
+
+      await driver.executeAction('d1', 'boost', { minutes: 5 }, scriptAction)
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
+      expect(fetchCount).toBe(2)
       await driver.close()
     })
 
