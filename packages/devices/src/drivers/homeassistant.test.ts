@@ -617,9 +617,7 @@ describe('HADriver', () => {
       }
       await expect(
         driver.getProperty('d1', 'hvac_mode', config),
-      ).rejects.toThrow(
-        /value "unavailable" is not one of the declared values/,
-      )
+      ).rejects.toThrow(/value "unavailable" is not one of the declared values/)
 
       mockFetch(() => jsonResponse({ state: 'unknown', attributes: {} }))
       await expect(
