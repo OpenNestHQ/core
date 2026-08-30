@@ -1,4 +1,5 @@
-import { isRecord, PLACEHOLDER_RE } from './binding.js'
+import { isRecord, PLACEHOLDER_RE, setConsumesValue } from './binding.js'
+import { coerceToType, declaredType } from './values.js'
 import type {
   HAActionStrategy,
   HAGetStrategy,
@@ -75,6 +76,102 @@ function validateProperty(
     if (!isRecord(set)) fail('set strategy must be an object')
     validateSetStrategy(set, raw, fail)
   }
+  validateValueMaps(raw, fail)
+}
+
+// Load-time validation of the declared value contract (`map`, `map_set`,
+// coherence with `type`/`values`): a broken map must fail at init, not at the
+// first call. Only shape and coherence are checked here — flat configs stay
+// unvalidated (retrocompat).
+function validateValueMaps(raw: Record<string, unknown>, fail: Failer): void {
+  const map = raw['map']
+  if (map !== undefined && !isRecord(map)) {
+    fail('map must be an object mapping HA values to OpenNest values')
+  }
+  const mapSet = raw['map_set']
+  if (mapSet !== undefined && !isRecord(mapSet)) {
+    fail('map_set must be an object mapping OpenNest values to HA values')
+  }
+  const values = raw['values']
+  const type = declaredType(raw['type'])
+  if (isRecord(map)) {
+    for (const [key, target] of Object.entries(map)) {
+      if (!isScalar(target)) {
+        fail(
+          `map."${key}" must be a string, number or boolean (got ${quote(target)})`,
+        )
+      }
+      // Coercing at load time guarantees the mapped get result always
+      // satisfies the declared type.
+      let mapped = target
+      if (type !== undefined) {
+        try {
+          mapped = coerceToType(target, type, '')
+        } catch {
+          fail(
+            `map."${key}" target ${quote(target)} is not coercible to the declared type "${type}"`,
+          )
+        }
+      }
+      if (
+        Array.isArray(values) &&
+        (typeof mapped !== 'string' || !values.includes(mapped))
+      ) {
+        fail(
+          `map."${key}" produces ${quote(mapped)}, which is not one of the declared values ${values.map(v => `"${v}"`).join(', ')}`,
+        )
+      }
+    }
+  }
+  if (isRecord(mapSet)) {
+    for (const [key, target] of Object.entries(mapSet)) {
+      if (!isScalar(target)) {
+        fail(
+          `map_set."${key}" must be a string, number or boolean (got ${quote(target)})`,
+        )
+      }
+      if (Array.isArray(values) && !values.includes(key)) {
+        fail(
+          `map_set key "${key}" is not one of the declared values ${values.map(v => `"${v}"`).join(', ')}`,
+        )
+      }
+    }
+  }
+  // The set direction needs an unambiguous OpenNest → HA translation: a
+  // non-bijective map is only acceptable when an explicit `map_set` is
+  // declared or the set strategy never writes the value (SIDE-22 keeps
+  // rejecting inferred sets for non-boolean contracts anyway).
+  if (isRecord(map) && mapSet === undefined && setConsumesValue(raw['set'])) {
+    const conflict = inverseMapConflict(map)
+    if (conflict) {
+      fail(
+        `map is not bijective (${conflict.keys.map(key => `"${key}"`).join(', ')} all map to ${quote(conflict.target)}): declare an explicit "map_set" for the set direction`,
+      )
+    }
+  }
+}
+
+function inverseMapConflict(
+  map: Record<string, unknown>,
+): { target: unknown; keys: string[] } | undefined {
+  const byTarget = new Map<unknown, string[]>()
+  for (const [key, target] of Object.entries(map)) {
+    const keys = byTarget.get(target)
+    if (keys) keys.push(key)
+    else byTarget.set(target, [key])
+  }
+  for (const [target, keys] of byTarget) {
+    if (keys.length > 1) return { target, keys }
+  }
+  return undefined
+}
+
+function isScalar(value: unknown): boolean {
+  return (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  )
 }
 
 function validateGetStrategy(get: Record<string, unknown>, fail: Failer): void {
