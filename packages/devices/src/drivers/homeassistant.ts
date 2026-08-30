@@ -355,6 +355,11 @@ export class HADriver implements DeviceDriver {
 
   // Service responses only exist over the websocket (`return_response`), so a
   // down socket fails explicitly instead of falling back to REST like reads.
+  //
+  // INVARIANT: the isReady() check and the callService() call must be
+  // synchronous — inserting any `await` between them would race with the
+  // reconnect loop, which queues commands without a timer until the socket is
+  // re-flushed, causing potentially unbounded waits.
   private wsServiceResponse(
     domain: string,
     service: string,
@@ -369,9 +374,13 @@ export class HADriver implements DeviceDriver {
         `HA get strategy "${strategy}" for device "${deviceId}", property "${property}" requires the HA websocket, which is not connected (service responses have no REST fallback)`,
       )
     }
-    return client.callService(domain, service, payload, {
-      returnResponse: true,
-    })
+    return client
+      .callService(domain, service, payload, { returnResponse: true })
+      .catch((error: Error) => {
+        throw new Error(
+          `HA get strategy "${strategy}" for device "${deviceId}", property "${property}" failed: ${error.message}`,
+        )
+      })
   }
 
   // State resolution chain, most to least preferred:
@@ -521,8 +530,10 @@ export class HADriver implements DeviceDriver {
     })
     if (!res.ok) {
       const body = await res.text()
+      const excerpt =
+        template.length > 120 ? `${template.slice(0, 120)}…` : template
       throw new Error(
-        `HA renderTemplate failed: ${res.status} ${res.statusText} — ${body}`,
+        `HA renderTemplate failed for "${excerpt}": ${res.status} ${res.statusText} — ${body}`,
       )
     }
     return res.text()
@@ -571,7 +582,8 @@ function templateCacheKey(template: string): string {
 
 // A script called with return_response answers as
 // `{ <response_variable>: value }`; the variable name belongs to the script,
-// so a single-entry response is unwrapped to its value.
+// so a single-entry response is unwrapped to its value. A script without
+// `response_variable` returns `{}` (zero keys), which is returned as-is.
 function unwrapResponseVariable(result: unknown): unknown {
   if (!isRecord(result)) return result
   const keys = Object.keys(result)

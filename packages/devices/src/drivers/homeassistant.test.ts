@@ -403,7 +403,7 @@ describe('HADriver', () => {
       const driver = await initDriver()
       await expect(
         driver.getProperty('d1', 'label', templateConfig('{{ a }}')),
-      ).rejects.toThrow(/renderTemplate failed.*template error/s)
+      ).rejects.toThrow(/renderTemplate failed for "{{ a }}".*template error/s)
     })
   })
 
@@ -466,6 +466,15 @@ describe('HADriver', () => {
 
       respond(id: number, result: unknown): void {
         this.serverMessage({ id, type: 'result', success: true, result })
+      }
+
+      errorRespond(id: number, code: string, message: string): void {
+        this.serverMessage({
+          id,
+          type: 'result',
+          success: false,
+          error: { code, message },
+        })
       }
 
       lastSent(): Record<string, unknown> {
@@ -635,6 +644,65 @@ describe('HADriver', () => {
       ).rejects.toThrow(
         /strategy "service_response".*device "d1".*property "forecast".*websocket.*not connected/s,
       )
+      await driver.close()
+    })
+
+    it('should wrap mid-flight ws failures with strategy/device/property context', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+
+      const config = {
+        properties: {
+          summary: {
+            get: { kind: 'script', script: 'script.daily_summary' },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'summary', config)
+
+      const callId = ws.callId()
+      expect(callId).not.toBeNull()
+      ws.errorRespond(callId!, 'unauthorized', 'connection lost')
+
+      await expect(pending).rejects.toThrow(
+        /strategy "script".*device "d1".*property "summary".*failed:.*connection lost/s,
+      )
+      await driver.close()
+    })
+
+    it('should call service_response get with empty fields payload when fields is absent', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+      mockFetch(() => {
+        throw new Error('no REST fallback for service responses')
+      })
+
+      const config = {
+        properties: {
+          forecast: {
+            get: {
+              kind: 'service_response',
+              service: 'weather.get_forecasts',
+            },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'forecast', config)
+
+      const callId = ws.callId()
+      expect(callId).not.toBeNull()
+      expect(ws.lastSent()).toEqual({
+        id: callId,
+        type: 'call_service',
+        domain: 'weather',
+        service: 'get_forecasts',
+        return_response: true,
+      })
+      ws.respond(callId!, { 'weather.home': { forecast: ['sunny'] } })
+
+      await expect(pending).resolves.toEqual({
+        'weather.home': { forecast: ['sunny'] },
+      })
       await driver.close()
     })
   })

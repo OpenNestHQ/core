@@ -75,6 +75,11 @@ export function normalizePropertyConfig(raw: HARawPropertyConfig): HABinding {
 // (state / inferred). Anything else is the legacy flat format.
 export function normalizePropertyBinding(raw: HARawPropertyConfig): HABinding {
   const record = raw as unknown as Record<string, unknown>
+  if (!isRecord(record)) {
+    throw new Error(
+      `Property binding must be an object with "get" or "set" keys, got ${typeof raw}: ${String(raw)}`,
+    )
+  }
   if (!('get' in record || 'set' in record)) {
     return normalizePropertyConfig(raw)
   }
