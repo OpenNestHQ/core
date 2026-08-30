@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { normalizeActionConfig, normalizePropertyConfig } from './binding.js'
+import type { HARawActionConfig } from './binding.js'
 
 describe('normalizePropertyConfig', () => {
   it('should map entity without attribute to state get strategy', () => {
@@ -96,5 +97,28 @@ describe('normalizeActionConfig', () => {
       target: { entity_id: 'media_player.salon' },
       data: { volume_level: 0.5 },
     })
+  })
+
+  it('should map a script action to the script strategy', () => {
+    const strategy = normalizeActionConfig({
+      kind: 'script',
+      script: 'script.boost',
+      fields: { minutes: '$minutes' },
+    } as unknown as HARawActionConfig)
+
+    expect(strategy).toEqual({
+      kind: 'script',
+      script: 'script.boost',
+      fields: { minutes: '$minutes' },
+    })
+  })
+
+  it('should throw when a script action is missing its script id', () => {
+    expect(() =>
+      normalizeActionConfig({
+        kind: 'script',
+        fields: {},
+      } as unknown as HARawActionConfig),
+    ).toThrow(/strategy "script" requires a "script" id/)
   })
 })

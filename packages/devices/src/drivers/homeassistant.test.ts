@@ -1103,6 +1103,75 @@ describe('HADriver', () => {
     })
   })
 
+  describe('executeAction — script strategy', () => {
+    it('should call the declared script with the args interpolated in fields', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: 'on' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.executeAction(
+        'd1',
+        'boost',
+        { minutes: 5 },
+        {
+          actions: {
+            boost: {
+              kind: 'script',
+              script: 'script.boost',
+              fields: { minutes: '$minutes', mode: 'turbo' },
+            },
+          },
+        },
+      )
+
+      expect(calls).toHaveLength(1)
+      expect(calls[0]!.url).toContain('/api/services/script/turn_on')
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'script.boost',
+        fields: { minutes: 5, mode: 'turbo' },
+      })
+    })
+
+    it('should interpolate nested placeholders and omit missing optional args', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: 'on' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.executeAction(
+        'd1',
+        'boost',
+        { minutes: 5 },
+        {
+          actions: {
+            boost: {
+              kind: 'script',
+              script: 'script.boost',
+              fields: {
+                minutes: '$minutes',
+                opts: { factor: '$factor', fixed: true },
+              },
+            },
+          },
+        },
+      )
+
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'script.boost',
+        fields: { minutes: 5, opts: { fixed: true } },
+      })
+    })
+  })
+
   describe('boolean inference for common domains', () => {
     const domains = ['switch', 'light', 'fan', 'automation', 'script']
 

@@ -218,24 +218,45 @@ export class HADriver implements DeviceDriver {
 
     const strategy = this.actionStrategy(deviceConfig, action, raw)
 
-    if (strategy.kind !== 'service') {
-      throw new Error(`HA action strategy "${strategy.kind}" is not supported`)
-    }
+    let domain: string
+    let service: string
+    let payload: Record<string, unknown>
 
-    const [domain, service] = splitService(strategy.service)
-
-    const payload: Record<string, unknown> = {}
-
-    if (strategy.target) {
-      Object.assign(payload, strategy.target)
+    switch (strategy.kind) {
+      case 'service': {
+        ;[domain, service] = splitService(strategy.service)
+        payload = {}
+        if (strategy.target) {
+          Object.assign(payload, strategy.target)
+        }
+        if (strategy.data) {
+          Object.assign(payload, strategy.data)
+        }
+        Object.assign(payload, args)
+        break
+      }
+      case 'script': {
+        // Writes stay on REST (like every set/action path): scripts need no
+        // response here, so no websocket coupling is introduced. Argument
+        // names are mapped explicitly through the declared fields.
+        domain = 'script'
+        service = 'turn_on'
+        payload = {
+          entity_id: strategy.script,
+          fields: interpolateFields(strategy.fields, args),
+        }
+        break
+      }
+      default: {
+        const unknownKind = (strategy as HAActionStrategy).kind
+        throw new Error(`HA action strategy "${unknownKind}" is not supported`)
+      }
     }
-    if (strategy.data) {
-      Object.assign(payload, strategy.data)
-    }
-    Object.assign(payload, args)
 
     await this.callService(domain, service, payload)
-    this.invalidateEntityState(targetEntityIds(strategy.target))
+    this.invalidateEntityState(
+      strategy.kind === 'service' ? targetEntityIds(strategy.target) : [],
+    )
     this.stateCache.clear()
   }
 

@@ -90,9 +90,26 @@ export function normalizePropertyBinding(raw: HARawPropertyConfig): HABinding {
   return { get, set }
 }
 
+// Runtime mirror of validate.ts' action discriminator: a config carrying
+// `kind: 'script'` is the strategy format; anything else is the legacy flat
+// service action (an explicit `kind: 'service'` keeps the same path).
 export function normalizeActionConfig(
   raw: HARawActionConfig,
 ): HAActionStrategy {
+  const record = raw as unknown as Record<string, unknown>
+  if (record['kind'] === 'script') {
+    const script = record['script']
+    if (typeof script !== 'string' || script === '') {
+      throw new Error(
+        'Invalid action config: strategy "script" requires a "script" id (expected "script.<name>")',
+      )
+    }
+    return {
+      kind: 'script',
+      script,
+      fields: isRecord(record['fields']) ? record['fields'] : {},
+    }
+  }
   const service: Extract<HAActionStrategy, { kind: 'service' }> = {
     kind: 'service',
     service: raw.service,
