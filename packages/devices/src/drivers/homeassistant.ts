@@ -483,29 +483,23 @@ export class HADriver implements DeviceDriver {
         return cached.value
       }
     }
-    return this.renderTemplateShared(template, runtime)
+    const value = await this.renderTemplateShared(template)
+    if (runtime?.programId) {
+      this.templateCache.set(templateCacheKey(template), {
+        at: Date.now(),
+        value,
+      })
+    }
+    return value
   }
 
-  private renderTemplateShared(
-    template: string,
-    runtime?: DriverRuntimeContext,
-  ): Promise<string> {
+  private renderTemplateShared(template: string): Promise<string> {
     const key = templateCacheKey(template)
     const inFlight = this.templateInFlight.get(key)
     if (inFlight) return inFlight
-    const pending = this.renderTemplateRemote(template).then(
-      value => {
-        this.templateInFlight.delete(key)
-        if (runtime?.programId) {
-          this.templateCache.set(key, { at: Date.now(), value })
-        }
-        return value
-      },
-      (error: unknown) => {
-        this.templateInFlight.delete(key)
-        throw error
-      },
-    )
+    const pending = this.renderTemplateRemote(template).finally(() => {
+      this.templateInFlight.delete(key)
+    })
     this.templateInFlight.set(key, pending)
     return pending
   }

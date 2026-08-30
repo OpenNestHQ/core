@@ -397,6 +397,30 @@ describe('HADriver', () => {
       expect(calls).toBe(2)
     })
 
+    it('should cache a joined render for the caller declaring a program', async () => {
+      let fetchCount = 0
+      mockFetch(async () => {
+        fetchCount++
+        await new Promise(resolve => setTimeout(resolve, 5))
+        return new Response('rendered', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const config = templateConfig('{{ a }}')
+
+      const withoutRuntime = driver.getProperty('d1', 'label', config)
+      const withRuntime = driver.getProperty('d1', 'label', config, {
+        programId: 'program-1',
+      })
+      await Promise.all([withoutRuntime, withRuntime])
+      expect(fetchCount).toBe(1)
+
+      await driver.getProperty('d1', 'label', config, {
+        programId: 'program-1',
+      })
+      expect(fetchCount).toBe(1)
+    })
+
     it('should throw with the HA response body on template failure', async () => {
       mockFetch(() => textResponse('template error', 400))
 
