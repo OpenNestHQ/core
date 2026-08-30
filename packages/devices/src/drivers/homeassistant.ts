@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { DeviceDriver, DriverRuntimeContext } from './interface.js'
 import {
+  interpolateFields,
   normalizeActionConfig,
   normalizePropertyBinding,
   splitService,
@@ -14,6 +15,7 @@ import type {
   HAGetStrategy,
   HARawActionConfig,
   HARawPropertyConfig,
+  HASetStrategy,
 } from './ha/binding.js'
 
 const DOMAIN_SERVICES: Record<string, { on: string; off: string }> = {
@@ -155,12 +157,9 @@ export class HADriver implements DeviceDriver {
     const entity = entry.raw.entity
     const set = entry.binding.set
 
-    const payload: Record<string, unknown> = {
-      entity_id: entity,
-    }
-
     let domain: string
     let service: string
+    let payload: Record<string, unknown>
 
     switch (set.kind) {
       case 'inferred': {
@@ -170,17 +169,35 @@ export class HADriver implements DeviceDriver {
         } else {
           ;[domain, service] = splitService(`${extractDomain(entity)}.unknown`)
         }
+        payload = { entity_id: entity }
         break
       }
       case 'service': {
         ;[domain, service] = splitService(set.service)
+        payload = { entity_id: entity }
+        if (set.target) {
+          Object.assign(payload, set.target)
+        }
         if (set.key !== undefined) {
           payload[set.key] = value
         }
         break
       }
-      default:
-        throw new Error(`HA set strategy "${set.kind}" is not supported`)
+      case 'script': {
+        // Writes stay on REST (like every set/action path): scripts need no
+        // response here, so no websocket coupling is introduced.
+        domain = 'script'
+        service = 'turn_on'
+        payload = {
+          entity_id: set.script,
+          fields: interpolateFields(set.fields, { value }),
+        }
+        break
+      }
+      default: {
+        const unknownKind = (set as HASetStrategy).kind
+        throw new Error(`HA set strategy "${unknownKind}" is not supported`)
+      }
     }
 
     await this.callService(domain, service, payload)

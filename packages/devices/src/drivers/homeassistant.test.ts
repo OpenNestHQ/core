@@ -911,6 +911,98 @@ describe('HADriver', () => {
     })
   })
 
+  describe('setProperty — set strategies', () => {
+    it('should call the declared service with the value under the declared key', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: '50' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.setProperty('d1', 'volume', 75, {
+        properties: {
+          volume: {
+            entity: 'media_player.test',
+            set: {
+              kind: 'service',
+              service: 'media_player.volume_set',
+              key: 'volume_level',
+            },
+          },
+        },
+      })
+
+      expect(calls[0]!.url).toContain('/api/services/media_player/volume_set')
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'media_player.test',
+        volume_level: 75,
+      })
+    })
+
+    it('should merge a declared target into the set service payload', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: '50' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.setProperty('d1', 'volume', 40, {
+        properties: {
+          volume: {
+            entity: 'media_player.test',
+            set: {
+              kind: 'service',
+              service: 'media_player.volume_set',
+              key: 'volume_level',
+              target: { entity_id: 'media_player.other' },
+            },
+          },
+        },
+      })
+
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'media_player.other',
+        volume_level: 40,
+      })
+    })
+
+    it('should call the declared script with $value interpolated in fields', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: 'off' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.setProperty('d1', 'away', 'vacation', {
+        properties: {
+          away: {
+            entity: 'climate.salon',
+            set: {
+              kind: 'script',
+              script: 'script.set_away',
+              fields: { mode: '$value', note: 'declared' },
+            },
+          },
+        },
+      })
+
+      expect(calls[0]!.url).toContain('/api/services/script/turn_on')
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'script.set_away',
+        fields: { mode: 'vacation', note: 'declared' },
+      })
+    })
+  })
+
   describe('executeAction', () => {
     it('should call a service from action config', async () => {
       const calls: { url: string; body: string }[] = []

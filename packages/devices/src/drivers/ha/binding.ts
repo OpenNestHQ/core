@@ -24,7 +24,12 @@ export type HAGetStrategy =
 
 export type HASetStrategy =
   | { kind: 'inferred' }
-  | { kind: 'service'; service: string; key?: string }
+  | {
+      kind: 'service'
+      service: string
+      key?: string
+      target?: Record<string, unknown>
+    }
   | { kind: 'script'; script: string; fields: Record<string, unknown> }
 
 export type HAActionStrategy =
@@ -104,4 +109,49 @@ export function splitService(service: string): [string, string] {
       `Invalid service format: "${service}". Expected "domain.service".`,
     )
   return [service.slice(0, dot), service.slice(dot + 1)]
+}
+
+// Placeholders are whole declared field values (`"$value"`, `"$minutes"`);
+// validate.ts applies the same shape rules to them at load time.
+export const PLACEHOLDER_RE = /^\$([A-Za-z_][A-Za-z0-9_-]*)$/
+
+// Replaces `$name` placeholders in declared strategy fields with the provided
+// values (set: `{ value }`; action: the named call arguments). A placeholder
+// with no provided value is omitted, keeping optional arguments optional.
+export function interpolateFields(
+  fields: Record<string, unknown> | undefined,
+  values: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const rendered = interpolateValue(fields ?? {}, values ?? {})
+  return isRecord(rendered) ? rendered : {}
+}
+
+function interpolateValue(
+  value: unknown,
+  values: Record<string, unknown>,
+): unknown {
+  if (typeof value === 'string') {
+    const name = PLACEHOLDER_RE.exec(value)?.[1]
+    return name === undefined ? value : values[name]
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map(item => interpolateValue(item, values))
+      .filter(item => item !== undefined)
+  }
+  if (isRecord(value)) {
+    const rendered: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(value)) {
+      const replacement = interpolateValue(item, values)
+      if (replacement !== undefined) {
+        rendered[key] = replacement
+      }
+    }
+    return rendered
+  }
+  return value
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
