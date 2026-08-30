@@ -4,10 +4,11 @@ import {
   interpolateFields,
   normalizeActionConfig,
   normalizePropertyBinding,
+  setConsumesValue,
   splitService,
 } from './ha/binding.js'
 import { isRecord, validateDeviceBindings } from './ha/validate.js'
-import { mapGetValue } from './ha/values.js'
+import { mapGetValue, mapSetValue } from './ha/values.js'
 import { validateActionArgs } from './ha/args.js'
 import { HAWebSocketClient, toHaWsUrl } from './ha/ws.js'
 import type { HAIncomingMessage } from './ha/ws.js'
@@ -165,7 +166,7 @@ export class HADriver implements DeviceDriver {
   }
 
   async setProperty(
-    _deviceId: string,
+    deviceId: string,
     property: string,
     value: unknown,
     deviceConfig: Record<string, unknown>,
@@ -175,6 +176,7 @@ export class HADriver implements DeviceDriver {
 
     const entity = entry.raw.entity
     const set = entry.binding.set
+    const prefix = `HA set for device "${deviceId}", property "${property}"`
 
     let domain: string
     let service: string
@@ -200,19 +202,23 @@ export class HADriver implements DeviceDriver {
           Object.assign(payload, set.target)
         }
         if (set.key !== undefined) {
-          payload[set.key] = value
+          payload[set.key] = mapSetValue(value, entry.raw, prefix)
         }
         writtenEntities = [entity, ...targetEntityIds(set.target)]
         break
       }
       case 'script': {
         // Writes stay on REST (like every set/action path): scripts need no
-        // response here, so no websocket coupling is introduced.
+        // response here, so no websocket coupling is introduced. The value is
+        // mapped only when a `$value` placeholder actually carries it.
         domain = 'script'
         service = 'turn_on'
+        const written = setConsumesValue(set)
+          ? mapSetValue(value, entry.raw, prefix)
+          : value
         payload = {
           entity_id: set.script,
-          fields: interpolateFields(set.fields, { value }),
+          fields: interpolateFields(set.fields, { value: written }),
         }
         writtenEntities = []
         break

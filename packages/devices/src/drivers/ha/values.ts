@@ -44,6 +44,38 @@ export function mapGetValue(
   return out
 }
 
+// Set-side translation of an OpenNest value into the HA value: an explicit
+// `map_set` wins (a value outside it is a violated contract, not a silent
+// passthrough); otherwise the inverse of the `map` applies when it resolves
+// to exactly one HA key; anything else is written through raw.
+export function mapSetValue(
+  value: unknown,
+  contract: HAValueContract,
+  prefix: string,
+): unknown {
+  const mapSet = contract.map_set
+  if (isRecord(mapSet)) {
+    const mapped = lookupMap(mapSet, value)
+    if (mapped === undefined) {
+      throw new Error(
+        `${prefix}: value ${describe(value)} is not in the declared set map (map_set keys: ${describeList(Object.keys(mapSet))})`,
+      )
+    }
+    return mapped
+  }
+  const map = contract.map
+  if (isRecord(map)) {
+    const matches = Object.keys(map).filter(key => map[key] === value)
+    if (matches.length === 1) return matches[0]
+    if (matches.length > 1) {
+      throw new Error(
+        `${prefix}: value ${describe(value)} has an ambiguous inverse map (${matches.map(key => `"${key}"`).join(', ')} all map to it); declare an explicit "map_set"`,
+      )
+    }
+  }
+  return value
+}
+
 // Coerces a raw HA value to the declared OpenNest type. Non-coercible values
 // fail with a clear error carrying the caller's context prefix.
 export function coerceToType(
