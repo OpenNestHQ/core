@@ -294,6 +294,21 @@ describe('validateDeviceBindings — value maps', () => {
     })
   })
 
+  it('should throw when the declared type is not one of the three', () => {
+    expectInvalid(
+      {
+        properties: {
+          power: {
+            type: 'bool',
+            entity: 'switch.salon',
+            get: { kind: 'state' },
+          },
+        },
+      },
+      /property "power": type must be "boolean", "number" or "string" \(got "bool"\)/,
+    )
+  })
+
   it('should throw when map is not an object', () => {
     expectInvalid(
       {

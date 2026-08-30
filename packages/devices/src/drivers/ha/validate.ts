@@ -94,6 +94,11 @@ function validateValueMaps(raw: Record<string, unknown>, fail: Failer): void {
   }
   const values = raw['values']
   const type = declaredType(raw['type'])
+  if (raw['type'] !== undefined && type === undefined) {
+    fail(
+      `type must be "boolean", "number" or "string" (got ${quote(raw['type'])})`,
+    )
+  }
   const byTarget = new Map<unknown, string[]>()
   if (isRecord(map)) {
     for (const [key, target] of Object.entries(map)) {

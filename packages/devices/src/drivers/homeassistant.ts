@@ -8,7 +8,7 @@ import {
   splitService,
 } from './ha/binding.js'
 import { isRecord, validateDeviceBindings } from './ha/validate.js'
-import { mapGetValue, mapSetValue } from './ha/values.js'
+import { declaredType, mapGetValue, mapSetValue } from './ha/values.js'
 import { validateActionArgs } from './ha/args.js'
 import { HAWebSocketClient, toHaWsUrl } from './ha/ws.js'
 import type { HAIncomingMessage } from './ha/ws.js'
@@ -118,9 +118,14 @@ export class HADriver implements DeviceDriver {
           value = attrs?.[get.attribute] ?? null
         } else {
           value = state['state']
-          // The declared contract (map or type) replaces the legacy on/off/
-          // number heuristic; untyped unmapped properties keep it.
-          if (entry.raw.map === undefined && entry.raw.type === undefined) {
+          // The declared contract (map or a valid type) replaces the legacy
+          // on/off/number heuristic; untyped unmapped properties keep it. A
+          // mistyped `type` (flat format is not load-validated) keeps the
+          // legacy behavior instead of silently disabling the heuristic.
+          if (
+            entry.raw.map === undefined &&
+            declaredType(entry.raw.type) === undefined
+          ) {
             value = parseHaState(value)
           }
         }

@@ -551,6 +551,19 @@ describe('HADriver', () => {
       expect(value).toBe(true)
     })
 
+    it('should keep the legacy heuristic for flat configs with a mistyped type', async () => {
+      mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'power', {
+        properties: {
+          power: { entity: 'switch.test', type: 'bool' },
+        },
+      })
+
+      expect(value).toBe(true)
+    })
+
     it('should coerce numeric states when type number is declared', async () => {
       mockFetch(() => jsonResponse({ state: '42.5', attributes: {} }))
 
