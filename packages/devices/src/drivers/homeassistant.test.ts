@@ -1427,7 +1427,11 @@ describe('HADriver', () => {
               entity: 'switch.salon',
               map: { on: 'true', off: 'false' },
               get: { kind: 'state' },
-              set: { kind: 'service', service: 'switch.set_state', key: 'state' },
+              set: {
+                kind: 'service',
+                service: 'switch.set_state',
+                key: 'state',
+              },
             },
           },
         }
@@ -1458,7 +1462,11 @@ describe('HADriver', () => {
               entity: 'switch.salon',
               map: { '1': 'on', '0': 'off' },
               get: { kind: 'state' },
-              set: { kind: 'service', service: 'switch.set_state', key: 'state' },
+              set: {
+                kind: 'service',
+                service: 'switch.set_state',
+                key: 'state',
+              },
             },
           },
         }
@@ -1489,7 +1497,11 @@ describe('HADriver', () => {
               entity: 'sensor.salon',
               map: { low: '1', high: '2' },
               get: { kind: 'state' },
-              set: { kind: 'service', service: 'sensor.set_level', key: 'level' },
+              set: {
+                kind: 'service',
+                service: 'sensor.set_level',
+                key: 'level',
+              },
             },
           },
         }
