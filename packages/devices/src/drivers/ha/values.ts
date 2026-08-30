@@ -17,7 +17,9 @@ type DeclaredType = NonNullable<HAValueContract['type']>
 // declared `type` (replacing the parseHaState heuristic for typed
 // properties), then the `values` membership check. A value outside the
 // declared contract is a violated contract, reported as a clear error instead
-// of a silent null.
+// of a silent null — including HA `unavailable`/`unknown` states and missing
+// attributes; a degraded-value feature would need explicit config support
+// (noted for the binding-format documentation).
 export function mapGetValue(
   value: unknown,
   contract: HAValueContract,

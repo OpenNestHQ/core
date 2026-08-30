@@ -600,6 +600,52 @@ describe('HADriver', () => {
       )
     })
 
+    it('should throw on unavailable and unknown states for contract-bound properties', async () => {
+      mockFetch(() => jsonResponse({ state: 'unavailable', attributes: {} }))
+
+      const driver = await initDriver()
+      const config = {
+        properties: {
+          hvac_mode: {
+            type: 'string',
+            values: ['auto', 'heat', 'cool', 'off'],
+            entity: 'climate.salon',
+            map: { cooling: 'cool', heating: 'heat' },
+            get: { kind: 'state' },
+          },
+        },
+      }
+      await expect(
+        driver.getProperty('d1', 'hvac_mode', config),
+      ).rejects.toThrow(
+        /value "unavailable" is not one of the declared values/,
+      )
+
+      mockFetch(() => jsonResponse({ state: 'unknown', attributes: {} }))
+      await expect(
+        driver.getProperty('d1', 'hvac_mode', config),
+      ).rejects.toThrow(/value "unknown" is not one of the declared values/)
+    })
+
+    it('should throw on a missing attribute for a contract-bound property', async () => {
+      mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
+
+      const driver = await initDriver()
+      await expect(
+        driver.getProperty('d1', 'temperature', {
+          properties: {
+            temperature: {
+              type: 'number',
+              entity: 'climate.salon',
+              get: { kind: 'attribute', attribute: 'current_temperature' },
+            },
+          },
+        }),
+      ).rejects.toThrow(
+        /HA get for device "d1", property "temperature": value null is not coercible to the declared type "number"/,
+      )
+    })
+
     it('should coerce the rendered template text to the declared type', async () => {
       mockFetch((url, init) => {
         expect(url).toBe('http://ha.local:8123/api/template')
