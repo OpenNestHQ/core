@@ -625,7 +625,7 @@ describe('HADriver', () => {
       ).rejects.toThrow(/value "unknown" is not one of the declared values/)
     })
 
-    it('should throw on a missing attribute for a contract-bound property', async () => {
+    it('should pass a missing attribute through as null for contract-bound properties', async () => {
       mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
 
       const driver = await initDriver()
@@ -639,9 +639,20 @@ describe('HADriver', () => {
             },
           },
         }),
-      ).rejects.toThrow(
-        /HA get for device "d1", property "temperature": value null is not coercible to the declared type "number"/,
-      )
+      ).resolves.toBeNull()
+      await expect(
+        driver.getProperty('d1', 'hvac_mode', {
+          properties: {
+            hvac_mode: {
+              type: 'string',
+              values: ['auto', 'heat', 'cool', 'off'],
+              entity: 'climate.salon',
+              map: { cooling: 'cool', heating: 'heat' },
+              get: { kind: 'attribute', attribute: 'hvac_action' },
+            },
+          },
+        }),
+      ).resolves.toBeNull()
     })
 
     it('should coerce the rendered template text to the declared type', async () => {

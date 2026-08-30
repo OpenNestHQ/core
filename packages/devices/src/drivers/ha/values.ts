@@ -15,16 +15,19 @@ type DeclaredType = NonNullable<HAValueContract['type']>
 // Get-side translation of a raw HA value into the OpenNest value of the
 // declared contract: `map` first (HA → OpenNest), then coercion to the
 // declared `type` (replacing the parseHaState heuristic for typed
-// properties), then the `values` membership check. A value outside the
-// declared contract is a violated contract, reported as a clear error instead
-// of a silent null — including HA `unavailable`/`unknown` states and missing
-// attributes; a degraded-value feature would need explicit config support
-// (noted for the binding-format documentation).
+// properties), then the `values` membership check. Absent data (null or
+// undefined input) is not a contract violation: it passes through as null,
+// preserving the base semantics for a missing attribute. A value that is
+// present but out of contract — including HA `unavailable`/`unknown` states —
+// is a violated contract, reported as a clear error; a degraded-value feature
+// would need explicit config support (noted for the binding-format
+// documentation).
 export function mapGetValue(
   value: unknown,
   contract: HAValueContract,
   prefix: string,
 ): unknown {
+  if (value === null || value === undefined) return null
   let out = value
   const map = contract.map
   if (isRecord(map)) {
