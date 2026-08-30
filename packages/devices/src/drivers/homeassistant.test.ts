@@ -355,6 +355,48 @@ describe('HADriver', () => {
       }
     })
 
+    it('should dedupe concurrent renders of the same template into one call', async () => {
+      let fetchCount = 0
+      mockFetch(async () => {
+        fetchCount++
+        await new Promise(resolve => setTimeout(resolve, 5))
+        return new Response('rendered', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const config = templateConfig('{{ a }}')
+
+      const [first, second] = await Promise.all([
+        driver.getProperty('d1', 'label', config),
+        driver.getProperty('d1', 'label', config),
+      ])
+
+      expect(first).toBe('rendered')
+      expect(second).toBe('rendered')
+      expect(fetchCount).toBe(1)
+    })
+
+    it('should retry a template render after a concurrent failure', async () => {
+      let calls = 0
+      mockFetch(async () => {
+        calls++
+        if (calls === 1) return textResponse('boom', 500)
+        return new Response('ok', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const config = templateConfig('{{ a }}')
+
+      const first = driver.getProperty('d1', 'label', config)
+      const second = driver.getProperty('d1', 'label', config)
+      await expect(first).rejects.toThrow(/renderTemplate failed/)
+      await expect(second).rejects.toThrow(/renderTemplate failed/)
+
+      const third = await driver.getProperty('d1', 'label', config)
+      expect(third).toBe('ok')
+      expect(calls).toBe(2)
+    })
+
     it('should throw with the HA response body on template failure', async () => {
       mockFetch(() => textResponse('template error', 400))
 

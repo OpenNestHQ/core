@@ -44,6 +44,7 @@ export class HADriver implements DeviceDriver {
   private cacheProgramId: string | undefined = undefined
   private templateCache = new Map<string, { at: number; value: string }>()
   private templateCacheProgramId: string | undefined = undefined
+  private templateInFlight = new Map<string, Promise<string>>()
   private propertyBindings = new WeakMap<
     Record<string, unknown>,
     Map<string, HABinding>
@@ -456,7 +457,8 @@ export class HADriver implements DeviceDriver {
   // Template renders follow the per-program TTL pattern of the state cache
   // (same STATE_CACHE_TTL_MS) keyed by the template hash. Unlike entity
   // states they are not invalidated on writes: a template targets no entity,
-  // so the TTL alone bounds staleness.
+  // so the TTL alone bounds staleness. Concurrent renders of the same
+  // template share a single in-flight request instead of hammering HA.
   private async renderTemplate(
     template: string,
     runtime?: DriverRuntimeContext,
@@ -467,16 +469,36 @@ export class HADriver implements DeviceDriver {
         this.templateCacheProgramId = runtime.programId
       }
       this.evictExpiredTemplates()
-      const key = templateCacheKey(template)
-      const cached = this.templateCache.get(key)
+      const cached = this.templateCache.get(templateCacheKey(template))
       if (cached !== undefined) {
         return cached.value
       }
-      const value = await this.renderTemplateRemote(template)
-      this.templateCache.set(key, { at: Date.now(), value })
-      return value
     }
-    return this.renderTemplateRemote(template)
+    return this.renderTemplateShared(template, runtime)
+  }
+
+  private renderTemplateShared(
+    template: string,
+    runtime?: DriverRuntimeContext,
+  ): Promise<string> {
+    const key = templateCacheKey(template)
+    const inFlight = this.templateInFlight.get(key)
+    if (inFlight) return inFlight
+    const pending = this.renderTemplateRemote(template).then(
+      value => {
+        this.templateInFlight.delete(key)
+        if (runtime?.programId) {
+          this.templateCache.set(key, { at: Date.now(), value })
+        }
+        return value
+      },
+      (error: unknown) => {
+        this.templateInFlight.delete(key)
+        throw error
+      },
+    )
+    this.templateInFlight.set(key, pending)
+    return pending
   }
 
   private evictExpiredTemplates(): void {
