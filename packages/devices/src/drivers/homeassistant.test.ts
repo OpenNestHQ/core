@@ -1172,6 +1172,161 @@ describe('HADriver', () => {
     })
   })
 
+  describe('executeAction — argument validation', () => {
+    const fetchSentinel = () => {
+      mockFetch(() => {
+        throw new Error('HA must not be called')
+      })
+    }
+
+    it('should reject a missing required argument before any HA call', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'boost',
+          {},
+          {
+            actions: {
+              boost: {
+                kind: 'script',
+                script: 'script.boost',
+                fields: { minutes: '$minutes' },
+                parameters: [
+                  { name: 'minutes', type: 'number', required: true },
+                ],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(
+        /Missing argument "minutes".*action "boost".*device "d1".*required/s,
+      )
+    })
+
+    it('should reject an argument outside the declared values', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'set_mode',
+          { mode: 'turbo' },
+          {
+            actions: {
+              set_mode: {
+                service: 'climate.set_operation_mode',
+                parameters: [
+                  { name: 'mode', type: 'enum', values: ['eco', 'boost'] },
+                ],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(/must be one of "eco", "boost" \(got "turbo"\)/)
+    })
+
+    it('should reject an argument outside the declared range', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'boost',
+          { minutes: 120 },
+          {
+            actions: {
+              boost: {
+                kind: 'script',
+                script: 'script.boost',
+                fields: { minutes: '$minutes' },
+                parameters: [
+                  { name: 'minutes', type: 'number', range: [1, 60] },
+                ],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(/must be between 1 and 60 \(got 120\)/)
+    })
+
+    it('should reject an argument with the wrong type', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'announce',
+          { message: 42 },
+          {
+            actions: {
+              announce: {
+                service: 'tts.speak',
+                parameters: [{ name: 'message', type: 'string' }],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(/"message".*must be a string \(got 42\)/)
+    })
+
+    it('should accept declared arguments that satisfy the contract', async () => {
+      const calls: { url: string }[] = []
+      mockFetch(url => {
+        if (url.includes('/states/')) return jsonResponse({ state: 'on' })
+        calls.push({ url })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.executeAction(
+        'd1',
+        'boost',
+        { on: true, minutes: 5 },
+        {
+          actions: {
+            boost: {
+              service: 'switch.turn_on',
+              target: { entity_id: 'switch.test' },
+              parameters: [
+                { name: 'on', type: 'power', required: true },
+                { name: 'minutes', type: 'number', range: [1, 60] },
+              ],
+            },
+          },
+        },
+      )
+
+      expect(calls).toHaveLength(1)
+    })
+
+    it('should validate args of legacy flat service actions too', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'announce',
+          {},
+          {
+            actions: {
+              announce: {
+                service: 'tts.speak',
+                parameters: [{ name: 'message', required: true }],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(/Missing argument "message"/)
+    })
+  })
+
   describe('boolean inference for common domains', () => {
     const domains = ['switch', 'light', 'fan', 'automation', 'script']
 

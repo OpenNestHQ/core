@@ -7,6 +7,7 @@ import {
   splitService,
 } from './ha/binding.js'
 import { isRecord, validateDeviceBindings } from './ha/validate.js'
+import { validateActionArgs } from './ha/args.js'
 import { HAWebSocketClient, toHaWsUrl } from './ha/ws.js'
 import type { HAIncomingMessage } from './ha/ws.js'
 import type {
@@ -206,7 +207,7 @@ export class HADriver implements DeviceDriver {
   }
 
   async executeAction(
-    _deviceId: string,
+    deviceId: string,
     action: string,
     args: Record<string, unknown>,
     deviceConfig: Record<string, unknown>,
@@ -217,6 +218,13 @@ export class HADriver implements DeviceDriver {
     if (!raw) return
 
     const strategy = this.actionStrategy(deviceConfig, action, raw)
+
+    validateActionArgs(
+      deviceId,
+      action,
+      (raw as unknown as Record<string, unknown>)['parameters'],
+      args,
+    )
 
     let domain: string
     let service: string
