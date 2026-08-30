@@ -28,7 +28,7 @@ export function mapGetValue(
   prefix: string,
 ): unknown {
   if (value === null || value === undefined) return null
-  let out = value
+  let out: unknown = value
   const map = contract.map
   if (isRecord(map)) {
     const mapped = lookupMap(map, value)
