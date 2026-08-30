@@ -1409,6 +1409,97 @@ describe('HADriver', () => {
         })
       })
 
+      it('should round-trip a map whose targets need boolean coercion', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((url, init) => {
+          if (url.includes('/states/')) {
+            return jsonResponse({ state: 'on', attributes: {} })
+          }
+          calls.push({ url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        const config = {
+          properties: {
+            power: {
+              type: 'boolean',
+              entity: 'switch.salon',
+              map: { on: 'true', off: 'false' },
+              get: { kind: 'state' },
+              set: { kind: 'service', service: 'switch.set_state', key: 'state' },
+            },
+          },
+        }
+
+        await expect(driver.getProperty('d1', 'power', config)).resolves.toBe(
+          true,
+        )
+        await driver.setProperty('d1', 'power', true, config)
+
+        expect(JSON.parse(calls[0]!.body).state).toBe('on')
+      })
+
+      it('should round-trip the HA 1/0 boolean convention through coercion', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((url, init) => {
+          if (url.includes('/states/')) {
+            return jsonResponse({ state: '1', attributes: {} })
+          }
+          calls.push({ url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        const config = {
+          properties: {
+            power: {
+              type: 'boolean',
+              entity: 'switch.salon',
+              map: { '1': 'on', '0': 'off' },
+              get: { kind: 'state' },
+              set: { kind: 'service', service: 'switch.set_state', key: 'state' },
+            },
+          },
+        }
+
+        await expect(driver.getProperty('d1', 'power', config)).resolves.toBe(
+          true,
+        )
+        await driver.setProperty('d1', 'power', true, config)
+
+        expect(JSON.parse(calls[0]!.body).state).toBe('1')
+      })
+
+      it('should round-trip a map whose targets need number coercion', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((url, init) => {
+          if (url.includes('/states/')) {
+            return jsonResponse({ state: 'low', attributes: {} })
+          }
+          calls.push({ url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        const config = {
+          properties: {
+            level: {
+              type: 'number',
+              entity: 'sensor.salon',
+              map: { low: '1', high: '2' },
+              get: { kind: 'state' },
+              set: { kind: 'service', service: 'sensor.set_level', key: 'level' },
+            },
+          },
+        }
+
+        await expect(driver.getProperty('d1', 'level', config)).resolves.toBe(1)
+        await driver.setProperty('d1', 'level', 1, config)
+
+        expect(JSON.parse(calls[0]!.body).level).toBe('low')
+      })
+
       it('should write a value absent from the map unchanged', async () => {
         const calls: { url: string; body: string }[] = []
         mockFetch((_url, init) => {

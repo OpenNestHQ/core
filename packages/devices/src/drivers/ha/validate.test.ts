@@ -410,6 +410,27 @@ describe('validateDeviceBindings — value maps', () => {
     )
   })
 
+  it('should judge bijectivity on coerced map targets', () => {
+    expectInvalid(
+      {
+        properties: {
+          level: {
+            type: 'number',
+            entity: 'sensor.salon',
+            map: { on: '1', off: '01' },
+            get: { kind: 'state' },
+            set: {
+              kind: 'service',
+              service: 'sensor.set_level',
+              key: 'level',
+            },
+          },
+        },
+      },
+      /property "level": map is not bijective \("on", "off" all map to 1\): declare an explicit "map_set" for the set direction/,
+    )
+  })
+
   it('should throw on a non-bijective map with a $value set script', () => {
     expectInvalid(
       {

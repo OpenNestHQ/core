@@ -94,6 +94,7 @@ function validateValueMaps(raw: Record<string, unknown>, fail: Failer): void {
   }
   const values = raw['values']
   const type = declaredType(raw['type'])
+  const byTarget = new Map<unknown, string[]>()
   if (isRecord(map)) {
     for (const [key, target] of Object.entries(map)) {
       if (!isScalar(target)) {
@@ -102,7 +103,8 @@ function validateValueMaps(raw: Record<string, unknown>, fail: Failer): void {
         )
       }
       // Coercing at load time guarantees the mapped get result always
-      // satisfies the declared type.
+      // satisfies the declared type; the set-side inverse compares against
+      // these same coerced targets, so bijectivity is judged on them too.
       let mapped = target
       if (type !== undefined) {
         try {
@@ -121,6 +123,9 @@ function validateValueMaps(raw: Record<string, unknown>, fail: Failer): void {
           `map."${key}" produces ${quote(mapped)}, which is not one of the declared values ${values.map(v => `"${v}"`).join(', ')}`,
         )
       }
+      const keys = byTarget.get(mapped)
+      if (keys) keys.push(key)
+      else byTarget.set(mapped, [key])
     }
   }
   if (isRecord(mapSet)) {
@@ -141,8 +146,8 @@ function validateValueMaps(raw: Record<string, unknown>, fail: Failer): void {
   // non-bijective map is only acceptable when an explicit `map_set` is
   // declared or the set strategy never writes the value (SIDE-22 keeps
   // rejecting inferred sets for non-boolean contracts anyway).
-  if (isRecord(map) && mapSet === undefined && setConsumesValue(raw['set'])) {
-    const conflict = inverseMapConflict(map)
+  if (mapSet === undefined && setConsumesValue(raw['set'])) {
+    const conflict = firstDuplicate(byTarget)
     if (conflict) {
       fail(
         `map is not bijective (${conflict.keys.map(key => `"${key}"`).join(', ')} all map to ${quote(conflict.target)}): declare an explicit "map_set" for the set direction`,
@@ -151,15 +156,9 @@ function validateValueMaps(raw: Record<string, unknown>, fail: Failer): void {
   }
 }
 
-function inverseMapConflict(
-  map: Record<string, unknown>,
+function firstDuplicate(
+  byTarget: Map<unknown, string[]>,
 ): { target: unknown; keys: string[] } | undefined {
-  const byTarget = new Map<unknown, string[]>()
-  for (const [key, target] of Object.entries(map)) {
-    const keys = byTarget.get(target)
-    if (keys) keys.push(key)
-    else byTarget.set(target, [key])
-  }
   for (const [target, keys] of byTarget) {
     if (keys.length > 1) return { target, keys }
   }

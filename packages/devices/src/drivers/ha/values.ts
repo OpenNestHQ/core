@@ -65,7 +65,17 @@ export function mapSetValue(
   }
   const map = contract.map
   if (isRecord(map)) {
-    const matches = Object.keys(map).filter(key => map[key] === value)
+    // The inverse mirrors the get pipeline: targets are compared after
+    // coercion to the declared type, so `{ on: 'true' }` with type boolean
+    // writes 'on' when `true` is set. Coercibility is already guaranteed at
+    // load time; a flat config with a broken target fails loudly here rather
+    // than silently writing the wrong value.
+    const type = declaredType(contract.type)
+    const matches = Object.keys(map).filter(key => {
+      const target =
+        type === undefined ? map[key] : coerceToType(map[key]!, type, prefix)
+      return target === value
+    })
     if (matches.length === 1) return matches[0]
     if (matches.length > 1) {
       throw new Error(
