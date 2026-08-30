@@ -46,15 +46,26 @@ export function mapGetValue(
   return out
 }
 
-// Set-side translation of an OpenNest value into the HA value: an explicit
-// `map_set` wins (a value outside it is a violated contract, not a silent
-// passthrough); otherwise the inverse of the `map` applies when it resolves
-// to exactly one HA key; anything else is written through raw.
+// Set-side translation of an OpenNest value into the HA value: the declared
+// `values` contract applies first (the set receives OpenNest values, they
+// must respect it — same gating as the inverse, this function is only called
+// by strategies that actually write the value); an explicit `map_set` wins (a
+// value outside it is a violated contract, not a silent passthrough);
+// otherwise the inverse of the `map` applies when it resolves to exactly one
+// HA key; anything else is written through raw.
 export function mapSetValue(
   value: unknown,
   contract: HAValueContract,
   prefix: string,
 ): unknown {
+  const values = contract.values
+  if (Array.isArray(values)) {
+    if (typeof value !== 'string' || !values.includes(value)) {
+      throw new Error(
+        `${prefix}: value ${describe(value)} is not one of the declared values ${describeList(values)}`,
+      )
+    }
+  }
   const mapSet = contract.map_set
   if (isRecord(mapSet)) {
     const mapped = lookupMap(mapSet, value)

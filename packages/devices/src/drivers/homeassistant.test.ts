@@ -1631,6 +1631,70 @@ describe('HADriver', () => {
         )
       })
 
+      it('should validate the set value against the declared values', async () => {
+        const driver = await initDriver()
+        await expect(
+          driver.setProperty('d1', 'hvac_mode', 'turbo', {
+            properties: {
+              hvac_mode: {
+                type: 'string',
+                values: ['auto', 'heat', 'cool', 'off'],
+                entity: 'climate.salon',
+                set: {
+                  kind: 'service',
+                  service: 'climate.set_hvac_mode',
+                  key: 'hvac_mode',
+                },
+              },
+            },
+          }),
+        ).rejects.toThrow(
+          /HA set for device "d1", property "hvac_mode": value "turbo" is not one of the declared values "auto", "heat", "cool", "off"/,
+        )
+      })
+
+      it('should validate set values of legacy flat configs against the declared values', async () => {
+        const driver = await initDriver()
+        await expect(
+          driver.setProperty('d1', 'hvac_mode', 'turbo', {
+            properties: {
+              hvac_mode: {
+                entity: 'climate.salon',
+                values: ['auto', 'heat', 'cool', 'off'],
+                set_service: 'climate.set_hvac_mode',
+                set_value_key: 'hvac_mode',
+              },
+            },
+          }),
+        ).rejects.toThrow(/value "turbo" is not one of the declared values/)
+      })
+
+      it('should not validate the value when the set strategy does not write it', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'unmapped', {
+          properties: {
+            hvac_mode: {
+              entity: 'climate.salon',
+              values: ['cool', 'heat'],
+              set: {
+                kind: 'script',
+                script: 'script.refresh',
+                fields: { source: 'declared' },
+              },
+            },
+          },
+        })
+
+        const body = JSON.parse(calls[0]!.body)
+        expect(body.fields).toEqual({ source: 'declared' })
+      })
+
       it('should map the $value interpolated into set script fields', async () => {
         const calls: { url: string; body: string }[] = []
         mockFetch((_url, init) => {
