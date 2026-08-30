@@ -67,7 +67,10 @@ export function normalizePropertyConfig(raw: HARawPropertyConfig): HABinding {
 // `get`/`set` keys is the strategy format and its nested strategies win; the
 // flat `attribute` field still feeds the get fallback (target schema keeps it
 // alongside a nested `set`), and missing sides default like the flat format
-// (state / inferred). Anything else is the legacy flat format.
+// (state / inferred). Flat `set_service`/`set_value_key` alongside the
+// strategy format never reaches this function: validate.ts rejects that
+// hybrid at load, since the nested strategies would silently win over it.
+// Anything else is the legacy flat format.
 export function normalizePropertyBinding(raw: HARawPropertyConfig): HABinding {
   const record = raw as unknown as Record<string, unknown>
   if (!('get' in record || 'set' in record)) {

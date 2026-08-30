@@ -1162,6 +1162,25 @@ describe('HADriver', () => {
       )
     })
 
+    it('should reject flat set fields mixed with the strategy format', () => {
+      const driver = makeDriver()
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          properties: {
+            volume: {
+              type: 'number',
+              entity: 'media_player.test',
+              get: { kind: 'attribute', attribute: 'volume_level' },
+              set_service: 'media_player.volume_set',
+              set_value_key: 'volume_level',
+            },
+          },
+        }),
+      ).toThrow(
+        /device "d1", property "volume".*flat "set_service"\/"set_value_key" cannot be combined with the strategy format/,
+      )
+    })
+
     it('should accept valid new format configs', () => {
       const driver = makeDriver()
       expect(() =>

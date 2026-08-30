@@ -65,6 +65,19 @@ function validateProperty(
       `Invalid HA binding for device "${deviceId}", property "${name}": ${detail}`,
     )
   }
+  // Flat `set_service`/`set_value_key` next to the strategy format (`get`/`set`
+  // present) is a never-valid hybrid: normalization lets the nested strategies
+  // win and would silently drop the flat set fields, degrading the write path.
+  // Rather than honoring a third format outside the target schema, the hybrid
+  // fails at load — same philosophy as the `domain.unknown` check: explicit
+  // failure over silent degradation. Only the pure flat format stays
+  // retrocompatible; the flat `attribute` + nested `set` mix remains valid
+  // (attribute feeds the get fallback).
+  if (raw['set_service'] !== undefined || raw['set_value_key'] !== undefined) {
+    fail(
+      'flat "set_service"/"set_value_key" cannot be combined with the strategy format ("get"/"set"): the flat set fields would be silently dropped; declare a nested "set" strategy instead',
+    )
+  }
   const get = raw['get']
   if (get !== undefined) {
     if (!isRecord(get)) fail('get strategy must be an object')

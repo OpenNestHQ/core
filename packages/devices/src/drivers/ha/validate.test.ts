@@ -413,6 +413,53 @@ describe('validateDeviceBindings — old flat format untouched', () => {
   })
 })
 
+describe('validateDeviceBindings — mixed flat set fields and strategy format', () => {
+  it('should throw when flat set fields sit next to a nested get', () => {
+    expectInvalid(
+      {
+        properties: {
+          volume: {
+            type: 'number',
+            entity: 'media_player.salon',
+            get: { kind: 'attribute', attribute: 'volume_level' },
+            set_service: 'media_player.volume_set',
+            set_value_key: 'volume_level',
+          },
+        },
+      },
+      /device "d1", property "volume": flat "set_service"\/"set_value_key" cannot be combined with the strategy format/,
+    )
+  })
+
+  it('should throw when flat set fields sit next to a nested set', () => {
+    expectInvalid(
+      {
+        properties: {
+          power: {
+            type: 'boolean',
+            entity: 'switch.salon',
+            set: { kind: 'inferred' },
+            set_service: 'switch.turn_on',
+          },
+        },
+      },
+      /property "power": flat "set_service"\/"set_value_key" cannot be combined with the strategy format/,
+    )
+  })
+
+  it('should keep the flat attribute + nested set mix valid', () => {
+    expectValid({
+      properties: {
+        volume: {
+          entity: 'media_player.salon',
+          attribute: 'volume_level',
+          set: { kind: 'service', service: 'media_player.volume_set' },
+        },
+      },
+    })
+  })
+})
+
 describe('validateDeviceBindings — non-binding shapes', () => {
   it('should accept a config without properties or actions', () => {
     expectValid({ entity: 'switch.salon' })
