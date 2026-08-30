@@ -1953,6 +1953,119 @@ describe('HADriver', () => {
       await driver.close()
     })
 
+    it('should clear the whole store after a set by script (unknown scope)', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'switch.test': compressed('off'),
+        'switch.other': compressed('on'),
+      })
+
+      let fetchCount = 0
+      mockFetch(url => {
+        if (!url.includes('/states/')) return jsonResponse([])
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const scriptConfig = {
+        properties: {
+          power: {
+            entity: 'switch.test',
+            set: {
+              kind: 'script',
+              script: 'script.set_power',
+              fields: { state: '$value' },
+            },
+          },
+        },
+      }
+      const otherConfig = {
+        properties: { power: { entity: 'switch.other' } },
+      }
+
+      await driver.setProperty('d1', 'power', true, scriptConfig)
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
+      expect(fetchCount).toBe(2)
+      await driver.close()
+    })
+
+    it('should drop the declared target entities of a set service call', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'switch.test': compressed('off'),
+        'switch.other': compressed('on'),
+      })
+
+      let fetchCount = 0
+      mockFetch(url => {
+        if (!url.includes('/states/')) return jsonResponse([])
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const targetConfig = {
+        properties: {
+          power: {
+            entity: 'switch.test',
+            set: {
+              kind: 'service',
+              service: 'switch.turn_on',
+              target: { entity_id: 'switch.other' },
+            },
+          },
+        },
+      }
+      const otherConfig = {
+        properties: { power: { entity: 'switch.other' } },
+      }
+
+      await driver.setProperty('d1', 'power', true, targetConfig)
+
+      expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
+      expect(fetchCount).toBe(1)
+      await driver.close()
+    })
+
+    it('should clear the whole store after an action by script (unknown scope)', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'switch.test': compressed('off'),
+        'switch.other': compressed('on'),
+      })
+
+      let fetchCount = 0
+      mockFetch(url => {
+        if (!url.includes('/states/')) return jsonResponse([])
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const scriptAction = {
+        actions: {
+          boost: {
+            kind: 'script',
+            script: 'script.boost',
+            fields: { minutes: '$minutes' },
+          },
+        },
+      }
+      const otherConfig = {
+        properties: { power: { entity: 'switch.other' } },
+      }
+
+      await driver.executeAction('d1', 'boost', { minutes: 5 }, scriptAction)
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
+      expect(fetchCount).toBe(2)
+      await driver.close()
+    })
+
     it('should re-subscribe and rebuild the store after a reconnection', async () => {
       vi.useFakeTimers()
       try {

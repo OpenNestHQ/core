@@ -161,6 +161,7 @@ export class HADriver implements DeviceDriver {
     let domain: string
     let service: string
     let payload: Record<string, unknown>
+    let writtenEntities: string[]
 
     switch (set.kind) {
       case 'inferred': {
@@ -171,6 +172,7 @@ export class HADriver implements DeviceDriver {
           ;[domain, service] = splitService(`${extractDomain(entity)}.unknown`)
         }
         payload = { entity_id: entity }
+        writtenEntities = [entity]
         break
       }
       case 'service': {
@@ -182,6 +184,7 @@ export class HADriver implements DeviceDriver {
         if (set.key !== undefined) {
           payload[set.key] = value
         }
+        writtenEntities = [entity, ...targetEntityIds(set.target)]
         break
       }
       case 'script': {
@@ -193,6 +196,7 @@ export class HADriver implements DeviceDriver {
           entity_id: set.script,
           fields: interpolateFields(set.fields, { value }),
         }
+        writtenEntities = []
         break
       }
       default: {
@@ -202,7 +206,7 @@ export class HADriver implements DeviceDriver {
     }
 
     await this.callService(domain, service, payload)
-    this.invalidateEntityState([entity])
+    this.invalidateEntityState(writtenEntities)
     this.stateCache.clear()
   }
 
@@ -389,8 +393,8 @@ export class HADriver implements DeviceDriver {
 
   // The push feed can lag behind HA right after a write, so drop only the
   // entities the call may have touched from the live store. When the scope
-  // cannot be determined (action without an entity_id target), fall back to
-  // dropping everything to guarantee no stale read.
+  // cannot be determined (action without an entity_id target, or any script
+  // write), fall back to dropping everything to guarantee no stale read.
   private invalidateEntityState(entityIds: string[]): void {
     if (entityIds.length === 0) {
       this.entityStates.clear()
