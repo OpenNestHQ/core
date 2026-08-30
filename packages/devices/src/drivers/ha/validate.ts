@@ -99,6 +99,13 @@ function validateValueMaps(raw: Record<string, unknown>, fail: Failer): void {
       `type must be "boolean", "number" or "string" (got ${quote(raw['type'])})`,
     )
   }
+  // `values` is a string contract: the get-side membership check compares
+  // strings, so a boolean/number declared type could never satisfy it.
+  if (Array.isArray(values) && type !== undefined && type !== 'string') {
+    fail(
+      `values cannot apply to the declared type "${type}" (values is a string contract)`,
+    )
+  }
   const byTarget = new Map<unknown, string[]>()
   if (isRecord(map)) {
     for (const [key, target] of Object.entries(map)) {

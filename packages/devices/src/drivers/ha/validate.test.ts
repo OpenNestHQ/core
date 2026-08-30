@@ -309,6 +309,27 @@ describe('validateDeviceBindings — value maps', () => {
     )
   })
 
+  it('should throw when values is declared with a non-string type', () => {
+    expectInvalid(
+      {
+        properties: {
+          level: {
+            type: 'number',
+            values: ['1', '2'],
+            entity: 'sensor.salon',
+            get: { kind: 'state' },
+            set: {
+              kind: 'service',
+              service: 'sensor.set_level',
+              key: 'level',
+            },
+          },
+        },
+      },
+      /property "level": values cannot apply to the declared type "number" \(values is a string contract\)/,
+    )
+  })
+
   it('should throw when map is not an object', () => {
     expectInvalid(
       {
