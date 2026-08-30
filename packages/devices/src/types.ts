@@ -3,6 +3,7 @@ export interface DevicePropertyConfig {
   description?: string
   range?: [number, number]
   values?: string[]
+  map?: Record<string, unknown>
   [key: string]: unknown
 }
 

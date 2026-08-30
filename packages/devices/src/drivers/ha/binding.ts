@@ -3,6 +3,10 @@ export interface HARawPropertyConfig {
   attribute?: string
   set_service?: string
   set_value_key?: string
+  type?: 'boolean' | 'number' | 'string'
+  values?: string[]
+  map?: Record<string, unknown>
+  map_set?: Record<string, unknown>
 }
 
 export interface HARawActionConfig {

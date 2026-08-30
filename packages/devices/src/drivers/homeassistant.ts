@@ -7,6 +7,7 @@ import {
   splitService,
 } from './ha/binding.js'
 import { isRecord, validateDeviceBindings } from './ha/validate.js'
+import { mapGetValue } from './ha/values.js'
 import { validateActionArgs } from './ha/args.js'
 import { HAWebSocketClient, toHaWsUrl } from './ha/ws.js'
 import type { HAIncomingMessage } from './ha/ws.js'
@@ -105,6 +106,7 @@ export class HADriver implements DeviceDriver {
     if (!entry) return null
 
     const get = entry.binding.get
+    let value: unknown
     switch (get.kind) {
       case 'state':
       case 'attribute': {
@@ -112,12 +114,20 @@ export class HADriver implements DeviceDriver {
         if (get.kind === 'attribute') {
           const attrs = state['attributes'] as
             Record<string, unknown> | undefined
-          return attrs?.[get.attribute] ?? null
+          value = attrs?.[get.attribute] ?? null
+        } else {
+          value = state['state']
+          // The declared contract (map or type) replaces the legacy on/off/
+          // number heuristic; untyped unmapped properties keep it.
+          if (entry.raw.map === undefined && entry.raw.type === undefined) {
+            value = parseHaState(value)
+          }
         }
-        return parseHaState(state['state'])
+        break
       }
       case 'template':
-        return this.renderTemplate(get.template, runtime)
+        value = await this.renderTemplate(get.template, runtime)
+        break
       case 'script': {
         const result = await this.wsServiceResponse(
           'script',
@@ -127,11 +137,12 @@ export class HADriver implements DeviceDriver {
           deviceId,
           property,
         )
-        return unwrapResponseVariable(result)
+        value = unwrapResponseVariable(result)
+        break
       }
       case 'service_response': {
         const [domain, service] = splitService(get.service)
-        return this.wsServiceResponse(
+        value = await this.wsServiceResponse(
           domain,
           service,
           get.fields ?? {},
@@ -139,12 +150,18 @@ export class HADriver implements DeviceDriver {
           deviceId,
           property,
         )
+        break
       }
       default: {
         const unknownKind = (get as HAGetStrategy).kind
         throw new Error(`HA get strategy "${unknownKind}" is not supported`)
       }
     }
+    return mapGetValue(
+      value,
+      entry.raw,
+      `HA get for device "${deviceId}", property "${property}"`,
+    )
   }
 
   async setProperty(
