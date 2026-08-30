@@ -1643,6 +1643,12 @@ describe('HADriver', () => {
       })
 
       it('should validate the set value against the declared values', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((url, init) => {
+          calls.push({ url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
         const driver = await initDriver()
         await expect(
           driver.setProperty('d1', 'hvac_mode', 'turbo', {
@@ -1662,6 +1668,7 @@ describe('HADriver', () => {
         ).rejects.toThrow(
           /HA set for device "d1", property "hvac_mode": value "turbo" is not one of the declared values "auto", "heat", "cool", "off"/,
         )
+        expect(calls).toHaveLength(0)
       })
 
       it('should validate set values of legacy flat configs against the declared values', async () => {
