@@ -93,8 +93,10 @@ properties:
 ```
 
 - `entity` — the HA entity the property reads from and/or writes to.
-  Required by `state`/`attribute` gets and `inferred`/`service` sets;
-  `template`, `script` and `service_response` strategies need none.
+  Needed by `state`/`attribute` gets and `inferred`/`service` sets;
+  `template`, `script` and `service_response` strategies need none. Its
+  presence is not checked at load: a binding missing `entity` passes the
+  validation and fails on the first call that needs it.
 - Omitting a side falls back to the default strategy — `state` for the
   get, `inferred` for the set, the same defaults the flat format applies.
   Read-only and write-only properties are a convention, not an enforced
@@ -356,9 +358,11 @@ optional arguments optional.
 
 The optional `parameters` contract is enforced at call time, before any HA
 call: required presence, `type` (`string`/`number`/`power`/`enum`), allowed
-`values` and numeric `range`. It applies to both formats, and placeholders
-are cross-checked against it at load: a `$name` placeholder without a
-matching declared parameter is an orphan and fails the load.
+`values` and numeric `range`. It applies to both formats. When `parameters`
+is declared, placeholders are cross-checked against it at load: a `$name`
+placeholder without a matching declared parameter is an orphan and fails
+the load; without a declared contract, placeholder names stay open and
+pass the validation.
 
 #### Load-time validation
 
@@ -418,3 +422,13 @@ The value contract (`type` / `values` / `map` / `map_set`) is shared by both
 formats at runtime; it is only load-validated on strategy-format properties,
 so flat configs with an unknown `type` keep the legacy on/off/number
 heuristic.
+
+## Exports
+
+| Export | Kind | Description |
+|---|---|---|
+| `DeviceRegistry` | class | YAML → Device factory |
+| `MockDriver` | class | In-memory mock driver |
+| `HADriver` | class | Home Assistant driver (REST + websocket) |
+| `DeviceDriver` | type | Driver interface |
+| `Device`, `DeviceEntry`, `InventoryYaml` | types | Device and inventory types |
