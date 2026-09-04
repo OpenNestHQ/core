@@ -1,0 +1,174 @@
+# Example Home Assistant inventory using the declarative binding format.
+#
+# Every property and action below is written in the strategy format and must
+# pass the driver's load-time validation (src/drivers/ha/validate.ts). The
+# test src/drivers/ha/examples.test.ts pins this file to that validation,
+# together with every `yaml` snippet of the package README — which documents
+# the full format reference (get/set/action strategies, value contracts,
+# websocket semantics and flat-format migration).
+
+drivers:
+  homeassistant:
+    url: http://homeassistant.local:8123
+    token: <long-lived-access-token>
+
+rooms:
+  - salon
+  - chambre
+
+devices:
+  # Boolean light: explicit state get + inferred set. `inferred` resolves the
+  # service from the entity domain (light.turn_on / light.turn_off); it can
+  # only write booleans.
+  - id: lamp_salon
+    type: light
+    room: salon
+    name: Lampe du salon
+    driver: homeassistant
+    properties:
+      power:
+        type: boolean
+        entity: light.salon
+        get:
+          kind: state
+        set:
+          kind: inferred
+    actions: []
+
+  # Speaker: attribute get + service set writing the value under a declared
+  # key, service actions with target/data, and a script action taking a
+  # declared argument.
+  - id: speaker_salon
+    type: speaker
+    room: salon
+    name: Enceinte du salon
+    driver: homeassistant
+    properties:
+      volume:
+        type: number
+        entity: media_player.salon
+        get:
+          kind: attribute
+          attribute: volume_level
+        set:
+          kind: service
+          service: media_player.volume_set
+          key: volume_level
+      playing:
+        type: boolean
+        entity: media_player.salon
+        get:
+          kind: state
+        set:
+          kind: inferred
+    actions:
+      play:
+        kind: service
+        service: media_player.media_play
+        target:
+          entity_id: media_player.salon
+      play_favorites:
+        kind: script
+        script: script.play_favorites
+        fields:
+          speaker: media_player.salon
+
+  # Thermostat: write-only script set ($value), mapped hvac mode with an
+  # explicit map_set, read-only attribute gets, a template read and a
+  # service_response read.
+  - id: thermostat_chambre
+    type: thermostat
+    room: chambre
+    name: Thermostat de la chambre
+    driver: homeassistant
+    properties:
+      # Write-only property: no `get` declared, so it is never read.
+      away:
+        set:
+          kind: script
+          script: script.set_away
+          fields:
+            mode: $value
+      # Multiple HA states translate to one OpenNest value (heat_cool → auto),
+      # so the set direction needs an explicit map_set.
+      hvac_mode:
+        type: string
+        values: [auto, heat, cool, off]
+        entity: climate.chambre
+        get:
+          kind: attribute
+          attribute: hvac_mode
+        map:
+          heat_cool: auto
+          auto: auto
+          heat: heat
+          cool: cool
+          off: off
+        map_set:
+          auto: heat_cool
+          heat: heat
+          cool: cool
+          off: off
+        set:
+          kind: service
+          service: climate.set_hvac_mode
+          key: hvac_mode
+      # Read-only properties: no `set` declared.
+      current_temperature:
+        type: number
+        entity: climate.chambre
+        get:
+          kind: attribute
+          attribute: current_temperature
+      # Template reads go over REST (POST /api/template); no entity needed.
+      outdoor_temperature:
+        type: number
+        get:
+          kind: template
+          template: '{{ states("sensor.outdoor") | float }}'
+      # Service responses are read over the websocket (return_response).
+      forecast:
+        get:
+          kind: service_response
+          service: weather.get_forecasts
+          fields:
+            entity_id: weather.home
+    actions:
+      boost:
+        kind: script
+        script: script.boost
+        fields:
+          minutes: $minutes
+        parameters:
+          - name: minutes
+            type: number
+            required: true
+            range: [1, 60]
+
+  # TV: state get on a media player entity, a script read (websocket response
+  # variable) and a service action with fixed data.
+  - id: tv_salon
+    type: tv
+    room: salon
+    name: TV du salon
+    driver: homeassistant
+    properties:
+      power:
+        type: boolean
+        entity: media_player.salon
+        get:
+          kind: state
+        set:
+          kind: inferred
+      summary:
+        get:
+          kind: script
+          script: script.daily_summary
+    actions:
+      mute:
+        kind: service
+        service: media_player.volume_mute
+        target:
+          entity_id: media_player.salon
+        data:
+          is_volume_muted: true
