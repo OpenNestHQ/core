@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import yaml from 'js-yaml'
+import { PLACEHOLDER_RE } from './binding.js'
 import { isRecord, validateDeviceBindings } from './validate.js'
 
 // The binding-format documentation ships runnable examples: a commented
@@ -15,6 +16,21 @@ const YAML_FENCE = /^```yaml\n([\s\S]*?)^```$/gm
 
 function loadYaml(url: URL): unknown {
   return yaml.load(readFileSync(url, 'utf-8'))
+}
+
+// Whole-field placeholders only: a literal merely containing "$value" does
+// not carry the value.
+function hasValuePlaceholder(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return PLACEHOLDER_RE.exec(value)?.[1] === 'value'
+  }
+  if (Array.isArray(value)) {
+    return value.some(hasValuePlaceholder)
+  }
+  if (isRecord(value)) {
+    return Object.values(value).some(hasValuePlaceholder)
+  }
+  return false
 }
 
 function haDeviceEntries(inventory: unknown): Record<string, unknown>[] {
@@ -74,7 +90,7 @@ describe('HA binding doc examples', () => {
               setFeatures.add('service key')
             }
             if (set['kind'] === 'script') {
-              if (JSON.stringify(set['fields']).includes('$value')) {
+              if (hasValuePlaceholder(set['fields'])) {
                 setFeatures.add('$value placeholder')
               }
             }
