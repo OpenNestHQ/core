@@ -73,16 +73,17 @@ devices:
         fields:
           speaker: media_player.salon
 
-  # Thermostat: write-only script set ($value), mapped hvac mode with an
-  # explicit map_set, read-only attribute gets, a template read and a
-  # service_response read.
+  # Thermostat: script set carrying the value through $value, mapped hvac
+  # mode with an explicit map_set, plain attribute gets, a template read
+  # and a service_response read.
   - id: thermostat_chambre
     type: thermostat
     room: chambre
     name: Thermostat de la chambre
     driver: homeassistant
     properties:
-      # Write-only property: no `get` declared, so it is never read.
+      # No `get` declared → the default state strategy stays; write-only
+      # is a convention, not an enforced contract.
       away:
         set:
           kind: script
@@ -113,7 +114,8 @@ devices:
           kind: service
           service: climate.set_hvac_mode
           key: hvac_mode
-      # Read-only properties: no `set` declared.
+      # No `set` declared → the default inferred strategy stays; read-only
+      # is a convention, not an enforced contract.
       current_temperature:
         type: number
         entity: climate.chambre

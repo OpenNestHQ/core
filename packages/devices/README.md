@@ -95,9 +95,15 @@ properties:
 - `entity` — the HA entity the property reads from and/or writes to.
   Required by `state`/`attribute` gets and `inferred`/`service` sets;
   `template`, `script` and `service_response` strategies need none.
-- Omit `get` to read the entity state by default; omit `set` for a
-  read-only property (the default `inferred` set is then simply never
-  called). A write-only property declares `set` only.
+- Omitting a side falls back to the default strategy — `state` for the
+  get, `inferred` for the set, the same defaults the flat format applies.
+  Read-only and write-only properties are a convention, not an enforced
+  contract: a property declared without `set` still accepts assignments
+  through the default `inferred` strategy (a boolean silently resolves the
+  entity-domain `turn_on`/`turn_off` services, a non-boolean value fails on
+  the invalid `<domain>.unknown` service), and a property declared without
+  `get` stays readable through the default `state` strategy, failing with
+  an opaque fetch error when no `entity` is declared.
 
 #### get strategies
 
