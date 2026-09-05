@@ -3,6 +3,10 @@ export interface HARawPropertyConfig {
   attribute?: string
   set_service?: string
   set_value_key?: string
+  type?: 'boolean' | 'number' | 'string'
+  values?: string[]
+  map?: Record<string, unknown>
+  map_set?: Record<string, unknown>
 }
 
 export interface HARawActionConfig {
@@ -24,7 +28,12 @@ export type HAGetStrategy =
 
 export type HASetStrategy =
   | { kind: 'inferred' }
-  | { kind: 'service'; service: string; key?: string }
+  | {
+      kind: 'service'
+      service: string
+      key?: string
+      target?: Record<string, unknown>
+    }
   | { kind: 'script'; script: string; fields: Record<string, unknown> }
 
 export type HAActionStrategy =
@@ -67,9 +76,17 @@ export function normalizePropertyConfig(raw: HARawPropertyConfig): HABinding {
 // `get`/`set` keys is the strategy format and its nested strategies win; the
 // flat `attribute` field still feeds the get fallback (target schema keeps it
 // alongside a nested `set`), and missing sides default like the flat format
-// (state / inferred). Anything else is the legacy flat format.
+// (state / inferred). Flat `set_service`/`set_value_key` alongside the
+// strategy format never reaches this function: validate.ts rejects that
+// hybrid at load, since the nested strategies would silently win over it.
+// Anything else is the legacy flat format.
 export function normalizePropertyBinding(raw: HARawPropertyConfig): HABinding {
   const record = raw as unknown as Record<string, unknown>
+  if (!isRecord(record)) {
+    throw new Error(
+      `Property binding must be an object with "get" or "set" keys, got ${typeof raw}: ${String(raw)}`,
+    )
+  }
   if (!('get' in record || 'set' in record)) {
     return normalizePropertyConfig(raw)
   }
@@ -85,9 +102,26 @@ export function normalizePropertyBinding(raw: HARawPropertyConfig): HABinding {
   return { get, set }
 }
 
+// Runtime mirror of validate.ts' action discriminator: a config carrying
+// `kind: 'script'` is the strategy format; anything else is the legacy flat
+// service action (an explicit `kind: 'service'` keeps the same path).
 export function normalizeActionConfig(
   raw: HARawActionConfig,
 ): HAActionStrategy {
+  const record = raw as unknown as Record<string, unknown>
+  if (record['kind'] === 'script') {
+    const script = record['script']
+    if (typeof script !== 'string' || script === '') {
+      throw new Error(
+        'Invalid action config: strategy "script" requires a "script" id (expected "script.<name>")',
+      )
+    }
+    return {
+      kind: 'script',
+      script,
+      fields: isRecord(record['fields']) ? record['fields'] : {},
+    }
+  }
   const service: Extract<HAActionStrategy, { kind: 'service' }> = {
     kind: 'service',
     service: raw.service,
@@ -104,4 +138,74 @@ export function splitService(service: string): [string, string] {
       `Invalid service format: "${service}". Expected "domain.service".`,
     )
   return [service.slice(0, dot), service.slice(dot + 1)]
+}
+
+// True when the set strategy actually writes the provided value into the HA
+// payload (`service` with a `key`, `script` with a `$value` placeholder):
+// only then does the value map apply on set. `inferred` writes booleans as
+// turn_on/turn_off services and never carries the value itself. validate.ts
+// applies the same rule to the raw config at load time.
+export function setConsumesValue(set: unknown): boolean {
+  if (!isRecord(set)) return false
+  if (set['kind'] === 'service') return set['key'] !== undefined
+  if (set['kind'] === 'script') return consumesValuePlaceholder(set['fields'])
+  return false
+}
+
+function consumesValuePlaceholder(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return PLACEHOLDER_RE.exec(value)?.[1] === 'value'
+  }
+  if (Array.isArray(value)) {
+    return value.some(item => consumesValuePlaceholder(item))
+  }
+  if (isRecord(value)) {
+    return Object.values(value).some(item => consumesValuePlaceholder(item))
+  }
+  return false
+}
+
+// Placeholders are whole declared field values (`"$value"`, `"$minutes"`);
+// validate.ts applies the same shape rules to them at load time.
+export const PLACEHOLDER_RE = /^\$([A-Za-z_][A-Za-z0-9_-]*)$/
+
+// Replaces `$name` placeholders in declared strategy fields with the provided
+// values (set: `{ value }`; action: the named call arguments). A placeholder
+// with no provided value is omitted, keeping optional arguments optional.
+export function interpolateFields(
+  fields: Record<string, unknown> | undefined,
+  values: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const rendered = interpolateValue(fields ?? {}, values ?? {})
+  return isRecord(rendered) ? rendered : {}
+}
+
+function interpolateValue(
+  value: unknown,
+  values: Record<string, unknown>,
+): unknown {
+  if (typeof value === 'string') {
+    const name = PLACEHOLDER_RE.exec(value)?.[1]
+    return name === undefined ? value : values[name]
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map(item => interpolateValue(item, values))
+      .filter(item => item !== undefined)
+  }
+  if (isRecord(value)) {
+    const rendered: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(value)) {
+      const replacement = interpolateValue(item, values)
+      if (replacement !== undefined) {
+        rendered[key] = replacement
+      }
+    }
+    return rendered
+  }
+  return value
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

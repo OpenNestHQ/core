@@ -1,11 +1,15 @@
 import { createHash } from 'node:crypto'
 import type { DeviceDriver, DriverRuntimeContext } from './interface.js'
 import {
+  interpolateFields,
   normalizeActionConfig,
   normalizePropertyBinding,
+  setConsumesValue,
   splitService,
 } from './ha/binding.js'
 import { isRecord, validateDeviceBindings } from './ha/validate.js'
+import { declaredType, mapGetValue, mapSetValue } from './ha/values.js'
+import { validateActionArgs } from './ha/args.js'
 import { HAWebSocketClient, toHaWsUrl } from './ha/ws.js'
 import type { HAIncomingMessage } from './ha/ws.js'
 import type {
@@ -14,6 +18,7 @@ import type {
   HAGetStrategy,
   HARawActionConfig,
   HARawPropertyConfig,
+  HASetStrategy,
 } from './ha/binding.js'
 
 const DOMAIN_SERVICES: Record<string, { on: string; off: string }> = {
@@ -41,6 +46,7 @@ export class HADriver implements DeviceDriver {
   private cacheProgramId: string | undefined = undefined
   private templateCache = new Map<string, { at: number; value: string }>()
   private templateCacheProgramId: string | undefined = undefined
+  private templateInFlight = new Map<string, Promise<string>>()
   private propertyBindings = new WeakMap<
     Record<string, unknown>,
     Map<string, HABinding>
@@ -101,6 +107,7 @@ export class HADriver implements DeviceDriver {
     if (!entry) return null
 
     const get = entry.binding.get
+    let value: unknown
     switch (get.kind) {
       case 'state':
       case 'attribute': {
@@ -108,12 +115,25 @@ export class HADriver implements DeviceDriver {
         if (get.kind === 'attribute') {
           const attrs = state['attributes'] as
             Record<string, unknown> | undefined
-          return attrs?.[get.attribute] ?? null
+          value = attrs?.[get.attribute] ?? null
+        } else {
+          value = state['state']
+          // The declared contract (map or a valid type) replaces the legacy
+          // on/off/number heuristic; untyped unmapped properties keep it. A
+          // mistyped `type` (flat format is not load-validated) keeps the
+          // legacy behavior instead of silently disabling the heuristic.
+          if (
+            entry.raw.map === undefined &&
+            declaredType(entry.raw.type) === undefined
+          ) {
+            value = parseHaState(value)
+          }
         }
-        return parseHaState(state['state'])
+        break
       }
       case 'template':
-        return this.renderTemplate(get.template, runtime)
+        value = await this.renderTemplate(get.template, runtime)
+        break
       case 'script': {
         const result = await this.wsServiceResponse(
           'script',
@@ -123,11 +143,12 @@ export class HADriver implements DeviceDriver {
           deviceId,
           property,
         )
-        return unwrapResponseVariable(result)
+        value = unwrapResponseVariable(result)
+        break
       }
       case 'service_response': {
         const [domain, service] = splitService(get.service)
-        return this.wsServiceResponse(
+        value = await this.wsServiceResponse(
           domain,
           service,
           get.fields ?? {},
@@ -135,16 +156,22 @@ export class HADriver implements DeviceDriver {
           deviceId,
           property,
         )
+        break
       }
       default: {
         const unknownKind = (get as HAGetStrategy).kind
         throw new Error(`HA get strategy "${unknownKind}" is not supported`)
       }
     }
+    return mapGetValue(
+      value,
+      entry.raw,
+      `HA get for device "${deviceId}", property "${property}"`,
+    )
   }
 
   async setProperty(
-    _deviceId: string,
+    deviceId: string,
     property: string,
     value: unknown,
     deviceConfig: Record<string, unknown>,
@@ -154,13 +181,12 @@ export class HADriver implements DeviceDriver {
 
     const entity = entry.raw.entity
     const set = entry.binding.set
-
-    const payload: Record<string, unknown> = {
-      entity_id: entity,
-    }
+    const prefix = `HA set for device "${deviceId}", property "${property}"`
 
     let domain: string
     let service: string
+    let payload: Record<string, unknown>
+    let writtenEntities: string[]
 
     switch (set.kind) {
       case 'inferred': {
@@ -170,26 +196,51 @@ export class HADriver implements DeviceDriver {
         } else {
           ;[domain, service] = splitService(`${extractDomain(entity)}.unknown`)
         }
+        payload = { entity_id: entity }
+        writtenEntities = [entity]
         break
       }
       case 'service': {
         ;[domain, service] = splitService(set.service)
-        if (set.key !== undefined) {
-          payload[set.key] = value
+        payload = { entity_id: entity }
+        if (set.target) {
+          Object.assign(payload, set.target)
         }
+        if (set.key !== undefined) {
+          payload[set.key] = mapSetValue(value, entry.raw, prefix)
+        }
+        writtenEntities = [entity, ...targetEntityIds(set.target)]
         break
       }
-      default:
-        throw new Error(`HA set strategy "${set.kind}" is not supported`)
+      case 'script': {
+        // Writes stay on REST (like every set/action path): scripts need no
+        // response here, so no websocket coupling is introduced. The value is
+        // mapped only when a `$value` placeholder actually carries it.
+        domain = 'script'
+        service = 'turn_on'
+        const written = setConsumesValue(set)
+          ? mapSetValue(value, entry.raw, prefix)
+          : value
+        payload = {
+          entity_id: set.script,
+          fields: interpolateFields(set.fields, { value: written }),
+        }
+        writtenEntities = []
+        break
+      }
+      default: {
+        const unknownKind = (set as HASetStrategy).kind
+        throw new Error(`HA set strategy "${unknownKind}" is not supported`)
+      }
     }
 
     await this.callService(domain, service, payload)
-    this.invalidateEntityState([entity])
+    this.invalidateEntityState(writtenEntities)
     this.stateCache.clear()
   }
 
   async executeAction(
-    _deviceId: string,
+    deviceId: string,
     action: string,
     args: Record<string, unknown>,
     deviceConfig: Record<string, unknown>,
@@ -201,24 +252,52 @@ export class HADriver implements DeviceDriver {
 
     const strategy = this.actionStrategy(deviceConfig, action, raw)
 
-    if (strategy.kind !== 'service') {
-      throw new Error(`HA action strategy "${strategy.kind}" is not supported`)
-    }
+    validateActionArgs(
+      deviceId,
+      action,
+      (raw as unknown as Record<string, unknown>)['parameters'],
+      args,
+    )
 
-    const [domain, service] = splitService(strategy.service)
+    let domain: string
+    let service: string
+    let payload: Record<string, unknown>
 
-    const payload: Record<string, unknown> = {}
-
-    if (strategy.target) {
-      Object.assign(payload, strategy.target)
+    switch (strategy.kind) {
+      case 'service': {
+        ;[domain, service] = splitService(strategy.service)
+        payload = {}
+        if (strategy.target) {
+          Object.assign(payload, strategy.target)
+        }
+        if (strategy.data) {
+          Object.assign(payload, strategy.data)
+        }
+        Object.assign(payload, args)
+        break
+      }
+      case 'script': {
+        // Writes stay on REST (like every set/action path): scripts need no
+        // response here, so no websocket coupling is introduced. Argument
+        // names are mapped explicitly through the declared fields.
+        domain = 'script'
+        service = 'turn_on'
+        payload = {
+          entity_id: strategy.script,
+          fields: interpolateFields(strategy.fields, args),
+        }
+        break
+      }
+      default: {
+        const unknownKind = (strategy as HAActionStrategy).kind
+        throw new Error(`HA action strategy "${unknownKind}" is not supported`)
+      }
     }
-    if (strategy.data) {
-      Object.assign(payload, strategy.data)
-    }
-    Object.assign(payload, args)
 
     await this.callService(domain, service, payload)
-    this.invalidateEntityState(targetEntityIds(strategy.target))
+    this.invalidateEntityState(
+      strategy.kind === 'service' ? targetEntityIds(strategy.target) : [],
+    )
     this.stateCache.clear()
   }
 
@@ -304,6 +383,11 @@ export class HADriver implements DeviceDriver {
 
   // Service responses only exist over the websocket (`return_response`), so a
   // down socket fails explicitly instead of falling back to REST like reads.
+  //
+  // INVARIANT: the isReady() check and the callService() call must be
+  // synchronous — inserting any `await` between them would race with the
+  // reconnect loop, which queues commands without a timer until the socket is
+  // re-flushed, causing potentially unbounded waits.
   private wsServiceResponse(
     domain: string,
     service: string,
@@ -318,9 +402,13 @@ export class HADriver implements DeviceDriver {
         `HA get strategy "${strategy}" for device "${deviceId}", property "${property}" requires the HA websocket, which is not connected (service responses have no REST fallback)`,
       )
     }
-    return client.callService(domain, service, payload, {
-      returnResponse: true,
-    })
+    return client
+      .callService(domain, service, payload, { returnResponse: true })
+      .catch((error: Error) => {
+        throw new Error(
+          `HA get strategy "${strategy}" for device "${deviceId}", property "${property}" failed: ${error.message}`,
+        )
+      })
   }
 
   // State resolution chain, most to least preferred:
@@ -343,8 +431,8 @@ export class HADriver implements DeviceDriver {
 
   // The push feed can lag behind HA right after a write, so drop only the
   // entities the call may have touched from the live store. When the scope
-  // cannot be determined (action without an entity_id target), fall back to
-  // dropping everything to guarantee no stale read.
+  // cannot be determined (action without an entity_id target, or any script
+  // write), fall back to dropping everything to guarantee no stale read.
   private invalidateEntityState(entityIds: string[]): void {
     if (entityIds.length === 0) {
       this.entityStates.clear()
@@ -406,7 +494,8 @@ export class HADriver implements DeviceDriver {
   // Template renders follow the per-program TTL pattern of the state cache
   // (same STATE_CACHE_TTL_MS) keyed by the template hash. Unlike entity
   // states they are not invalidated on writes: a template targets no entity,
-  // so the TTL alone bounds staleness.
+  // so the TTL alone bounds staleness. Concurrent renders of the same
+  // template share a single in-flight request instead of hammering HA.
   private async renderTemplate(
     template: string,
     runtime?: DriverRuntimeContext,
@@ -417,16 +506,30 @@ export class HADriver implements DeviceDriver {
         this.templateCacheProgramId = runtime.programId
       }
       this.evictExpiredTemplates()
-      const key = templateCacheKey(template)
-      const cached = this.templateCache.get(key)
+      const cached = this.templateCache.get(templateCacheKey(template))
       if (cached !== undefined) {
         return cached.value
       }
-      const value = await this.renderTemplateRemote(template)
-      this.templateCache.set(key, { at: Date.now(), value })
-      return value
     }
-    return this.renderTemplateRemote(template)
+    const value = await this.renderTemplateShared(template)
+    if (runtime?.programId) {
+      this.templateCache.set(templateCacheKey(template), {
+        at: Date.now(),
+        value,
+      })
+    }
+    return value
+  }
+
+  private renderTemplateShared(template: string): Promise<string> {
+    const key = templateCacheKey(template)
+    const inFlight = this.templateInFlight.get(key)
+    if (inFlight) return inFlight
+    const pending = this.renderTemplateRemote(template).finally(() => {
+      this.templateInFlight.delete(key)
+    })
+    this.templateInFlight.set(key, pending)
+    return pending
   }
 
   private evictExpiredTemplates(): void {
@@ -449,8 +552,10 @@ export class HADriver implements DeviceDriver {
     })
     if (!res.ok) {
       const body = await res.text()
+      const excerpt =
+        template.length > 120 ? `${template.slice(0, 120)}…` : template
       throw new Error(
-        `HA renderTemplate failed: ${res.status} ${res.statusText} — ${body}`,
+        `HA renderTemplate failed for "${excerpt}": ${res.status} ${res.statusText} — ${body}`,
       )
     }
     return res.text()
@@ -499,7 +604,8 @@ function templateCacheKey(template: string): string {
 
 // A script called with return_response answers as
 // `{ <response_variable>: value }`; the variable name belongs to the script,
-// so a single-entry response is unwrapped to its value.
+// so a single-entry response is unwrapped to its value. A script without
+// `response_variable` returns `{}` (zero keys), which is returned as-is.
 function unwrapResponseVariable(result: unknown): unknown {
   if (!isRecord(result)) return result
   const keys = Object.keys(result)

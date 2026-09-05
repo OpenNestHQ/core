@@ -25,8 +25,17 @@ function textResponse(text: string, status: number): Response {
 
 const GLOBAL_CONFIG = { url: 'http://ha.local:8123', token: 'test-token-123' }
 
+// A driver left open by a test keeps its websocket client reconnecting in the
+// background (~1/s with real timers). When a later test installs fake timers
+// and stubs WebSocket, those stray reconnects create sockets that end up as
+// RealtimeWs.last() and hijack the reconnection test. Reap every driver
+// created via makeDriver() after each test.
+const openDrivers: HADriver[] = []
+
 function makeDriver(): HADriver {
-  return new HADriver()
+  const driver = new HADriver()
+  openDrivers.push(driver)
+  return driver
 }
 
 async function initDriver(config = GLOBAL_CONFIG): Promise<HADriver> {
@@ -45,7 +54,10 @@ describe('HADriver', () => {
     vi.clearAllMocks()
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const driver of openDrivers.splice(0)) {
+      await driver.close()
+    }
     vi.unstubAllGlobals()
   })
 
@@ -355,13 +367,340 @@ describe('HADriver', () => {
       }
     })
 
+    it('should dedupe concurrent renders of the same template into one call', async () => {
+      let fetchCount = 0
+      mockFetch(async () => {
+        fetchCount++
+        await new Promise(resolve => setTimeout(resolve, 5))
+        return new Response('rendered', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const config = templateConfig('{{ a }}')
+
+      const [first, second] = await Promise.all([
+        driver.getProperty('d1', 'label', config),
+        driver.getProperty('d1', 'label', config),
+      ])
+
+      expect(first).toBe('rendered')
+      expect(second).toBe('rendered')
+      expect(fetchCount).toBe(1)
+    })
+
+    it('should retry a template render after a concurrent failure', async () => {
+      let calls = 0
+      mockFetch(async () => {
+        calls++
+        if (calls === 1) return textResponse('boom', 500)
+        return new Response('ok', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const config = templateConfig('{{ a }}')
+
+      const first = driver.getProperty('d1', 'label', config)
+      const second = driver.getProperty('d1', 'label', config)
+      await expect(first).rejects.toThrow(/renderTemplate failed/)
+      await expect(second).rejects.toThrow(/renderTemplate failed/)
+
+      const third = await driver.getProperty('d1', 'label', config)
+      expect(third).toBe('ok')
+      expect(calls).toBe(2)
+    })
+
+    it('should cache a joined render for the caller declaring a program', async () => {
+      let fetchCount = 0
+      mockFetch(async () => {
+        fetchCount++
+        await new Promise(resolve => setTimeout(resolve, 5))
+        return new Response('rendered', { status: 200 })
+      })
+
+      const driver = await initDriver()
+      const config = templateConfig('{{ a }}')
+
+      const withoutRuntime = driver.getProperty('d1', 'label', config)
+      const withRuntime = driver.getProperty('d1', 'label', config, {
+        programId: 'program-1',
+      })
+      await Promise.all([withoutRuntime, withRuntime])
+      expect(fetchCount).toBe(1)
+
+      await driver.getProperty('d1', 'label', config, {
+        programId: 'program-1',
+      })
+      expect(fetchCount).toBe(1)
+    })
+
     it('should throw with the HA response body on template failure', async () => {
       mockFetch(() => textResponse('template error', 400))
 
       const driver = await initDriver()
       await expect(
         driver.getProperty('d1', 'label', templateConfig('{{ a }}')),
-      ).rejects.toThrow(/renderTemplate failed.*template error/s)
+      ).rejects.toThrow(/renderTemplate failed for "{{ a }}".*template error/s)
+    })
+  })
+
+  describe('getProperty — value mapping and coercion', () => {
+    it('should translate a mapped HA value into the OpenNest value on get', async () => {
+      mockFetch(() =>
+        jsonResponse({
+          state: 'cooling',
+          attributes: { hvac_action: 'cooling' },
+        }),
+      )
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'hvac_mode', {
+        properties: {
+          hvac_mode: {
+            type: 'string',
+            values: ['auto', 'heat', 'cool', 'off'],
+            entity: 'climate.salon',
+            map: { cooling: 'cool', heating: 'heat' },
+            get: { kind: 'attribute', attribute: 'hvac_action' },
+            set: {
+              kind: 'service',
+              service: 'climate.set_hvac_mode',
+              key: 'hvac_mode',
+            },
+          },
+        },
+      })
+
+      expect(value).toBe('cool')
+    })
+
+    it('should pass an unmapped value through raw when values are not declared', async () => {
+      mockFetch(() => jsonResponse({ state: 'auto', attributes: {} }))
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'hvac_mode', {
+        properties: {
+          hvac_mode: {
+            entity: 'climate.salon',
+            map: { cooling: 'cool', heating: 'heat' },
+            get: { kind: 'state' },
+          },
+        },
+      })
+
+      expect(value).toBe('auto')
+    })
+
+    it('should throw when the raw value misses the map and the declared values', async () => {
+      mockFetch(() => jsonResponse({ state: 'warming', attributes: {} }))
+
+      const driver = await initDriver()
+      await expect(
+        driver.getProperty('d1', 'hvac_mode', {
+          properties: {
+            hvac_mode: {
+              type: 'string',
+              values: ['cool', 'heat'],
+              entity: 'climate.salon',
+              map: { cooling: 'cool', heating: 'heat' },
+              get: { kind: 'state' },
+            },
+          },
+        }),
+      ).rejects.toThrow(
+        /HA get for device "d1", property "hvac_mode": value "warming" is not one of the declared values "cool", "heat"/,
+      )
+    })
+
+    it('should throw when a typed get result violates the declared values', async () => {
+      mockFetch(() => jsonResponse({ state: 'idle', attributes: {} }))
+
+      const driver = await initDriver()
+      await expect(
+        driver.getProperty('d1', 'hvac_mode', {
+          properties: {
+            hvac_mode: {
+              type: 'string',
+              values: ['auto', 'off'],
+              entity: 'climate.salon',
+              get: { kind: 'state' },
+            },
+          },
+        }),
+      ).rejects.toThrow(/value "idle" is not one of the declared values/)
+    })
+
+    it('should keep string states unparsed when type string is declared', async () => {
+      mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'hvac_mode', {
+        properties: {
+          hvac_mode: {
+            type: 'string',
+            entity: 'climate.salon',
+            get: { kind: 'state' },
+          },
+        },
+      })
+
+      expect(value).toBe('on')
+    })
+
+    it('should coerce on/off states when type boolean is declared', async () => {
+      mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'power', {
+        properties: {
+          power: {
+            type: 'boolean',
+            entity: 'switch.test',
+            get: { kind: 'state' },
+          },
+        },
+      })
+
+      expect(value).toBe(true)
+    })
+
+    it('should keep the legacy heuristic for flat configs with a mistyped type', async () => {
+      mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'power', {
+        properties: {
+          power: { entity: 'switch.test', type: 'bool' },
+        },
+      })
+
+      expect(value).toBe(true)
+    })
+
+    it('should coerce numeric states when type number is declared', async () => {
+      mockFetch(() => jsonResponse({ state: '42.5', attributes: {} }))
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'temperature', {
+        properties: {
+          temperature: {
+            type: 'number',
+            entity: 'sensor.temp',
+            get: { kind: 'state' },
+          },
+        },
+      })
+
+      expect(value).toBe(42.5)
+    })
+
+    it('should throw on a state not coercible to the declared type', async () => {
+      mockFetch(() => jsonResponse({ state: 'idle', attributes: {} }))
+
+      const driver = await initDriver()
+      await expect(
+        driver.getProperty('d1', 'power', {
+          properties: {
+            power: {
+              type: 'boolean',
+              entity: 'switch.test',
+              get: { kind: 'state' },
+            },
+          },
+        }),
+      ).rejects.toThrow(
+        /HA get for device "d1", property "power": value "idle" is not coercible to the declared type "boolean"/,
+      )
+    })
+
+    it('should throw on unavailable and unknown states for contract-bound properties', async () => {
+      mockFetch(() => jsonResponse({ state: 'unavailable', attributes: {} }))
+
+      const driver = await initDriver()
+      const config = {
+        properties: {
+          hvac_mode: {
+            type: 'string',
+            values: ['auto', 'heat', 'cool', 'off'],
+            entity: 'climate.salon',
+            map: { cooling: 'cool', heating: 'heat' },
+            get: { kind: 'state' },
+          },
+        },
+      }
+      await expect(
+        driver.getProperty('d1', 'hvac_mode', config),
+      ).rejects.toThrow(/value "unavailable" is not one of the declared values/)
+
+      mockFetch(() => jsonResponse({ state: 'unknown', attributes: {} }))
+      await expect(
+        driver.getProperty('d1', 'hvac_mode', config),
+      ).rejects.toThrow(/value "unknown" is not one of the declared values/)
+    })
+
+    it('should pass a missing attribute through as null for contract-bound properties', async () => {
+      mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
+
+      const driver = await initDriver()
+      await expect(
+        driver.getProperty('d1', 'temperature', {
+          properties: {
+            temperature: {
+              type: 'number',
+              entity: 'climate.salon',
+              get: { kind: 'attribute', attribute: 'current_temperature' },
+            },
+          },
+        }),
+      ).resolves.toBeNull()
+      await expect(
+        driver.getProperty('d1', 'hvac_mode', {
+          properties: {
+            hvac_mode: {
+              type: 'string',
+              values: ['auto', 'heat', 'cool', 'off'],
+              entity: 'climate.salon',
+              map: { cooling: 'cool', heating: 'heat' },
+              get: { kind: 'attribute', attribute: 'hvac_action' },
+            },
+          },
+        }),
+      ).resolves.toBeNull()
+    })
+
+    it('should coerce the rendered template text to the declared type', async () => {
+      mockFetch((url, init) => {
+        expect(url).toBe('http://ha.local:8123/api/template')
+        expect(JSON.parse(String(init?.body))).toEqual({ template: '{{ x }}' })
+        return textResponse(' 42.5\n', 200)
+      })
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'temperature', {
+        properties: {
+          temperature: {
+            type: 'number',
+            get: { kind: 'template', template: '{{ x }}' },
+          },
+        },
+      })
+
+      expect(value).toBe(42.5)
+    })
+
+    it('should coerce an on/off template text when type boolean is declared', async () => {
+      mockFetch(() => textResponse('off\n', 200))
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'power', {
+        properties: {
+          power: {
+            type: 'boolean',
+            get: { kind: 'template', template: '{{ states("switch.a") }}' },
+          },
+        },
+      })
+
+      expect(value).toBe(false)
     })
   })
 
@@ -424,6 +763,15 @@ describe('HADriver', () => {
 
       respond(id: number, result: unknown): void {
         this.serverMessage({ id, type: 'result', success: true, result })
+      }
+
+      errorRespond(id: number, code: string, message: string): void {
+        this.serverMessage({
+          id,
+          type: 'result',
+          success: false,
+          error: { code, message },
+        })
       }
 
       lastSent(): Record<string, unknown> {
@@ -549,6 +897,50 @@ describe('HADriver', () => {
       await driver.close()
     })
 
+    it('should translate a mapped script response on get', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+
+      const config = {
+        properties: {
+          hvac_mode: {
+            entity: 'climate.salon',
+            type: 'string',
+            values: ['heat', 'cool'],
+            map: { heating: 'heat', cooling: 'cool' },
+            get: { kind: 'script', script: 'script.hvac_state' },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'hvac_mode', config)
+      ws.respond(ws.callId()!, { mode: 'cooling' })
+
+      await expect(pending).resolves.toBe('cool')
+      await driver.close()
+    })
+
+    it('should coerce a service_response result to the declared type on get', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+
+      const config = {
+        properties: {
+          temperature: {
+            type: 'number',
+            get: {
+              kind: 'service_response',
+              service: 'weather.get_temperature',
+            },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'temperature', config)
+      ws.respond(ws.callId()!, '21.5')
+
+      await expect(pending).resolves.toBe(21.5)
+      await driver.close()
+    })
+
     it('should throw an explicit error when the socket is down for a script get', async () => {
       vi.stubGlobal('WebSocket', ServiceWs)
       const driver = makeDriver()
@@ -593,6 +985,65 @@ describe('HADriver', () => {
       ).rejects.toThrow(
         /strategy "service_response".*device "d1".*property "forecast".*websocket.*not connected/s,
       )
+      await driver.close()
+    })
+
+    it('should wrap mid-flight ws failures with strategy/device/property context', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+
+      const config = {
+        properties: {
+          summary: {
+            get: { kind: 'script', script: 'script.daily_summary' },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'summary', config)
+
+      const callId = ws.callId()
+      expect(callId).not.toBeNull()
+      ws.errorRespond(callId!, 'unauthorized', 'connection lost')
+
+      await expect(pending).rejects.toThrow(
+        /strategy "script".*device "d1".*property "summary".*failed:.*connection lost/s,
+      )
+      await driver.close()
+    })
+
+    it('should call service_response get with empty fields payload when fields is absent', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+      mockFetch(() => {
+        throw new Error('no REST fallback for service responses')
+      })
+
+      const config = {
+        properties: {
+          forecast: {
+            get: {
+              kind: 'service_response',
+              service: 'weather.get_forecasts',
+            },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'forecast', config)
+
+      const callId = ws.callId()
+      expect(callId).not.toBeNull()
+      expect(ws.lastSent()).toEqual({
+        id: callId,
+        type: 'call_service',
+        domain: 'weather',
+        service: 'get_forecasts',
+        return_response: true,
+      })
+      ws.respond(callId!, { 'weather.home': { forecast: ['sunny'] } })
+
+      await expect(pending).resolves.toEqual({
+        'weather.home': { forecast: ['sunny'] },
+      })
       await driver.close()
     })
   })
@@ -911,6 +1362,464 @@ describe('HADriver', () => {
     })
   })
 
+  describe('setProperty — set strategies', () => {
+    it('should call the declared service with the value under the declared key', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: '50' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.setProperty('d1', 'volume', 75, {
+        properties: {
+          volume: {
+            entity: 'media_player.test',
+            set: {
+              kind: 'service',
+              service: 'media_player.volume_set',
+              key: 'volume_level',
+            },
+          },
+        },
+      })
+
+      expect(calls[0]!.url).toContain('/api/services/media_player/volume_set')
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'media_player.test',
+        volume_level: 75,
+      })
+    })
+
+    it('should merge a declared target into the set service payload', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: '50' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.setProperty('d1', 'volume', 40, {
+        properties: {
+          volume: {
+            entity: 'media_player.test',
+            set: {
+              kind: 'service',
+              service: 'media_player.volume_set',
+              key: 'volume_level',
+              target: { entity_id: 'media_player.other' },
+            },
+          },
+        },
+      })
+
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'media_player.other',
+        volume_level: 40,
+      })
+    })
+
+    it('should call the declared script with $value interpolated in fields', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: 'off' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.setProperty('d1', 'away', 'vacation', {
+        properties: {
+          away: {
+            entity: 'climate.salon',
+            set: {
+              kind: 'script',
+              script: 'script.set_away',
+              fields: { mode: '$value', note: 'declared' },
+            },
+          },
+        },
+      })
+
+      expect(calls[0]!.url).toContain('/api/services/script/turn_on')
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'script.set_away',
+        fields: { mode: 'vacation', note: 'declared' },
+      })
+    })
+
+    describe('setProperty — value mapping', () => {
+      const hvacConfig = {
+        properties: {
+          hvac_mode: {
+            type: 'string',
+            values: ['auto', 'heat', 'cool', 'off'],
+            entity: 'climate.salon',
+            map: { cooling: 'cool', heating: 'heat' },
+            get: { kind: 'attribute', attribute: 'hvac_action' },
+            set: {
+              kind: 'service',
+              service: 'climate.set_hvac_mode',
+              key: 'hvac_mode',
+            },
+          },
+        },
+      }
+
+      it('should write the inverse-mapped HA value for a bijective map', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'cool', hvacConfig)
+
+        expect(calls[0]!.url).toContain('/api/services/climate/set_hvac_mode')
+        const body = JSON.parse(calls[0]!.body)
+        expect(body).toEqual({
+          entity_id: 'climate.salon',
+          hvac_mode: 'cooling',
+        })
+      })
+
+      it('should round-trip a map whose targets need boolean coercion', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((url, init) => {
+          if (url.includes('/states/')) {
+            return jsonResponse({ state: 'on', attributes: {} })
+          }
+          calls.push({ url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        const config = {
+          properties: {
+            power: {
+              type: 'boolean',
+              entity: 'switch.salon',
+              map: { on: 'true', off: 'false' },
+              get: { kind: 'state' },
+              set: {
+                kind: 'service',
+                service: 'switch.set_state',
+                key: 'state',
+              },
+            },
+          },
+        }
+
+        await expect(driver.getProperty('d1', 'power', config)).resolves.toBe(
+          true,
+        )
+        await driver.setProperty('d1', 'power', true, config)
+
+        expect(JSON.parse(calls[0]!.body).state).toBe('on')
+      })
+
+      it('should round-trip the HA 1/0 boolean convention through coercion', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((url, init) => {
+          if (url.includes('/states/')) {
+            return jsonResponse({ state: '1', attributes: {} })
+          }
+          calls.push({ url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        const config = {
+          properties: {
+            power: {
+              type: 'boolean',
+              entity: 'switch.salon',
+              map: { '1': 'on', '0': 'off' },
+              get: { kind: 'state' },
+              set: {
+                kind: 'service',
+                service: 'switch.set_state',
+                key: 'state',
+              },
+            },
+          },
+        }
+
+        await expect(driver.getProperty('d1', 'power', config)).resolves.toBe(
+          true,
+        )
+        await driver.setProperty('d1', 'power', true, config)
+
+        expect(JSON.parse(calls[0]!.body).state).toBe('1')
+      })
+
+      it('should round-trip a map whose targets need number coercion', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((url, init) => {
+          if (url.includes('/states/')) {
+            return jsonResponse({ state: 'low', attributes: {} })
+          }
+          calls.push({ url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        const config = {
+          properties: {
+            level: {
+              type: 'number',
+              entity: 'sensor.salon',
+              map: { low: '1', high: '2' },
+              get: { kind: 'state' },
+              set: {
+                kind: 'service',
+                service: 'sensor.set_level',
+                key: 'level',
+              },
+            },
+          },
+        }
+
+        await expect(driver.getProperty('d1', 'level', config)).resolves.toBe(1)
+        await driver.setProperty('d1', 'level', 1, config)
+
+        expect(JSON.parse(calls[0]!.body).level).toBe('low')
+      })
+
+      it('should write a value absent from the map unchanged', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'off', hvacConfig)
+
+        const body = JSON.parse(calls[0]!.body)
+        expect(body.hvac_mode).toBe('off')
+      })
+
+      it('should prefer the declared map_set over the automatic inverse', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'cool', {
+          properties: {
+            hvac_mode: {
+              entity: 'climate.salon',
+              map: { cooling: 'cool' },
+              map_set: { cool: 'frost' },
+              set: {
+                kind: 'service',
+                service: 'climate.set_hvac_mode',
+                key: 'hvac_mode',
+              },
+            },
+          },
+        })
+
+        const body = JSON.parse(calls[0]!.body)
+        expect(body.hvac_mode).toBe('frost')
+      })
+
+      it('should throw when a set value is outside the declared map_set', async () => {
+        const driver = await initDriver()
+        await expect(
+          driver.setProperty('d1', 'hvac_mode', 'turbo', {
+            properties: {
+              hvac_mode: {
+                entity: 'climate.salon',
+                map_set: { cool: 'cooling', heat: 'heating' },
+                set: {
+                  kind: 'service',
+                  service: 'climate.set_hvac_mode',
+                  key: 'hvac_mode',
+                },
+              },
+            },
+          }),
+        ).rejects.toThrow(
+          /HA set for device "d1", property "hvac_mode": value "turbo" is not in the declared set map \(map_set keys: "cool", "heat"\)/,
+        )
+      })
+
+      it('should validate the set value against the declared values', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((url, init) => {
+          calls.push({ url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await expect(
+          driver.setProperty('d1', 'hvac_mode', 'turbo', {
+            properties: {
+              hvac_mode: {
+                type: 'string',
+                values: ['auto', 'heat', 'cool', 'off'],
+                entity: 'climate.salon',
+                set: {
+                  kind: 'service',
+                  service: 'climate.set_hvac_mode',
+                  key: 'hvac_mode',
+                },
+              },
+            },
+          }),
+        ).rejects.toThrow(
+          /HA set for device "d1", property "hvac_mode": value "turbo" is not one of the declared values "auto", "heat", "cool", "off"/,
+        )
+        expect(calls).toHaveLength(0)
+      })
+
+      it('should validate set values of legacy flat configs against the declared values', async () => {
+        const driver = await initDriver()
+        await expect(
+          driver.setProperty('d1', 'hvac_mode', 'turbo', {
+            properties: {
+              hvac_mode: {
+                entity: 'climate.salon',
+                values: ['auto', 'heat', 'cool', 'off'],
+                set_service: 'climate.set_hvac_mode',
+                set_value_key: 'hvac_mode',
+              },
+            },
+          }),
+        ).rejects.toThrow(/value "turbo" is not one of the declared values/)
+      })
+
+      it('should not validate the value when the set strategy does not write it', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'unmapped', {
+          properties: {
+            hvac_mode: {
+              entity: 'climate.salon',
+              values: ['cool', 'heat'],
+              set: {
+                kind: 'script',
+                script: 'script.refresh',
+                fields: { source: 'declared' },
+              },
+            },
+          },
+        })
+
+        const body = JSON.parse(calls[0]!.body)
+        expect(body.fields).toEqual({ source: 'declared' })
+      })
+
+      it('should map the $value interpolated into set script fields', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'cool', {
+          properties: {
+            hvac_mode: {
+              entity: 'climate.salon',
+              map: { cooling: 'cool' },
+              set: {
+                kind: 'script',
+                script: 'script.set_hvac',
+                fields: { mode: '$value' },
+              },
+            },
+          },
+        })
+
+        const body = JSON.parse(calls[0]!.body)
+        expect(body.fields).toEqual({ mode: 'cooling' })
+      })
+
+      it('should not map the value when the set strategy does not write it', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'unmapped', {
+          properties: {
+            hvac_mode: {
+              entity: 'climate.salon',
+              map_set: { cool: 'cooling' },
+              set: {
+                kind: 'script',
+                script: 'script.refresh',
+                fields: { source: 'declared' },
+              },
+            },
+          },
+        })
+
+        const body = JSON.parse(calls[0]!.body)
+        expect(body.fields).toEqual({ source: 'declared' })
+      })
+
+      it('should map set values of legacy flat configs too', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'cool', {
+          properties: {
+            hvac_mode: {
+              entity: 'climate.salon',
+              map: { cooling: 'cool' },
+              set_service: 'climate.set_hvac_mode',
+              set_value_key: 'hvac_mode',
+            },
+          },
+        })
+
+        const body = JSON.parse(calls[0]!.body)
+        expect(body.hvac_mode).toBe('cooling')
+      })
+
+      it('should throw with the driver context on an ambiguous inverse map at runtime', async () => {
+        const driver = await initDriver()
+        await expect(
+          driver.setProperty('d1', 'hvac_mode', 'cool', {
+            properties: {
+              hvac_mode: {
+                entity: 'climate.salon',
+                map: { cooling: 'cool', freezing: 'cool' },
+                set_service: 'climate.set_hvac_mode',
+                set_value_key: 'hvac_mode',
+              },
+            },
+          }),
+        ).rejects.toThrow(
+          /value "cool" has an ambiguous inverse map \("cooling", "freezing" all map to it\); declare an explicit "map_set"/,
+        )
+      })
+    })
+  })
+
   describe('executeAction', () => {
     it('should call a service from action config', async () => {
       const calls: { url: string; body: string }[] = []
@@ -1008,6 +1917,230 @@ describe('HADriver', () => {
       await expect(
         driver.executeAction('d1', 'play', {}, {}),
       ).resolves.toBeUndefined()
+    })
+  })
+
+  describe('executeAction — script strategy', () => {
+    it('should call the declared script with the args interpolated in fields', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: 'on' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.executeAction(
+        'd1',
+        'boost',
+        { minutes: 5 },
+        {
+          actions: {
+            boost: {
+              kind: 'script',
+              script: 'script.boost',
+              fields: { minutes: '$minutes', mode: 'turbo' },
+            },
+          },
+        },
+      )
+
+      expect(calls).toHaveLength(1)
+      expect(calls[0]!.url).toContain('/api/services/script/turn_on')
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'script.boost',
+        fields: { minutes: 5, mode: 'turbo' },
+      })
+    })
+
+    it('should interpolate nested placeholders and omit missing optional args', async () => {
+      const calls: { url: string; body: string }[] = []
+      mockFetch((url, init) => {
+        if (url.includes('/states/')) return jsonResponse({ state: 'on' })
+        calls.push({ url, body: init?.body?.toString() ?? '' })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.executeAction(
+        'd1',
+        'boost',
+        { minutes: 5 },
+        {
+          actions: {
+            boost: {
+              kind: 'script',
+              script: 'script.boost',
+              fields: {
+                minutes: '$minutes',
+                opts: { factor: '$factor', fixed: true },
+              },
+            },
+          },
+        },
+      )
+
+      const body = JSON.parse(calls[0]!.body)
+      expect(body).toEqual({
+        entity_id: 'script.boost',
+        fields: { minutes: 5, opts: { fixed: true } },
+      })
+    })
+  })
+
+  describe('executeAction — argument validation', () => {
+    const fetchSentinel = () => {
+      mockFetch(() => {
+        throw new Error('HA must not be called')
+      })
+    }
+
+    it('should reject a missing required argument before any HA call', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'boost',
+          {},
+          {
+            actions: {
+              boost: {
+                kind: 'script',
+                script: 'script.boost',
+                fields: { minutes: '$minutes' },
+                parameters: [
+                  { name: 'minutes', type: 'number', required: true },
+                ],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(
+        /Missing argument "minutes".*action "boost".*device "d1".*required/s,
+      )
+    })
+
+    it('should reject an argument outside the declared values', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'set_mode',
+          { mode: 'turbo' },
+          {
+            actions: {
+              set_mode: {
+                service: 'climate.set_operation_mode',
+                parameters: [
+                  { name: 'mode', type: 'enum', values: ['eco', 'boost'] },
+                ],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(/must be one of "eco", "boost" \(got "turbo"\)/)
+    })
+
+    it('should reject an argument outside the declared range', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'boost',
+          { minutes: 120 },
+          {
+            actions: {
+              boost: {
+                kind: 'script',
+                script: 'script.boost',
+                fields: { minutes: '$minutes' },
+                parameters: [
+                  { name: 'minutes', type: 'number', range: [1, 60] },
+                ],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(/must be between 1 and 60 \(got 120\)/)
+    })
+
+    it('should reject an argument with the wrong type', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'announce',
+          { message: 42 },
+          {
+            actions: {
+              announce: {
+                service: 'tts.speak',
+                parameters: [{ name: 'message', type: 'string' }],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(/"message".*must be a string \(got 42\)/)
+    })
+
+    it('should accept declared arguments that satisfy the contract', async () => {
+      const calls: { url: string }[] = []
+      mockFetch(url => {
+        if (url.includes('/states/')) return jsonResponse({ state: 'on' })
+        calls.push({ url })
+        return jsonResponse([])
+      })
+
+      const driver = await initDriver()
+      await driver.executeAction(
+        'd1',
+        'boost',
+        { on: true, minutes: 5 },
+        {
+          actions: {
+            boost: {
+              service: 'switch.turn_on',
+              target: { entity_id: 'switch.test' },
+              parameters: [
+                { name: 'on', type: 'power', required: true },
+                { name: 'minutes', type: 'number', range: [1, 60] },
+              ],
+            },
+          },
+        },
+      )
+
+      expect(calls).toHaveLength(1)
+    })
+
+    it('should validate args of legacy flat service actions too', async () => {
+      fetchSentinel()
+
+      const driver = await initDriver()
+      await expect(
+        driver.executeAction(
+          'd1',
+          'announce',
+          {},
+          {
+            actions: {
+              announce: {
+                service: 'tts.speak',
+                parameters: [{ name: 'message', required: true }],
+              },
+            },
+          },
+        ),
+      ).rejects.toThrow(/Missing argument "message"/)
     })
   })
 
@@ -1159,6 +2292,25 @@ describe('HADriver', () => {
         }),
       ).toThrow(
         /property "volume".*set strategy "inferred".*media_player\.unknown/,
+      )
+    })
+
+    it('should reject flat set fields mixed with the strategy format', () => {
+      const driver = makeDriver()
+      expect(() =>
+        driver.validateDeviceConfig('d1', {
+          properties: {
+            volume: {
+              type: 'number',
+              entity: 'media_player.test',
+              get: { kind: 'attribute', attribute: 'volume_level' },
+              set_service: 'media_player.volume_set',
+              set_value_key: 'volume_level',
+            },
+          },
+        }),
+      ).toThrow(
+        /device "d1", property "volume".*flat "set_service"\/"set_value_key" cannot be combined with the strategy format/,
       )
     })
 
@@ -1634,6 +2786,119 @@ describe('HADriver', () => {
       }
       expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
       expect(fetchCount).toBe(1)
+      await driver.close()
+    })
+
+    it('should clear the whole store after a set by script (unknown scope)', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'switch.test': compressed('off'),
+        'switch.other': compressed('on'),
+      })
+
+      let fetchCount = 0
+      mockFetch(url => {
+        if (!url.includes('/states/')) return jsonResponse([])
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const scriptConfig = {
+        properties: {
+          power: {
+            entity: 'switch.test',
+            set: {
+              kind: 'script',
+              script: 'script.set_power',
+              fields: { state: '$value' },
+            },
+          },
+        },
+      }
+      const otherConfig = {
+        properties: { power: { entity: 'switch.other' } },
+      }
+
+      await driver.setProperty('d1', 'power', true, scriptConfig)
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
+      expect(fetchCount).toBe(2)
+      await driver.close()
+    })
+
+    it('should drop the declared target entities of a set service call', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'switch.test': compressed('off'),
+        'switch.other': compressed('on'),
+      })
+
+      let fetchCount = 0
+      mockFetch(url => {
+        if (!url.includes('/states/')) return jsonResponse([])
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const targetConfig = {
+        properties: {
+          power: {
+            entity: 'switch.test',
+            set: {
+              kind: 'service',
+              service: 'switch.turn_on',
+              target: { entity_id: 'switch.other' },
+            },
+          },
+        },
+      }
+      const otherConfig = {
+        properties: { power: { entity: 'switch.other' } },
+      }
+
+      await driver.setProperty('d1', 'power', true, targetConfig)
+
+      expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
+      expect(fetchCount).toBe(1)
+      await driver.close()
+    })
+
+    it('should clear the whole store after an action by script (unknown scope)', async () => {
+      vi.stubGlobal('WebSocket', RealtimeWs)
+      const { driver, ws, subId } = await initRealtimeDriver()
+      ws.addEntities(subId, {
+        'switch.test': compressed('off'),
+        'switch.other': compressed('on'),
+      })
+
+      let fetchCount = 0
+      mockFetch(url => {
+        if (!url.includes('/states/')) return jsonResponse([])
+        fetchCount++
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+
+      const scriptAction = {
+        actions: {
+          boost: {
+            kind: 'script',
+            script: 'script.boost',
+            fields: { minutes: '$minutes' },
+          },
+        },
+      }
+      const otherConfig = {
+        properties: { power: { entity: 'switch.other' } },
+      }
+
+      await driver.executeAction('d1', 'boost', { minutes: 5 }, scriptAction)
+
+      expect(await driver.getProperty('d1', 'power', deviceConfig)).toBe(true)
+      expect(await driver.getProperty('d1', 'power', otherConfig)).toBe(true)
+      expect(fetchCount).toBe(2)
       await driver.close()
     })
 

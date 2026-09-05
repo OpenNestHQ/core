@@ -161,7 +161,7 @@ export class HAWebSocketClient {
       unrefTimer(subscription.timer)
       this.subscriptions.set(id, subscription)
       try {
-        ws.send(JSON.stringify({ id, ...message }))
+        ws.send(JSON.stringify({ ...message, id }))
       } catch (error) {
         subscription.ack(
           error instanceof Error ? error : new Error(String(error)),
@@ -315,7 +315,7 @@ export class HAWebSocketClient {
       unrefTimer(pending.timer)
       this.pending.set(id, pending)
       try {
-        ws.send(JSON.stringify({ id, ...message }))
+        ws.send(JSON.stringify({ ...message, id }))
       } catch (error) {
         this.pending.delete(id)
         this.clearPendingTimer(pending)
@@ -343,6 +343,10 @@ export class HAWebSocketClient {
     this.stopHeartbeat()
     this.rejectReadyWaiters(reason)
     this.rejectQueue(reason)
+    // In-flight commands never see an onclose here (teardownSocket detaches
+    // the handlers first), so they must be rejected explicitly or they would
+    // pend until their own timeout.
+    this.rejectPending(reason)
     this.clearSubscriptions(reason)
     this.teardownSocket()
     const connectFail = this.connectFail

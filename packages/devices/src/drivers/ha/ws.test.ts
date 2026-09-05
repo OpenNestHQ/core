@@ -281,6 +281,35 @@ describe('HAWebSocketClient', () => {
       }
     })
 
+    it('should not let a payload field named id overwrite the command id', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client, ws } = await connectClient()
+
+      const result = client.callService(
+        'weather',
+        'get_forecasts',
+        { entity_id: 'weather.home', id: 'service-field-id' },
+        { returnResponse: true },
+      )
+      expect(ws.lastSent()).toMatchObject({
+        id: 1,
+        type: 'call_service',
+        domain: 'weather',
+        service: 'get_forecasts',
+        entity_id: 'weather.home',
+      })
+
+      const response = { 'weather.home': { forecast: [] } }
+      ws.serverMessage({
+        id: 1,
+        type: 'result',
+        success: true,
+        result: response,
+      })
+      await expect(result).resolves.toEqual(response)
+      await client.close()
+    })
+
     it('should keep command fields stable against payload keys', async () => {
       vi.stubGlobal('WebSocket', MockWebSocket)
       const { client, ws } = await connectClient()
@@ -359,6 +388,23 @@ describe('HAWebSocketClient', () => {
       await expect(client.callService('switch', 'turn_on', {})).rejects.toThrow(
         /closed/,
       )
+    })
+
+    it('should reject in-flight commands immediately when the client is closed', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient()
+
+        const result = client.callService('switch', 'turn_on', {})
+        expect(ws.lastSent()).toMatchObject({ id: 1, type: 'call_service' })
+
+        const expectation = expect(result).rejects.toThrow(/closed/)
+        await client.close()
+        await expectation
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 
