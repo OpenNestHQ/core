@@ -274,6 +274,285 @@ describe('validateDeviceBindings — properties', () => {
   })
 })
 
+describe('validateDeviceBindings — value maps', () => {
+  it('should accept a mapped property with a coherent contract', () => {
+    expectValid({
+      properties: {
+        hvac_mode: {
+          type: 'string',
+          values: ['auto', 'heat', 'cool', 'off'],
+          entity: 'climate.salon',
+          map: { cooling: 'cool', heating: 'heat' },
+          get: { kind: 'attribute', attribute: 'hvac_action' },
+          set: {
+            kind: 'service',
+            service: 'climate.set_hvac_mode',
+            key: 'hvac_mode',
+          },
+        },
+      },
+    })
+  })
+
+  it('should throw when the declared type is not one of the three', () => {
+    expectInvalid(
+      {
+        properties: {
+          power: {
+            type: 'bool',
+            entity: 'switch.salon',
+            get: { kind: 'state' },
+          },
+        },
+      },
+      /property "power": type must be "boolean", "number" or "string" \(got "bool"\)/,
+    )
+  })
+
+  it('should throw when values is declared with a non-string type', () => {
+    expectInvalid(
+      {
+        properties: {
+          level: {
+            type: 'number',
+            values: ['1', '2'],
+            entity: 'sensor.salon',
+            get: { kind: 'state' },
+            set: {
+              kind: 'service',
+              service: 'sensor.set_level',
+              key: 'level',
+            },
+          },
+        },
+      },
+      /property "level": values cannot apply to the declared type "number" \(values is a string contract\)/,
+    )
+  })
+
+  it('should throw when map is not an object', () => {
+    expectInvalid(
+      {
+        properties: {
+          hvac_mode: {
+            entity: 'climate.salon',
+            map: 'cooling',
+            get: { kind: 'state' },
+          },
+        },
+      },
+      /property "hvac_mode": map must be an object mapping HA values to OpenNest values/,
+    )
+  })
+
+  it('should throw when map_set is not an object', () => {
+    expectInvalid(
+      {
+        properties: {
+          hvac_mode: {
+            entity: 'climate.salon',
+            map_set: 42,
+            get: { kind: 'state' },
+          },
+        },
+      },
+      /property "hvac_mode": map_set must be an object mapping OpenNest values to HA values/,
+    )
+  })
+
+  it('should throw when a map target is not a scalar', () => {
+    expectInvalid(
+      {
+        properties: {
+          hvac_mode: {
+            entity: 'climate.salon',
+            map: { cooling: { mode: 'cool' } },
+            get: { kind: 'state' },
+          },
+        },
+      },
+      /property "hvac_mode": map\."cooling" must be a string, number or boolean/,
+    )
+  })
+
+  it('should throw when a map target is not coercible to the declared type', () => {
+    expectInvalid(
+      {
+        properties: {
+          level: {
+            type: 'number',
+            entity: 'sensor.salon',
+            map: { low: 'cold' },
+            get: { kind: 'state' },
+          },
+        },
+      },
+      /property "level": map\."low" target "cold" is not coercible to the declared type "number"/,
+    )
+  })
+
+  it('should throw when a map target violates the declared values', () => {
+    expectInvalid(
+      {
+        properties: {
+          hvac_mode: {
+            type: 'string',
+            values: ['heat', 'cool'],
+            entity: 'climate.salon',
+            map: { cooling: 'chilly' },
+            get: { kind: 'state' },
+          },
+        },
+      },
+      /property "hvac_mode": map\."cooling" produces "chilly", which is not one of the declared values "heat", "cool"/,
+    )
+  })
+
+  it('should throw when a map_set key violates the declared values', () => {
+    expectInvalid(
+      {
+        properties: {
+          hvac_mode: {
+            type: 'string',
+            values: ['heat', 'cool'],
+            entity: 'climate.salon',
+            map: { cooling: 'cool' },
+            map_set: { cool: 'cooling', turbo: 'boost' },
+            get: { kind: 'state' },
+          },
+        },
+      },
+      /property "hvac_mode": map_set key "turbo" is not one of the declared values "heat", "cool"/,
+    )
+  })
+
+  it('should throw on a non-bijective map with a value-consuming set strategy', () => {
+    expectInvalid(
+      {
+        properties: {
+          hvac_mode: {
+            entity: 'climate.salon',
+            map: { cooling: 'cool', freezing: 'cool' },
+            get: { kind: 'state' },
+            set: {
+              kind: 'service',
+              service: 'climate.set_hvac_mode',
+              key: 'hvac_mode',
+            },
+          },
+        },
+      },
+      /property "hvac_mode": map is not bijective \("cooling", "freezing" all map to "cool"\): declare an explicit "map_set" for the set direction/,
+    )
+  })
+
+  it('should judge bijectivity on coerced map targets', () => {
+    expectInvalid(
+      {
+        properties: {
+          level: {
+            type: 'number',
+            entity: 'sensor.salon',
+            map: { on: '1', off: '01' },
+            get: { kind: 'state' },
+            set: {
+              kind: 'service',
+              service: 'sensor.set_level',
+              key: 'level',
+            },
+          },
+        },
+      },
+      /property "level": map is not bijective \("on", "off" all map to 1\): declare an explicit "map_set" for the set direction/,
+    )
+  })
+
+  it('should throw on a non-bijective map with a $value set script', () => {
+    expectInvalid(
+      {
+        properties: {
+          hvac_mode: {
+            entity: 'climate.salon',
+            map: { cooling: 'cool', freezing: 'cool' },
+            get: { kind: 'state' },
+            set: {
+              kind: 'script',
+              script: 'script.set_hvac',
+              fields: { mode: '$value' },
+            },
+          },
+        },
+      },
+      /map is not bijective/,
+    )
+  })
+
+  it('should accept a non-bijective map when map_set is declared', () => {
+    expectValid({
+      properties: {
+        hvac_mode: {
+          entity: 'climate.salon',
+          map: { cooling: 'cool', freezing: 'cool' },
+          map_set: { cool: 'cooling' },
+          get: { kind: 'state' },
+          set: {
+            kind: 'service',
+            service: 'climate.set_hvac_mode',
+            key: 'hvac_mode',
+          },
+        },
+      },
+    })
+  })
+
+  it('should accept a non-bijective map when the set does not consume the value', () => {
+    expectValid({
+      properties: {
+        hvac_mode: {
+          entity: 'climate.salon',
+          map: { cooling: 'cool', freezing: 'cool' },
+          get: { kind: 'state' },
+          set: {
+            kind: 'service',
+            service: 'climate.set_hvac_mode',
+          },
+        },
+      },
+    })
+    expectValid({
+      properties: {
+        hvac_mode: {
+          entity: 'climate.salon',
+          map: { cooling: 'cool', freezing: 'cool' },
+          get: { kind: 'state' },
+          set: {
+            kind: 'script',
+            script: 'script.refresh',
+            fields: { source: 'declared' },
+          },
+        },
+      },
+    })
+  })
+
+  it('should keep rejecting inferred sets for non-boolean mapped properties', () => {
+    expectInvalid(
+      {
+        properties: {
+          hvac_mode: {
+            type: 'string',
+            entity: 'climate.salon',
+            map: { cooling: 'cool' },
+            get: { kind: 'state' },
+            set: { kind: 'inferred' },
+          },
+        },
+      },
+      /set strategy "inferred" cannot apply non-boolean values \(declared type "string"\)/,
+    )
+  })
+})
+
 describe('validateDeviceBindings — actions', () => {
   it('should accept a valid script action with declared parameters', () => {
     expectValid({

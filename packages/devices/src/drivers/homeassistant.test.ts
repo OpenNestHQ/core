@@ -431,6 +431,267 @@ describe('HADriver', () => {
     })
   })
 
+  describe('getProperty — value mapping and coercion', () => {
+    it('should translate a mapped HA value into the OpenNest value on get', async () => {
+      mockFetch(() =>
+        jsonResponse({
+          state: 'cooling',
+          attributes: { hvac_action: 'cooling' },
+        }),
+      )
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'hvac_mode', {
+        properties: {
+          hvac_mode: {
+            type: 'string',
+            values: ['auto', 'heat', 'cool', 'off'],
+            entity: 'climate.salon',
+            map: { cooling: 'cool', heating: 'heat' },
+            get: { kind: 'attribute', attribute: 'hvac_action' },
+            set: {
+              kind: 'service',
+              service: 'climate.set_hvac_mode',
+              key: 'hvac_mode',
+            },
+          },
+        },
+      })
+
+      expect(value).toBe('cool')
+    })
+
+    it('should pass an unmapped value through raw when values are not declared', async () => {
+      mockFetch(() => jsonResponse({ state: 'auto', attributes: {} }))
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'hvac_mode', {
+        properties: {
+          hvac_mode: {
+            entity: 'climate.salon',
+            map: { cooling: 'cool', heating: 'heat' },
+            get: { kind: 'state' },
+          },
+        },
+      })
+
+      expect(value).toBe('auto')
+    })
+
+    it('should throw when the raw value misses the map and the declared values', async () => {
+      mockFetch(() => jsonResponse({ state: 'warming', attributes: {} }))
+
+      const driver = await initDriver()
+      await expect(
+        driver.getProperty('d1', 'hvac_mode', {
+          properties: {
+            hvac_mode: {
+              type: 'string',
+              values: ['cool', 'heat'],
+              entity: 'climate.salon',
+              map: { cooling: 'cool', heating: 'heat' },
+              get: { kind: 'state' },
+            },
+          },
+        }),
+      ).rejects.toThrow(
+        /HA get for device "d1", property "hvac_mode": value "warming" is not one of the declared values "cool", "heat"/,
+      )
+    })
+
+    it('should throw when a typed get result violates the declared values', async () => {
+      mockFetch(() => jsonResponse({ state: 'idle', attributes: {} }))
+
+      const driver = await initDriver()
+      await expect(
+        driver.getProperty('d1', 'hvac_mode', {
+          properties: {
+            hvac_mode: {
+              type: 'string',
+              values: ['auto', 'off'],
+              entity: 'climate.salon',
+              get: { kind: 'state' },
+            },
+          },
+        }),
+      ).rejects.toThrow(/value "idle" is not one of the declared values/)
+    })
+
+    it('should keep string states unparsed when type string is declared', async () => {
+      mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'hvac_mode', {
+        properties: {
+          hvac_mode: {
+            type: 'string',
+            entity: 'climate.salon',
+            get: { kind: 'state' },
+          },
+        },
+      })
+
+      expect(value).toBe('on')
+    })
+
+    it('should coerce on/off states when type boolean is declared', async () => {
+      mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'power', {
+        properties: {
+          power: {
+            type: 'boolean',
+            entity: 'switch.test',
+            get: { kind: 'state' },
+          },
+        },
+      })
+
+      expect(value).toBe(true)
+    })
+
+    it('should keep the legacy heuristic for flat configs with a mistyped type', async () => {
+      mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'power', {
+        properties: {
+          power: { entity: 'switch.test', type: 'bool' },
+        },
+      })
+
+      expect(value).toBe(true)
+    })
+
+    it('should coerce numeric states when type number is declared', async () => {
+      mockFetch(() => jsonResponse({ state: '42.5', attributes: {} }))
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'temperature', {
+        properties: {
+          temperature: {
+            type: 'number',
+            entity: 'sensor.temp',
+            get: { kind: 'state' },
+          },
+        },
+      })
+
+      expect(value).toBe(42.5)
+    })
+
+    it('should throw on a state not coercible to the declared type', async () => {
+      mockFetch(() => jsonResponse({ state: 'idle', attributes: {} }))
+
+      const driver = await initDriver()
+      await expect(
+        driver.getProperty('d1', 'power', {
+          properties: {
+            power: {
+              type: 'boolean',
+              entity: 'switch.test',
+              get: { kind: 'state' },
+            },
+          },
+        }),
+      ).rejects.toThrow(
+        /HA get for device "d1", property "power": value "idle" is not coercible to the declared type "boolean"/,
+      )
+    })
+
+    it('should throw on unavailable and unknown states for contract-bound properties', async () => {
+      mockFetch(() => jsonResponse({ state: 'unavailable', attributes: {} }))
+
+      const driver = await initDriver()
+      const config = {
+        properties: {
+          hvac_mode: {
+            type: 'string',
+            values: ['auto', 'heat', 'cool', 'off'],
+            entity: 'climate.salon',
+            map: { cooling: 'cool', heating: 'heat' },
+            get: { kind: 'state' },
+          },
+        },
+      }
+      await expect(
+        driver.getProperty('d1', 'hvac_mode', config),
+      ).rejects.toThrow(/value "unavailable" is not one of the declared values/)
+
+      mockFetch(() => jsonResponse({ state: 'unknown', attributes: {} }))
+      await expect(
+        driver.getProperty('d1', 'hvac_mode', config),
+      ).rejects.toThrow(/value "unknown" is not one of the declared values/)
+    })
+
+    it('should pass a missing attribute through as null for contract-bound properties', async () => {
+      mockFetch(() => jsonResponse({ state: 'on', attributes: {} }))
+
+      const driver = await initDriver()
+      await expect(
+        driver.getProperty('d1', 'temperature', {
+          properties: {
+            temperature: {
+              type: 'number',
+              entity: 'climate.salon',
+              get: { kind: 'attribute', attribute: 'current_temperature' },
+            },
+          },
+        }),
+      ).resolves.toBeNull()
+      await expect(
+        driver.getProperty('d1', 'hvac_mode', {
+          properties: {
+            hvac_mode: {
+              type: 'string',
+              values: ['auto', 'heat', 'cool', 'off'],
+              entity: 'climate.salon',
+              map: { cooling: 'cool', heating: 'heat' },
+              get: { kind: 'attribute', attribute: 'hvac_action' },
+            },
+          },
+        }),
+      ).resolves.toBeNull()
+    })
+
+    it('should coerce the rendered template text to the declared type', async () => {
+      mockFetch((url, init) => {
+        expect(url).toBe('http://ha.local:8123/api/template')
+        expect(JSON.parse(String(init?.body))).toEqual({ template: '{{ x }}' })
+        return textResponse(' 42.5\n', 200)
+      })
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'temperature', {
+        properties: {
+          temperature: {
+            type: 'number',
+            get: { kind: 'template', template: '{{ x }}' },
+          },
+        },
+      })
+
+      expect(value).toBe(42.5)
+    })
+
+    it('should coerce an on/off template text when type boolean is declared', async () => {
+      mockFetch(() => textResponse('off\n', 200))
+
+      const driver = await initDriver()
+      const value = await driver.getProperty('d1', 'power', {
+        properties: {
+          power: {
+            type: 'boolean',
+            get: { kind: 'template', template: '{{ states("switch.a") }}' },
+          },
+        },
+      })
+
+      expect(value).toBe(false)
+    })
+  })
+
   describe('getProperty — websocket strategies', () => {
     class ServiceWs {
       static instances: ServiceWs[] = []
@@ -621,6 +882,50 @@ describe('HADriver', () => {
       ws.respond(callId!, response)
 
       await expect(pending).resolves.toEqual(response)
+      await driver.close()
+    })
+
+    it('should translate a mapped script response on get', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+
+      const config = {
+        properties: {
+          hvac_mode: {
+            entity: 'climate.salon',
+            type: 'string',
+            values: ['heat', 'cool'],
+            map: { heating: 'heat', cooling: 'cool' },
+            get: { kind: 'script', script: 'script.hvac_state' },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'hvac_mode', config)
+      ws.respond(ws.callId()!, { mode: 'cooling' })
+
+      await expect(pending).resolves.toBe('cool')
+      await driver.close()
+    })
+
+    it('should coerce a service_response result to the declared type on get', async () => {
+      vi.stubGlobal('WebSocket', ServiceWs)
+      const { driver, ws } = await initServiceDriver()
+
+      const config = {
+        properties: {
+          temperature: {
+            type: 'number',
+            get: {
+              kind: 'service_response',
+              service: 'weather.get_temperature',
+            },
+          },
+        },
+      }
+      const pending = driver.getProperty('d1', 'temperature', config)
+      ws.respond(ws.callId()!, '21.5')
+
+      await expect(pending).resolves.toBe(21.5)
       await driver.close()
     })
 
@@ -1133,6 +1438,372 @@ describe('HADriver', () => {
       expect(body).toEqual({
         entity_id: 'script.set_away',
         fields: { mode: 'vacation', note: 'declared' },
+      })
+    })
+
+    describe('setProperty — value mapping', () => {
+      const hvacConfig = {
+        properties: {
+          hvac_mode: {
+            type: 'string',
+            values: ['auto', 'heat', 'cool', 'off'],
+            entity: 'climate.salon',
+            map: { cooling: 'cool', heating: 'heat' },
+            get: { kind: 'attribute', attribute: 'hvac_action' },
+            set: {
+              kind: 'service',
+              service: 'climate.set_hvac_mode',
+              key: 'hvac_mode',
+            },
+          },
+        },
+      }
+
+      it('should write the inverse-mapped HA value for a bijective map', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'cool', hvacConfig)
+
+        expect(calls[0]!.url).toContain('/api/services/climate/set_hvac_mode')
+        const body = JSON.parse(calls[0]!.body)
+        expect(body).toEqual({
+          entity_id: 'climate.salon',
+          hvac_mode: 'cooling',
+        })
+      })
+
+      it('should round-trip a map whose targets need boolean coercion', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((url, init) => {
+          if (url.includes('/states/')) {
+            return jsonResponse({ state: 'on', attributes: {} })
+          }
+          calls.push({ url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        const config = {
+          properties: {
+            power: {
+              type: 'boolean',
+              entity: 'switch.salon',
+              map: { on: 'true', off: 'false' },
+              get: { kind: 'state' },
+              set: {
+                kind: 'service',
+                service: 'switch.set_state',
+                key: 'state',
+              },
+            },
+          },
+        }
+
+        await expect(driver.getProperty('d1', 'power', config)).resolves.toBe(
+          true,
+        )
+        await driver.setProperty('d1', 'power', true, config)
+
+        expect(JSON.parse(calls[0]!.body).state).toBe('on')
+      })
+
+      it('should round-trip the HA 1/0 boolean convention through coercion', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((url, init) => {
+          if (url.includes('/states/')) {
+            return jsonResponse({ state: '1', attributes: {} })
+          }
+          calls.push({ url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        const config = {
+          properties: {
+            power: {
+              type: 'boolean',
+              entity: 'switch.salon',
+              map: { '1': 'on', '0': 'off' },
+              get: { kind: 'state' },
+              set: {
+                kind: 'service',
+                service: 'switch.set_state',
+                key: 'state',
+              },
+            },
+          },
+        }
+
+        await expect(driver.getProperty('d1', 'power', config)).resolves.toBe(
+          true,
+        )
+        await driver.setProperty('d1', 'power', true, config)
+
+        expect(JSON.parse(calls[0]!.body).state).toBe('1')
+      })
+
+      it('should round-trip a map whose targets need number coercion', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((url, init) => {
+          if (url.includes('/states/')) {
+            return jsonResponse({ state: 'low', attributes: {} })
+          }
+          calls.push({ url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        const config = {
+          properties: {
+            level: {
+              type: 'number',
+              entity: 'sensor.salon',
+              map: { low: '1', high: '2' },
+              get: { kind: 'state' },
+              set: {
+                kind: 'service',
+                service: 'sensor.set_level',
+                key: 'level',
+              },
+            },
+          },
+        }
+
+        await expect(driver.getProperty('d1', 'level', config)).resolves.toBe(1)
+        await driver.setProperty('d1', 'level', 1, config)
+
+        expect(JSON.parse(calls[0]!.body).level).toBe('low')
+      })
+
+      it('should write a value absent from the map unchanged', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'off', hvacConfig)
+
+        const body = JSON.parse(calls[0]!.body)
+        expect(body.hvac_mode).toBe('off')
+      })
+
+      it('should prefer the declared map_set over the automatic inverse', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'cool', {
+          properties: {
+            hvac_mode: {
+              entity: 'climate.salon',
+              map: { cooling: 'cool' },
+              map_set: { cool: 'frost' },
+              set: {
+                kind: 'service',
+                service: 'climate.set_hvac_mode',
+                key: 'hvac_mode',
+              },
+            },
+          },
+        })
+
+        const body = JSON.parse(calls[0]!.body)
+        expect(body.hvac_mode).toBe('frost')
+      })
+
+      it('should throw when a set value is outside the declared map_set', async () => {
+        const driver = await initDriver()
+        await expect(
+          driver.setProperty('d1', 'hvac_mode', 'turbo', {
+            properties: {
+              hvac_mode: {
+                entity: 'climate.salon',
+                map_set: { cool: 'cooling', heat: 'heating' },
+                set: {
+                  kind: 'service',
+                  service: 'climate.set_hvac_mode',
+                  key: 'hvac_mode',
+                },
+              },
+            },
+          }),
+        ).rejects.toThrow(
+          /HA set for device "d1", property "hvac_mode": value "turbo" is not in the declared set map \(map_set keys: "cool", "heat"\)/,
+        )
+      })
+
+      it('should validate the set value against the declared values', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((url, init) => {
+          calls.push({ url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await expect(
+          driver.setProperty('d1', 'hvac_mode', 'turbo', {
+            properties: {
+              hvac_mode: {
+                type: 'string',
+                values: ['auto', 'heat', 'cool', 'off'],
+                entity: 'climate.salon',
+                set: {
+                  kind: 'service',
+                  service: 'climate.set_hvac_mode',
+                  key: 'hvac_mode',
+                },
+              },
+            },
+          }),
+        ).rejects.toThrow(
+          /HA set for device "d1", property "hvac_mode": value "turbo" is not one of the declared values "auto", "heat", "cool", "off"/,
+        )
+        expect(calls).toHaveLength(0)
+      })
+
+      it('should validate set values of legacy flat configs against the declared values', async () => {
+        const driver = await initDriver()
+        await expect(
+          driver.setProperty('d1', 'hvac_mode', 'turbo', {
+            properties: {
+              hvac_mode: {
+                entity: 'climate.salon',
+                values: ['auto', 'heat', 'cool', 'off'],
+                set_service: 'climate.set_hvac_mode',
+                set_value_key: 'hvac_mode',
+              },
+            },
+          }),
+        ).rejects.toThrow(/value "turbo" is not one of the declared values/)
+      })
+
+      it('should not validate the value when the set strategy does not write it', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'unmapped', {
+          properties: {
+            hvac_mode: {
+              entity: 'climate.salon',
+              values: ['cool', 'heat'],
+              set: {
+                kind: 'script',
+                script: 'script.refresh',
+                fields: { source: 'declared' },
+              },
+            },
+          },
+        })
+
+        const body = JSON.parse(calls[0]!.body)
+        expect(body.fields).toEqual({ source: 'declared' })
+      })
+
+      it('should map the $value interpolated into set script fields', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'cool', {
+          properties: {
+            hvac_mode: {
+              entity: 'climate.salon',
+              map: { cooling: 'cool' },
+              set: {
+                kind: 'script',
+                script: 'script.set_hvac',
+                fields: { mode: '$value' },
+              },
+            },
+          },
+        })
+
+        const body = JSON.parse(calls[0]!.body)
+        expect(body.fields).toEqual({ mode: 'cooling' })
+      })
+
+      it('should not map the value when the set strategy does not write it', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'unmapped', {
+          properties: {
+            hvac_mode: {
+              entity: 'climate.salon',
+              map_set: { cool: 'cooling' },
+              set: {
+                kind: 'script',
+                script: 'script.refresh',
+                fields: { source: 'declared' },
+              },
+            },
+          },
+        })
+
+        const body = JSON.parse(calls[0]!.body)
+        expect(body.fields).toEqual({ source: 'declared' })
+      })
+
+      it('should map set values of legacy flat configs too', async () => {
+        const calls: { url: string; body: string }[] = []
+        mockFetch((_url, init) => {
+          calls.push({ url: _url, body: init?.body?.toString() ?? '' })
+          return jsonResponse([])
+        })
+
+        const driver = await initDriver()
+        await driver.setProperty('d1', 'hvac_mode', 'cool', {
+          properties: {
+            hvac_mode: {
+              entity: 'climate.salon',
+              map: { cooling: 'cool' },
+              set_service: 'climate.set_hvac_mode',
+              set_value_key: 'hvac_mode',
+            },
+          },
+        })
+
+        const body = JSON.parse(calls[0]!.body)
+        expect(body.hvac_mode).toBe('cooling')
+      })
+
+      it('should throw with the driver context on an ambiguous inverse map at runtime', async () => {
+        const driver = await initDriver()
+        await expect(
+          driver.setProperty('d1', 'hvac_mode', 'cool', {
+            properties: {
+              hvac_mode: {
+                entity: 'climate.salon',
+                map: { cooling: 'cool', freezing: 'cool' },
+                set_service: 'climate.set_hvac_mode',
+                set_value_key: 'hvac_mode',
+              },
+            },
+          }),
+        ).rejects.toThrow(
+          /value "cool" has an ambiguous inverse map \("cooling", "freezing" all map to it\); declare an explicit "map_set"/,
+        )
       })
     })
   })
