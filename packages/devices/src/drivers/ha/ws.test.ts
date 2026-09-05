@@ -360,6 +360,23 @@ describe('HAWebSocketClient', () => {
         /closed/,
       )
     })
+
+    it('should reject in-flight commands immediately when the client is closed', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient()
+
+        const result = client.callService('switch', 'turn_on', {})
+        expect(ws.lastSent()).toMatchObject({ id: 1, type: 'call_service' })
+
+        const expectation = expect(result).rejects.toThrow(/closed/)
+        await client.close()
+        await expectation
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   describe('subscriptions', () => {

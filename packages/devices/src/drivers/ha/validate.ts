@@ -1,3 +1,4 @@
+import { isRecord, PLACEHOLDER_RE } from './binding.js'
 import type {
   HAActionStrategy,
   HAGetStrategy,
@@ -22,7 +23,6 @@ const ACTION_KINDS: readonly HAActionStrategy['kind'][] = ['service', 'script']
 
 const SERVICE_RE = /^[a-z0-9_]+\.[a-z0-9_]+$/
 const SCRIPT_ID_RE = /^script\.[a-z0-9_]+$/
-const PLACEHOLDER_RE = /^\$([A-Za-z_][A-Za-z0-9_-]*)$/
 
 interface Placeholder {
   name: string
@@ -116,9 +116,14 @@ function validateSetStrategy(
     fail(`unknown set kind ${quote(kind)} (expected: ${SET_KINDS.join(', ')})`)
   }
   switch (kind) {
-    case 'service':
+    case 'service': {
       validateServiceId(set['service'], 'set strategy "service"', fail)
+      const target = set['target']
+      if (target !== undefined && !isRecord(target)) {
+        fail('set strategy "service" requires "target" to be an object')
+      }
       break
+    }
     case 'script': {
       validateScriptId(set['script'], 'set strategy "script"', fail)
       const fields = set['fields']
@@ -275,6 +280,4 @@ function quote(value: unknown): string {
   return typeof value === 'string' ? `"${value}"` : String(value)
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+export { isRecord }

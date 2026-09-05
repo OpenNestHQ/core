@@ -1,5 +1,42 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeActionConfig, normalizePropertyConfig } from './binding.js'
+import {
+  normalizeActionConfig,
+  normalizePropertyBinding,
+  normalizePropertyConfig,
+} from './binding.js'
+import type { HARawActionConfig } from './binding.js'
+
+describe('normalizePropertyBinding', () => {
+  it('should throw a clear error when raw is a primitive', () => {
+    expect(() =>
+      normalizePropertyBinding('on' as unknown as { entity: string }),
+    ).toThrow(/must be an object/)
+  })
+
+  it('should throw a clear error when raw is a number', () => {
+    expect(() =>
+      normalizePropertyBinding(42 as unknown as { entity: string }),
+    ).toThrow(/must be an object/)
+  })
+
+  it('should throw a clear error when raw is an array', () => {
+    expect(() =>
+      normalizePropertyBinding([] as unknown as { entity: string }),
+    ).toThrow(/must be an object/)
+  })
+
+  it('should throw a clear error when raw is null', () => {
+    expect(() =>
+      normalizePropertyBinding(null as unknown as { entity: string }),
+    ).toThrow(/must be an object/)
+  })
+
+  it('should delegate to normalizePropertyConfig for flat configs', () => {
+    const binding = normalizePropertyBinding({ entity: 'switch.test' })
+    expect(binding.get).toEqual({ kind: 'state' })
+    expect(binding.set).toEqual({ kind: 'inferred' })
+  })
+})
 
 describe('normalizePropertyConfig', () => {
   it('should map entity without attribute to state get strategy', () => {
@@ -96,5 +133,28 @@ describe('normalizeActionConfig', () => {
       target: { entity_id: 'media_player.salon' },
       data: { volume_level: 0.5 },
     })
+  })
+
+  it('should map a script action to the script strategy', () => {
+    const strategy = normalizeActionConfig({
+      kind: 'script',
+      script: 'script.boost',
+      fields: { minutes: '$minutes' },
+    } as unknown as HARawActionConfig)
+
+    expect(strategy).toEqual({
+      kind: 'script',
+      script: 'script.boost',
+      fields: { minutes: '$minutes' },
+    })
+  })
+
+  it('should throw when a script action is missing its script id', () => {
+    expect(() =>
+      normalizeActionConfig({
+        kind: 'script',
+        fields: {},
+      } as unknown as HARawActionConfig),
+    ).toThrow(/strategy "script" requires a "script" id/)
   })
 })
