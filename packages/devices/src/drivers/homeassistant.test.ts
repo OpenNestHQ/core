@@ -25,8 +25,17 @@ function textResponse(text: string, status: number): Response {
 
 const GLOBAL_CONFIG = { url: 'http://ha.local:8123', token: 'test-token-123' }
 
+// A driver left open by a test keeps its websocket client reconnecting in the
+// background (~1/s with real timers). When a later test installs fake timers
+// and stubs WebSocket, those stray reconnects create sockets that end up as
+// RealtimeWs.last() and hijack the reconnection test. Reap every driver
+// created via makeDriver() after each test.
+const openDrivers: HADriver[] = []
+
 function makeDriver(): HADriver {
-  return new HADriver()
+  const driver = new HADriver()
+  openDrivers.push(driver)
+  return driver
 }
 
 async function initDriver(config = GLOBAL_CONFIG): Promise<HADriver> {
@@ -45,7 +54,10 @@ describe('HADriver', () => {
     vi.clearAllMocks()
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const driver of openDrivers.splice(0)) {
+      await driver.close()
+    }
     vi.unstubAllGlobals()
   })
 
