@@ -4,9 +4,11 @@ import {
   interpolateFields,
   normalizeActionConfig,
   normalizePropertyBinding,
+  setConsumesValue,
   splitService,
 } from './ha/binding.js'
 import { isRecord, validateDeviceBindings } from './ha/validate.js'
+import { declaredType, mapGetValue, mapSetValue } from './ha/values.js'
 import { validateActionArgs } from './ha/args.js'
 import { HAWebSocketClient, toHaWsUrl } from './ha/ws.js'
 import type { HAIncomingMessage } from './ha/ws.js'
@@ -105,6 +107,7 @@ export class HADriver implements DeviceDriver {
     if (!entry) return null
 
     const get = entry.binding.get
+    let value: unknown
     switch (get.kind) {
       case 'state':
       case 'attribute': {
@@ -112,12 +115,25 @@ export class HADriver implements DeviceDriver {
         if (get.kind === 'attribute') {
           const attrs = state['attributes'] as
             Record<string, unknown> | undefined
-          return attrs?.[get.attribute] ?? null
+          value = attrs?.[get.attribute] ?? null
+        } else {
+          value = state['state']
+          // The declared contract (map or a valid type) replaces the legacy
+          // on/off/number heuristic; untyped unmapped properties keep it. A
+          // mistyped `type` (flat format is not load-validated) keeps the
+          // legacy behavior instead of silently disabling the heuristic.
+          if (
+            entry.raw.map === undefined &&
+            declaredType(entry.raw.type) === undefined
+          ) {
+            value = parseHaState(value)
+          }
         }
-        return parseHaState(state['state'])
+        break
       }
       case 'template':
-        return this.renderTemplate(get.template, runtime)
+        value = await this.renderTemplate(get.template, runtime)
+        break
       case 'script': {
         const result = await this.wsServiceResponse(
           'script',
@@ -127,11 +143,12 @@ export class HADriver implements DeviceDriver {
           deviceId,
           property,
         )
-        return unwrapResponseVariable(result)
+        value = unwrapResponseVariable(result)
+        break
       }
       case 'service_response': {
         const [domain, service] = splitService(get.service)
-        return this.wsServiceResponse(
+        value = await this.wsServiceResponse(
           domain,
           service,
           get.fields ?? {},
@@ -139,16 +156,22 @@ export class HADriver implements DeviceDriver {
           deviceId,
           property,
         )
+        break
       }
       default: {
         const unknownKind = (get as HAGetStrategy).kind
         throw new Error(`HA get strategy "${unknownKind}" is not supported`)
       }
     }
+    return mapGetValue(
+      value,
+      entry.raw,
+      `HA get for device "${deviceId}", property "${property}"`,
+    )
   }
 
   async setProperty(
-    _deviceId: string,
+    deviceId: string,
     property: string,
     value: unknown,
     deviceConfig: Record<string, unknown>,
@@ -158,6 +181,7 @@ export class HADriver implements DeviceDriver {
 
     const entity = entry.raw.entity
     const set = entry.binding.set
+    const prefix = `HA set for device "${deviceId}", property "${property}"`
 
     let domain: string
     let service: string
@@ -183,19 +207,23 @@ export class HADriver implements DeviceDriver {
           Object.assign(payload, set.target)
         }
         if (set.key !== undefined) {
-          payload[set.key] = value
+          payload[set.key] = mapSetValue(value, entry.raw, prefix)
         }
         writtenEntities = [entity, ...targetEntityIds(set.target)]
         break
       }
       case 'script': {
         // Writes stay on REST (like every set/action path): scripts need no
-        // response here, so no websocket coupling is introduced.
+        // response here, so no websocket coupling is introduced. The value is
+        // mapped only when a `$value` placeholder actually carries it.
         domain = 'script'
         service = 'turn_on'
+        const written = setConsumesValue(set)
+          ? mapSetValue(value, entry.raw, prefix)
+          : value
         payload = {
           entity_id: set.script,
-          fields: interpolateFields(set.fields, { value }),
+          fields: interpolateFields(set.fields, { value: written }),
         }
         writtenEntities = []
         break

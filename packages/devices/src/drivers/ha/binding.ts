@@ -3,6 +3,10 @@ export interface HARawPropertyConfig {
   attribute?: string
   set_service?: string
   set_value_key?: string
+  type?: 'boolean' | 'number' | 'string'
+  values?: string[]
+  map?: Record<string, unknown>
+  map_set?: Record<string, unknown>
 }
 
 export interface HARawActionConfig {
@@ -131,6 +135,31 @@ export function splitService(service: string): [string, string] {
       `Invalid service format: "${service}". Expected "domain.service".`,
     )
   return [service.slice(0, dot), service.slice(dot + 1)]
+}
+
+// True when the set strategy actually writes the provided value into the HA
+// payload (`service` with a `key`, `script` with a `$value` placeholder):
+// only then does the value map apply on set. `inferred` writes booleans as
+// turn_on/turn_off services and never carries the value itself. validate.ts
+// applies the same rule to the raw config at load time.
+export function setConsumesValue(set: unknown): boolean {
+  if (!isRecord(set)) return false
+  if (set['kind'] === 'service') return set['key'] !== undefined
+  if (set['kind'] === 'script') return consumesValuePlaceholder(set['fields'])
+  return false
+}
+
+function consumesValuePlaceholder(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return PLACEHOLDER_RE.exec(value)?.[1] === 'value'
+  }
+  if (Array.isArray(value)) {
+    return value.some(item => consumesValuePlaceholder(item))
+  }
+  if (isRecord(value)) {
+    return Object.values(value).some(item => consumesValuePlaceholder(item))
+  }
+  return false
 }
 
 // Placeholders are whole declared field values (`"$value"`, `"$minutes"`);
