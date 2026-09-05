@@ -161,7 +161,7 @@ export class HAWebSocketClient {
       unrefTimer(subscription.timer)
       this.subscriptions.set(id, subscription)
       try {
-        ws.send(JSON.stringify({ id, ...message }))
+        ws.send(JSON.stringify({ ...message, id }))
       } catch (error) {
         subscription.ack(
           error instanceof Error ? error : new Error(String(error)),
@@ -315,7 +315,7 @@ export class HAWebSocketClient {
       unrefTimer(pending.timer)
       this.pending.set(id, pending)
       try {
-        ws.send(JSON.stringify({ id, ...message }))
+        ws.send(JSON.stringify({ ...message, id }))
       } catch (error) {
         this.pending.delete(id)
         this.clearPendingTimer(pending)
