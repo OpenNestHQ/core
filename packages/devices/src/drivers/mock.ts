@@ -20,6 +20,11 @@ export class MockDriver implements DeviceDriver {
     }
   }
 
+  async close(): Promise<void> {
+    this.store = new Map()
+    this.latency = 0
+  }
+
   getProperty(
     deviceId: string,
     property: string,

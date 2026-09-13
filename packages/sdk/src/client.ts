@@ -141,6 +141,14 @@ export class OpenNestClient {
     return this.session
   }
 
+  async whenReady(): Promise<void> {
+    await this.registry?.whenReady()
+  }
+
+  async close(): Promise<void> {
+    await this.registry?.close()
+  }
+
   private async run(command: VMCommand): Promise<VMResult> {
     const result = await executeCommand(command, this.buildContext())
     this.session = result.session

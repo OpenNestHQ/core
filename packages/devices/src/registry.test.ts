@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { writeFileSync, unlinkSync, existsSync } from 'node:fs'
 import { DeviceRegistry } from './registry.js'
 
@@ -197,6 +197,42 @@ devices:
       const registry = DeviceRegistry.fromYaml(path)
 
       expect(registry.getDriver('unknown')).toBeUndefined()
+      cleanup(path)
+    })
+  })
+
+  describe('lifecycle', () => {
+    it('should resolve whenReady once drivers are initialized', async () => {
+      const path = writeTempYaml(TEST_YAML)
+      const registry = DeviceRegistry.fromYaml(path)
+
+      await expect(registry.whenReady()).resolves.toBeUndefined()
+      cleanup(path)
+    })
+
+    it('should call close on every driver', async () => {
+      const path = writeTempYaml(TEST_YAML)
+      const registry = DeviceRegistry.fromYaml(path)
+      const driver = registry.getDriver('mock')!
+      const spy = vi.spyOn(driver, 'close')
+
+      await registry.close()
+
+      expect(spy).toHaveBeenCalledTimes(1)
+      cleanup(path)
+    })
+
+    it('should clear mock driver state on close', async () => {
+      const path = writeTempYaml(TEST_YAML)
+      const registry = DeviceRegistry.fromYaml(path)
+      const tv = registry.getDevice('tv_salon')!
+
+      await tv.driver.setProperty(tv.id, 'power', true, tv.driverConfig)
+      await registry.close()
+
+      expect(
+        await tv.driver.getProperty(tv.id, 'power', tv.driverConfig),
+      ).toBeNull()
       cleanup(path)
     })
   })

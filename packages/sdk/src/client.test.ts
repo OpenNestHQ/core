@@ -311,6 +311,36 @@ describe('OpenNestClient', () => {
     expect(result.status).toBe('success')
     expect(result.executed[0]!.changes[0]!.newValue).toBe(true)
   })
+
+  it('resolves whenReady with a DeviceRegistry source', async () => {
+    const registry = new DeviceRegistry(makeInventory())
+    const client = new OpenNestClient({ devices: registry })
+
+    await expect(client.whenReady()).resolves.toBeUndefined()
+  })
+
+  it('resolves whenReady with no registry (bare Device[])', async () => {
+    const { client } = await makeClient()
+
+    await expect(client.whenReady()).resolves.toBeUndefined()
+  })
+
+  it('closes the underlying registry drivers', async () => {
+    const registry = new DeviceRegistry(makeInventory())
+    const driver = registry.getDriver('mock')!
+    const spy = vi.spyOn(driver, 'close')
+    const client = new OpenNestClient({ devices: registry })
+
+    await client.close()
+
+    expect(spy).toHaveBeenCalledTimes(1)
+  })
+
+  it('resolves close with no registry (bare Device[])', async () => {
+    const { client } = await makeClient()
+
+    await expect(client.close()).resolves.toBeUndefined()
+  })
 })
 
 const FROM_YAML = `

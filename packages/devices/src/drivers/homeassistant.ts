@@ -90,6 +90,14 @@ export class HADriver implements DeviceDriver {
     await client?.close()
   }
 
+  async whenReady(): Promise<void> {
+    const client = this.wsClient
+    if (!client) {
+      throw new Error('homeassistant driver is not initialized')
+    }
+    await client.whenReady()
+  }
+
   validateDeviceConfig(
     deviceId: string,
     deviceConfig: Record<string, unknown>,
