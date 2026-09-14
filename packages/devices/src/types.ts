@@ -22,6 +22,12 @@ export interface ActionEntryConfig {
   target?: Record<string, unknown>
   data?: Record<string, unknown>
   parameters?: ActionParameterConfig[]
+  /**
+   * Declarative expected effect of the action (property → value), e.g.
+   * `{ power: true }` for `turnOn()`. Enables runtime state verification:
+   * the VM observes the device after execution and compares it against this.
+   */
+  expectedEffects?: Record<string, unknown>
   [key: string]: unknown
 }
 

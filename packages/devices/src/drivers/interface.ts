@@ -1,3 +1,5 @@
+import type { VerificationStrategy } from '@opennest/lang-core'
+
 export interface DriverRuntimeContext {
   programId: string
 }
@@ -42,4 +44,18 @@ export interface DeviceDriver {
     deviceConfig: Record<string, unknown>,
     runtime?: DriverRuntimeContext,
   ): Promise<void>
+  /**
+   * Optional guidance on how the runtime should observe the device state to
+   * verify the effect of an action or property write. Return `null` (or omit
+   * the method) to fall back to the default single immediate observation.
+   * Drivers with latency (REST, eventually-consistent buses) can declare a
+   * `poll` strategy; drivers with a subscription channel will later declare
+   * `event`.
+   */
+  getVerificationStrategy?(
+    deviceId: string,
+    targetKind: 'action' | 'property',
+    targetName: string,
+    deviceConfig: Record<string, unknown>,
+  ): VerificationStrategy | null
 }

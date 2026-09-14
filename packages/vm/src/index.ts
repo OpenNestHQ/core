@@ -36,6 +36,21 @@ export type {
 } from './types.js'
 
 export type {
+  ExecutionStatus,
+  ActionExecution,
+  VerificationStatus,
+  Verification,
+  ActionOutcome,
+  VerificationStrategy,
+  PollVerificationStrategy,
+  EventVerificationStrategy,
+} from '@opennest/lang-core'
+export {
+  DEFAULT_POLL_TIMEOUT_MS,
+  DEFAULT_POLL_INTERVAL_MS,
+} from './execution.js'
+
+export type {
   UserInteraction,
   UserResponse,
   DeviceSelectionInteraction,

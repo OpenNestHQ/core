@@ -4,6 +4,7 @@ import type {
   CollectionModifier,
   Program,
   Value,
+  ActionOutcome,
 } from '@opennest/lang-core'
 import type { DeviceDriver } from '@opennest/devices'
 import type {
@@ -35,6 +36,7 @@ export interface ExecutedStatement {
   statement: Statement
   resolvedDevices: Device[]
   changes: StateChange[]
+  outcomes?: ActionOutcome[]
   filter?: ResolutionFilter
 }
 
