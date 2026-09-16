@@ -3,6 +3,7 @@ import type {
   Verification,
   VerificationStrategy,
   PollVerificationStrategy,
+  EventVerificationStrategy,
 } from '@opennest/lang-core'
 import type { Device } from './types.js'
 
@@ -89,6 +90,10 @@ export async function verifyState(
     return pollForEffects(device, properties, expected, strategy, runtime)
   }
 
+  if (strategy?.type === 'event') {
+    return waitForStateEvent(device, properties, expected, strategy, runtime)
+  }
+
   const observed = await observeState(device, properties, runtime)
   const matched = matchesEffects(expected, observed)
   return buildVerification(
@@ -129,6 +134,72 @@ function buildVerification(
   if (expected !== undefined) verification.expected = expected
   if (observed !== undefined) verification.observed = observed
   return verification
+}
+
+async function waitForStateEvent(
+  device: Device,
+  properties: string[],
+  expected: Record<string, unknown>,
+  strategy: EventVerificationStrategy,
+  runtime: DriverRuntimeContext,
+): Promise<Verification> {
+  // Immediate observation first: the write may already have been applied.
+  let observed = await observeState(device, properties, runtime)
+  if (matchesEffects(expected, observed)) {
+    return buildVerification('confirmed', expected, observed)
+  }
+
+  return new Promise<Verification>(resolve => {
+    const deadline = Date.now() + strategy.timeout
+    const unsubscribers: (() => void)[] = []
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined = undefined
+
+    const finish = (verification: Verification): void => {
+      if (settled) return
+      settled = true
+      if (timer !== undefined) clearTimeout(timer)
+      for (const unsubscribe of unsubscribers) unsubscribe()
+      resolve(verification)
+    }
+
+    const check = async (): Promise<void> => {
+      if (settled) return
+      if (Date.now() >= deadline) {
+        finish(buildVerification('timeout', expected, observed))
+        return
+      }
+      try {
+        observed = await observeState(device, properties, runtime)
+      } catch {
+        finish(buildVerification('not_observable'))
+        return
+      }
+      if (matchesEffects(expected, observed)) {
+        finish(buildVerification('confirmed', expected, observed))
+      }
+    }
+
+    for (const property of properties) {
+      const unsubscribe = device.driver.subscribeProperty?.(
+        device.id,
+        property,
+        device.driverConfig,
+        () => void check(),
+      )
+      if (unsubscribe) unsubscribers.push(unsubscribe)
+    }
+
+    // Not subscribable (down channel or non-push property): fall back to the
+    // single observation already taken.
+    if (unsubscribers.length === 0) {
+      resolve(buildVerification('mismatch', expected, observed))
+      return
+    }
+
+    timer = setTimeout(() => void check(), strategy.timeout)
+    void check()
+  })
 }
 
 function sleep(ms: number): Promise<void> {

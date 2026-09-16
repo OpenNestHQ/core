@@ -41,9 +41,11 @@ export interface PollVerificationStrategy {
 }
 
 /**
- * Reserved for future event/subscription-based verification. The runtime does
- * not implement it yet — it is declared so drivers can opt into it later.
+ * Subscription/push-based verification: the driver notifies the runtime when
+ * the observed state changes, instead of the runtime polling. `timeout` bounds
+ * the wait so a driver that never fires still produces a `timeout` result.
  */
 export interface EventVerificationStrategy {
   type: 'event'
+  timeout: number
 }

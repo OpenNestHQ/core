@@ -58,4 +58,17 @@ export interface DeviceDriver {
     targetName: string,
     deviceConfig: Record<string, unknown>,
   ): VerificationStrategy | null
+  /**
+   * Optional push subscription for event-based verification. Registers a
+   * callback fired whenever the observed state for `property` may have
+   * changed, and returns an unsubscribe function. Return `null` when the
+   * property cannot be observed through a subscription (e.g. computed values
+   * or a down channel), so the runtime can fall back to a single observation.
+   */
+  subscribeProperty?(
+    deviceId: string,
+    property: string,
+    deviceConfig: Record<string, unknown>,
+    onStateChange: () => void,
+  ): (() => void) | null
 }

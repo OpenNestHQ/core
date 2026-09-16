@@ -5,6 +5,7 @@ import type { DeviceDriver } from '@opennest/devices'
 import { executeCommand } from './index.js'
 import type { Device } from './index.js'
 import { executeAction } from './executor.js'
+import { verifyState } from './execution.js'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -228,6 +229,133 @@ describe('ActionOutcome — polling', () => {
     const outcome = result.executed[0]!.outcomes![0]!
     expect(outcome.verification.status).toBe('confirmed')
     expect(outcome.verification.observed).toEqual({ power: true })
+  })
+})
+
+describe('ActionOutcome — event verification', () => {
+  class EventDriver implements DeviceDriver {
+    readonly name = 'event'
+    state = new Map<string, Record<string, unknown>>()
+    subscribable = true
+    private listeners = new Set<() => void>()
+
+    async init(): Promise<void> {}
+    async close(): Promise<void> {}
+
+    async getProperty(deviceId: string, property: string): Promise<unknown> {
+      return this.state.get(deviceId)?.[property] ?? null
+    }
+
+    async setProperty(
+      deviceId: string,
+      property: string,
+      value: unknown,
+    ): Promise<void> {
+      const entry = this.state.get(deviceId) ?? {}
+      entry[property] = value
+      this.state.set(deviceId, entry)
+    }
+
+    async executeAction(): Promise<void> {}
+
+    subscribeProperty(
+      _deviceId: string,
+      _property: string,
+      _deviceConfig: Record<string, unknown>,
+      onStateChange: () => void,
+    ): (() => void) | null {
+      if (!this.subscribable) return null
+      this.listeners.add(onStateChange)
+      return () => this.listeners.delete(onStateChange)
+    }
+
+    emitChange(): void {
+      for (const listener of this.listeners) listener()
+    }
+  }
+
+  async function makeEventDevice(driver: EventDriver): Promise<Device> {
+    await driver.init()
+    return {
+      id: 'light_salon',
+      type: 'light',
+      room: 'salon',
+      name: 'light_salon',
+      driver,
+      driverConfig: {},
+    }
+  }
+
+  it('confirms immediately when the state already matches', async () => {
+    const driver = new EventDriver()
+    driver.state.set('light_salon', { power: true })
+    const dev = await makeEventDevice(driver)
+
+    const verification = await verifyState(
+      dev,
+      { power: true },
+      { type: 'event', timeout: 1000 },
+      { programId: 'p1' },
+    )
+
+    expect(verification.status).toBe('confirmed')
+  })
+
+  it('confirms once the driver signals a state change', async () => {
+    const driver = new EventDriver()
+    driver.state.set('light_salon', { power: false })
+    const dev = await makeEventDevice(driver)
+
+    const promise = verifyState(
+      dev,
+      { power: true },
+      { type: 'event', timeout: 1000 },
+      { programId: 'p1' },
+    )
+
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    driver.state.set('light_salon', { power: true })
+    driver.emitChange()
+
+    const verification = await promise
+    expect(verification.status).toBe('confirmed')
+    expect(verification.observed).toEqual({ power: true })
+  })
+
+  it('falls back to mismatch when the driver cannot subscribe', async () => {
+    const driver = new EventDriver()
+    driver.subscribable = false
+    driver.state.set('light_salon', { power: false })
+    const dev = await makeEventDevice(driver)
+
+    const verification = await verifyState(
+      dev,
+      { power: true },
+      { type: 'event', timeout: 1000 },
+      { programId: 'p1' },
+    )
+
+    expect(verification.status).toBe('mismatch')
+    expect(verification.observed).toEqual({ power: false })
+  })
+
+  it('times out when no event arrives', async () => {
+    vi.useFakeTimers()
+    const driver = new EventDriver()
+    driver.state.set('light_salon', { power: false })
+    const dev = await makeEventDevice(driver)
+
+    const promise = verifyState(
+      dev,
+      { power: true },
+      { type: 'event', timeout: 100 },
+      { programId: 'p1' },
+    )
+
+    await vi.advanceTimersByTimeAsync(200)
+    const verification = await promise
+    expect(verification.status).toBe('timeout')
   })
 })
 

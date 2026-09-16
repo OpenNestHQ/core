@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import { HADriver, STATE_CACHE_TTL_MS } from './homeassistant.js'
+import {
+  HADriver,
+  STATE_CACHE_TTL_MS,
+  EVENT_VERIFY_TIMEOUT_MS,
+} from './homeassistant.js'
 
 function mockFetch(
   responseFactory: (url: string, init?: RequestInit) => Response,
@@ -93,6 +97,118 @@ describe('HADriver', () => {
       await driver.getProperty('d1', 'power', {
         properties: { power: { entity: 'switch.test' } },
       })
+    })
+  })
+
+  describe('getVerificationStrategy', () => {
+    it('returns an event strategy for a state-bound property', () => {
+      const driver = makeDriver()
+      const config = { properties: { power: { entity: 'switch.test' } } }
+      const strategy = driver.getVerificationStrategy!(
+        'd1',
+        'property',
+        'power',
+        config,
+      )
+      expect(strategy).toEqual({
+        type: 'event',
+        timeout: EVENT_VERIFY_TIMEOUT_MS,
+      })
+    })
+
+    it('returns null for a template-bound property', () => {
+      const driver = makeDriver()
+      const config = {
+        properties: {
+          label: { get: { kind: 'template', template: '{{ x }}' } },
+        },
+      }
+      const strategy = driver.getVerificationStrategy!(
+        'd1',
+        'property',
+        'label',
+        config,
+      )
+      expect(strategy).toBeNull()
+    })
+
+    it('returns an event strategy for an action with subscribable effects', () => {
+      const driver = makeDriver()
+      const config = {
+        properties: { power: { entity: 'switch.test' } },
+        actions: { turnOn: { expectedEffects: { power: true } } },
+      }
+      const strategy = driver.getVerificationStrategy!(
+        'd1',
+        'action',
+        'turnOn',
+        config,
+      )
+      expect(strategy).toEqual({
+        type: 'event',
+        timeout: EVENT_VERIFY_TIMEOUT_MS,
+      })
+    })
+
+    it('returns null for an action without expected effects', () => {
+      const driver = makeDriver()
+      const config = { actions: { turnOn: {} } }
+      const strategy = driver.getVerificationStrategy!(
+        'd1',
+        'action',
+        'turnOn',
+        config,
+      )
+      expect(strategy).toBeNull()
+    })
+  })
+
+  describe('subscribeProperty', () => {
+    it('notifies a subscriber when a state change event arrives', () => {
+      const driver = makeDriver()
+      const config = { properties: { power: { entity: 'switch.test' } } }
+
+      let fired = 0
+      const unsubscribe = driver.subscribeProperty!(
+        'd1',
+        'power',
+        config,
+        () => {
+          fired += 1
+        },
+      )
+      expect(unsubscribe).not.toBeNull()
+
+      const handle = driver as unknown as {
+        handleStateEvent: (m: { event: unknown }) => void
+      }
+
+      handle.handleStateEvent({
+        event: { c: { 'switch.test': { '+': { s: 'on' } } } },
+      })
+      expect(fired).toBe(1)
+
+      unsubscribe!()
+      handle.handleStateEvent({
+        event: { c: { 'switch.test': { '+': { s: 'off' } } } },
+      })
+      expect(fired).toBe(1)
+    })
+
+    it('returns null for a non-subscribable property', () => {
+      const driver = makeDriver()
+      const config = {
+        properties: {
+          label: { get: { kind: 'template', template: '{{ x }}' } },
+        },
+      }
+      const unsubscribe = driver.subscribeProperty!(
+        'd1',
+        'label',
+        config,
+        () => {},
+      )
+      expect(unsubscribe).toBeNull()
     })
   })
 
