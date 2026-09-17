@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { extractPromptDefinitions } from './prompt.js'
-import type { InventoryYaml } from './types.js'
+import type { DeviceEntry, InventoryYaml } from './types.js'
 
 function inventory(partial: Partial<InventoryYaml> = {}): InventoryYaml {
   return { drivers: {}, rooms: [], devices: [], ...partial }
@@ -190,6 +190,27 @@ describe('extractPromptDefinitions', () => {
           description: 'Text to speak',
         },
       ],
+    })
+  })
+
+  it('tolerates a device without actions', () => {
+    const defs = extractPromptDefinitions(
+      inventory({
+        devices: [
+          {
+            id: 'tv1',
+            type: 'tv',
+            room: 'salon',
+            name: 'TV',
+            driver: 'mock',
+            properties: { power: { type: 'boolean' } },
+          } as unknown as DeviceEntry,
+        ],
+      }),
+    )
+
+    expect(defs.devices['tv']).toEqual({
+      capabilities: [{ kind: 'property', name: 'power', type: 'power' }],
     })
   })
 

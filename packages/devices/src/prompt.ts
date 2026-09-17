@@ -64,7 +64,7 @@ function actionCapabilities(
   if (Array.isArray(actions)) {
     return actions.map(name => ({ kind: 'action', name }))
   }
-  return Object.entries(actions).map(([name, config]) => ({
+  return Object.entries(actions ?? {}).map(([name, config]) => ({
     kind: 'action',
     name,
     ...(config.description ? { description: config.description } : {}),
