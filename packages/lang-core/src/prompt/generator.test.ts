@@ -140,7 +140,7 @@ describe('OpenNestPrompt', () => {
       expect(prompt).toContain('## DOOR')
       expect(prompt).toContain('- lock()')
       expect(prompt).toContain('- unlock()')
-      expect(prompt).toContain('- state (optional)')
+      expect(prompt).toContain('- state (text)')
     })
 
     it('should render switch capabilities correctly', () => {
@@ -162,13 +162,20 @@ describe('OpenNestPrompt', () => {
       expect(prompt).toContain('## Context reference')
     })
 
+    it('should contain the types and values section', () => {
+      expect(prompt).toContain('# TYPES & VALUES')
+      expect(prompt).toContain('## Number')
+      expect(prompt).toContain('## Power (on/off)')
+      expect(prompt).toContain('## String')
+      expect(prompt).toContain('## Identifier (enum)')
+    })
+
     it('should contain the static sections', () => {
       expect(prompt).toContain('# MULTIPLE INSTRUCTIONS')
       expect(prompt).toContain('# USAGE GUIDELINES')
       expect(prompt).toContain('# INVALID PATTERNS')
-      expect(prompt).toContain('# AMBIGUITY RESOLUTION')
+      expect(prompt).toContain('# AMBIGUITY')
       expect(prompt).toContain('# GENERAL PRINCIPLE')
-      expect(prompt).toContain('# OUTPUT FORMAT')
       expect(prompt).toContain('# EXAMPLES')
     })
 
@@ -244,7 +251,7 @@ describe('OpenNestPrompt', () => {
     })
 
     it('should still contain room selector examples', () => {
-      expect(prompt).toContain('- device[room_name]')
+      expect(prompt).toContain('- device[room]')
       expect(prompt).toContain('- light[*]')
     })
   })
@@ -437,7 +444,7 @@ describe('OpenNestPrompt', () => {
         },
         {},
       ).prompt()
-      expect(prompt).toContain('- mode (optional)')
+      expect(prompt).toContain('- mode (text)')
     })
 
     it('should NOT render range for number when no range provided', () => {
@@ -451,7 +458,7 @@ describe('OpenNestPrompt', () => {
       expect(prompt).not.toContain('count (')
     })
 
-    it('should NOT render (optional) for power type', () => {
+    it('should NOT render (text) for power type', () => {
       const prompt = new OpenNestPrompt(
         {
           test: makeDevice([makeProp('power', 'power')]),
@@ -459,7 +466,7 @@ describe('OpenNestPrompt', () => {
         {},
       ).prompt()
       expect(prompt).toContain('- power (on/off)')
-      expect(prompt).not.toContain('power (optional)')
+      expect(prompt).not.toContain('power (text)')
     })
 
     it('should list all rooms when more than 4 are provided', () => {
@@ -508,14 +515,14 @@ describe('capability rendering', () => {
     expect(prompt).toContain('- input (hdmi, usb, bluetooth)')
   })
 
-  it('should render string properties as name (optional)', () => {
+  it('should render string properties as name (text)', () => {
     const prompt = new OpenNestPrompt(
       {
         display: makeDevice([makeProp('label', 'string')]),
       },
       {},
     ).prompt()
-    expect(prompt).toContain('- label (optional)')
+    expect(prompt).toContain('- label (text)')
   })
 
   it('should render actions as name()', () => {
@@ -604,13 +611,13 @@ describe('section ordering', () => {
       '# SUPPORTED DEVICES',
       '# ROOMS',
       '# CAPABILITIES',
+      '# TYPES & VALUES',
       '# SYNTAX',
       '# MULTIPLE INSTRUCTIONS',
       '# USAGE GUIDELINES',
       '# INVALID PATTERNS',
-      '# AMBIGUITY RESOLUTION',
+      '# AMBIGUITY',
       '# GENERAL PRINCIPLE',
-      '# OUTPUT FORMAT',
       '# EXAMPLES',
     ])
   })
