@@ -6,7 +6,7 @@ import type {
   UserInteraction,
   DeviceSelectionInteraction,
   UserResponse,
-  VMResult,
+  RunResult,
 } from '@opennest/sdk'
 import {
   formatSuccess,
@@ -49,7 +49,7 @@ function createState(
 }
 
 function presentResult(
-  result: VMResult,
+  result: RunResult,
   prevHistoryLen: number,
 ): UserInteraction | null {
   if (result.executed.length > prevHistoryLen) {

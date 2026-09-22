@@ -5,6 +5,13 @@ export type {
   DSLFeedback,
 } from './client.js'
 
+export { toRunResult } from './result.js'
+export type {
+  DeviceSummary,
+  ExecutedStatementSummary,
+  RunResult,
+} from './result.js'
+
 export { ParseError } from '@opennest/lang-core'
 export type {
   Program,

@@ -18,6 +18,8 @@ import type {
   UserResponse,
   VMError,
 } from '@opennest/vm'
+import { toRunResult } from './result.js'
+import type { RunResult } from './result.js'
 
 export interface OpenNestClientOptions {
   devices: Device[] | DeviceRegistry
@@ -121,20 +123,20 @@ export class OpenNestClient {
     }
   }
 
-  execute(program: Program): Promise<VMResult> {
-    return this.run({ kind: 'run_program', program })
+  async execute(program: Program): Promise<RunResult> {
+    return toRunResult(await this.run({ kind: 'run_program', program }))
   }
 
-  async runDsl(dsl: string): Promise<VMResult> {
+  async runDsl(dsl: string): Promise<RunResult> {
     return this.execute(this.parse(dsl))
   }
 
-  resume(response: UserResponse): Promise<VMResult> {
-    return this.run({ kind: 'resume_interaction', response })
+  async resume(response: UserResponse): Promise<RunResult> {
+    return toRunResult(await this.run({ kind: 'resume_interaction', response }))
   }
 
-  cancel(): Promise<VMResult> {
-    return this.run({ kind: 'cancel_execution' })
+  async cancel(): Promise<RunResult> {
+    return toRunResult(await this.run({ kind: 'cancel_execution' }))
   }
 
   getSession(): Session {

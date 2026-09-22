@@ -258,9 +258,8 @@ describe('OpenNestClient', () => {
   it('exposes the session through getSession', async () => {
     const { client } = await makeClient()
 
-    const result = await client.runDsl('tv[salon].power = on')
+    await client.runDsl('tv[salon].power = on')
 
-    expect(client.getSession()).toBe(result.session)
     expect(client.getSession().history).toHaveLength(1)
   })
 

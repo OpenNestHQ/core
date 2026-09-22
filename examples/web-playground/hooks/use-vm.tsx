@@ -162,7 +162,7 @@ export function VMProvider({ children }: { children: ReactNode }) {
       const prevHistoryLen = state.executedStatements.length
       const result = await adapter.executeDSL(source)
 
-      dispatch({ type: 'SET_SESSION', session: result.session })
+      dispatch({ type: 'SET_SESSION', session: adapter.getSession() })
 
       if (result.executed.length > prevHistoryLen) {
         const newStmts = result.executed.slice(prevHistoryLen)
@@ -236,7 +236,7 @@ export function VMProvider({ children }: { children: ReactNode }) {
       const prevHistoryLen = state.executedStatements.length
       const result = await adapter.resumeInteraction(response)
 
-      dispatch({ type: 'SET_SESSION', session: result.session })
+      dispatch({ type: 'SET_SESSION', session: adapter.getSession() })
 
       if (result.executed.length > prevHistoryLen) {
         const newStmts = result.executed.slice(prevHistoryLen)
@@ -286,8 +286,8 @@ export function VMProvider({ children }: { children: ReactNode }) {
   )
 
   const cancelExecution = useCallback(async () => {
-    const result = await adapter.cancelExecution()
-    dispatch({ type: 'SET_SESSION', session: result.session })
+    await adapter.cancelExecution()
+    dispatch({ type: 'SET_SESSION', session: adapter.getSession() })
     dispatch({ type: 'SET_STATUS', status: 'idle' })
     dispatch({ type: 'SET_INTERACTION', interaction: null })
     dispatch({

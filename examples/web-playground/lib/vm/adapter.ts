@@ -9,7 +9,7 @@ import type {
   Middleware,
   UserInteraction,
   UserResponse,
-  VMResult,
+  RunResult,
   VMEvent,
   PlannedAction,
 } from '@opennest/sdk'
@@ -109,13 +109,12 @@ export class VMAdapter {
     })
   }
 
-  async executeDSL(source: string): Promise<VMResult> {
+  async executeDSL(source: string): Promise<RunResult> {
     const normalized = source.replace(/\r\n/g, '\n')
     const feedback = this.client.analyze(normalized)
     if (feedback.parseErrors.length > 0) {
       return {
         status: 'error',
-        session: this.client.getSession(),
         executed: [],
         interaction: null,
         errors: feedback.parseErrors.map(e => ({
@@ -134,14 +133,14 @@ export class VMAdapter {
     return result
   }
 
-  async resumeInteraction(response: UserResponse): Promise<VMResult> {
+  async resumeInteraction(response: UserResponse): Promise<RunResult> {
     const result = await this.client.resume(response)
 
     this.onSessionUpdate(this.client.getSession())
     return result
   }
 
-  async cancelExecution(): Promise<VMResult> {
+  async cancelExecution(): Promise<RunResult> {
     const result = await this.client.cancel()
     this.onSessionUpdate(this.client.getSession())
     return result
@@ -180,7 +179,7 @@ function stmtLabel(kind: string, property: string): string {
 }
 
 export function buildTimelineEntries(
-  result: VMResult,
+  result: RunResult,
   prevHistoryLen: number,
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = []
