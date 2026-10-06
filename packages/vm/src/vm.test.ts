@@ -201,16 +201,32 @@ describe('interpret_home_dsl', () => {
       expect(result.executed[0]!.changes[0]!.newValue).toBe('hdmi1')
     })
 
-    it('should assign to a wildcard room selector (all rooms)', async () => {
+    it('should be ambiguous for a wildcard room selector spanning multiple devices', async () => {
       const program = parse('tv[*].power = on')
       const result = await executeCommand(
         { kind: 'run_program', program: program },
         await ctx(),
       )
 
+      expect(result.status).toBe('awaiting_interaction')
+      expect(result.interaction!.type).toBe('device_selection')
+      const selection = result.interaction as DeviceSelectionInteraction
+      const ids = selection.devices.map(d => d.id)
+      expect(ids).toContain('tv_salon')
+      expect(ids).toContain('tv_chambre')
+    })
+
+    it('should assign to all rooms in batch with @all wildcard', async () => {
+      const program = parse('$tvs = @all(tv[*])\n$tvs.power = on')
+      const result = await executeCommand(
+        { kind: 'run_program', program: program },
+        await ctx(),
+      )
+
       expect(result.status).toBe('success')
-      expect(result.executed[0]!.resolvedDevices).toHaveLength(2)
-      const ids = result.executed[0]!.resolvedDevices.map(d => d.id)
+      const assignment = result.executed[1]!
+      expect(assignment.resolvedDevices).toHaveLength(2)
+      const ids = assignment.resolvedDevices.map(d => d.id)
       expect(ids).toContain('tv_salon')
       expect(ids).toContain('tv_chambre')
     })
@@ -937,12 +953,12 @@ describe('interpret_home_dsl', () => {
       expect(result.ambiguous).toBe(false)
     })
 
-    it('should match all devices of a type with wildcard', async () => {
+    it('should match all devices of a type with wildcard (ambiguous)', async () => {
       const devs = await devices()
       const result = resolveDevices([seg('light', '*')], devs, createSession())
 
       expect(result.devices).toHaveLength(2)
-      expect(result.ambiguous).toBe(false)
+      expect(result.ambiguous).toBe(true)
     })
 
     it('should detect ambiguity when no room selector on multi-instance type', async () => {
@@ -2320,17 +2336,17 @@ describe('interpret_home_dsl', () => {
     })
 
     it("should handle 'turn off all lights'", async () => {
-      const program = parse(`light[*].power = off`)
+      const program = parse(`$lights = @all(light[*])\n$lights.power = off`)
       const result = await executeCommand(
         { kind: 'run_program', program: program },
         await ctx(),
       )
 
       expect(result.status).toBe('success')
-      expect(result.executed).toHaveLength(1)
-      expect(result.executed[0]!.resolvedDevices).toHaveLength(2)
+      expect(result.executed).toHaveLength(2)
+      expect(result.executed[1]!.resolvedDevices).toHaveLength(2)
 
-      for (const d of result.executed[0]!.resolvedDevices) {
+      for (const d of result.executed[1]!.resolvedDevices) {
         const pwr = await getProperty(d, 'power')
         expect(pwr).toBe(false)
       }

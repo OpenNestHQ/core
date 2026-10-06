@@ -92,7 +92,7 @@ function renderRoomsSection(rooms: Record<string, RoomDefinition>): string {
   lines.push('', 'Room selector syntax:', '')
   lines.push('- device[room] — targets a specific room')
   lines.push(
-    '- light[*] — targets ALL rooms (bypasses ambiguity, batch execution)',
+    '- light[*] — targets ALL rooms (matches every room, may be ambiguous)',
   )
 
   lines.push(
@@ -100,11 +100,11 @@ function renderRoomsSection(rooms: Record<string, RoomDefinition>): string {
     'Rooms are logical labels — they describe where a device is placed.',
     'Devices are matched to rooms based on the actual inventory.',
     '',
-    'The wildcard [*] bypasses ambiguity: light[*].power = off',
-    'turns off lights in every room without requiring resolution.',
+    'The wildcard [*] matches every room but is still subject to ambiguity:',
+    'light[*].power = off asks the user to pick one if several match.',
     '',
-    '[*] can be combined with @all: @all(light[*]) stores all lights',
-    'from every room in a single variable.',
+    'To batch across every room, use @all: $lights = @all(light[*])',
+    'stores every light, then $lights.power = off turns them all off.',
     '',
   )
 
@@ -573,11 +573,11 @@ function renderAmbiguitySection(): string {
     '',
     'Disambiguation tools:',
     '- device[room] / device[owner:name] / device[tag:name] — narrow the match',
-    '- @all(...) or [*] — target every match (batch)',
+    '- @all(...) — target every match (batch)',
     '- @first(...)     — target the first match',
     '- @oneof(...)     — target one device; if several match, let the user choose',
     '',
-    'Rule of thumb: "all" → @all or [*]; "any one" → @first;',
+    'Rule of thumb: "all" → @all; "any one" → @first;',
     '"one I can name" → selector; "one I can\'t name" → @oneof.',
     '',
   ].join('\n')
@@ -613,7 +613,8 @@ function renderExamplesSection(userExamples?: string[]): string {
     '→ thermostat.temperature = 21',
     '',
     '"Turn off all lights"',
-    '→ light[*].power = off',
+    '→ $lights = @all(light[*])',
+    '$lights.power = off',
     '',
     '"Play music"',
     '→ speaker.play()',

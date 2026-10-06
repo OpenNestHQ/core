@@ -154,12 +154,7 @@ function updateItRef(
   }
   // Only update itRef if we can uniquely determine the device
   if (candidates.length === 1) return candidates[0]!
-  // If multiple matches but we have a room selector with wildcard, pick first
-  if (candidates.length > 1 && roomSelector?.kind === 'wildcard')
-    return candidates[0]!
-  // If room selector restricts to one room and there's exactly one, pick it
-  if (candidates.length === 1) return candidates[0]!
-  // For multiple matches without disambiguation, don't update itRef
+  // For multiple matches without disambiguation (including wildcard), don't update itRef
   return itRef
 }
 
@@ -365,6 +360,16 @@ function validateSimpleCondition(
           ],
           newItRef: itRef,
         }
+      }
+    } else if (roomSelector?.kind === 'wildcard' && matches.length > 1) {
+      return {
+        errors: [
+          error(
+            parentStmt,
+            `Ambiguous device in @if condition: '${info.deviceType}[*]' matches ${matches.length} devices. Use @oneof to pre-resolve or specify a room`,
+          ),
+        ],
+        newItRef: itRef,
       }
     } else if (!roomSelector && matches.length > 1) {
       return {

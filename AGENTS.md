@@ -256,7 +256,7 @@ const trace: ExecutionTrace = tracer.getTrace(); // { root: ExecutionNode }
 
 - `@all(type[room])` — expands to all matches, bypasses ambiguity, executes in batch.
 - `@first(type[room])` — selects the first match.
-- `[*]` wildcard room selector — matches devices in all rooms, bypasses ambiguity.
+- `[*]` wildcard room selector — matches devices in all rooms but stays subject to ambiguity (use `@all` for batch).
 - Variables remember their modifier: `$lights = @all(light[salon])` binds with `@all` semantics.
 
 ### `it` context

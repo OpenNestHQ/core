@@ -165,19 +165,15 @@ describe('executeCommand', () => {
       expect(exec.resolvedDevices[0]!.id).toBe('tv_chambre')
     })
 
-    it('should expand wildcard rooms in batch without ambiguity', async () => {
+    it('should trigger device selection for wildcard rooms', async () => {
       const ctx = { devices: await devices() }
       const result = await executeCommand(
         { kind: 'execute_action', action: buildAction('tv', 'turn_on', '*') },
         ctx,
       )
 
-      expect(result.status).toBe('success')
-      const exec = result.executed[0]!
-      expect(exec.resolvedDevices.map(d => d.id).sort()).toEqual([
-        'tv_chambre',
-        'tv_salon',
-      ])
+      expect(result.status).toBe('awaiting_interaction')
+      expect(result.interaction!.type).toBe('device_selection')
     })
 
     it('should go through the middleware pipeline and pause on confirmation', async () => {

@@ -441,15 +441,15 @@ describe('VM with middleware', () => {
       return next()
     }
 
-    const program = parse('tv[*].power = on')
+    const program = parse('$tvs = @all(tv[*])\n$tvs.power = on')
     const result = await executeCommand(
       { kind: 'run_program', program: program },
       await ctx(undefined, [skipTvChambre]),
     )
 
     expect(result.status).toBe('success')
-    expect(result.executed).toHaveLength(1)
-    const exec = result.executed[0]!
+    expect(result.executed).toHaveLength(2)
+    const exec = result.executed[1]!
     expect(exec.changes).toHaveLength(1)
     expect(exec.changes[0]!.deviceId).toBe('tv_salon')
     expect(exec.resolvedDevices).toHaveLength(1)
@@ -464,7 +464,7 @@ describe('VM with middleware', () => {
       return next()
     }
 
-    const program = parse('tv[*].power = on')
+    const program = parse('$tvs = @all(tv[*])\n$tvs.power = on')
     const result = await executeCommand(
       { kind: 'run_program', program: program },
       await ctx(undefined, [blockTvChambre]),

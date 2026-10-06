@@ -184,7 +184,7 @@ describe('OpenNestPrompt', () => {
       expect(prompt).toContain('tv.power = on')
       expect(prompt).toContain('$it.power = off')
       expect(prompt).toContain('thermostat.temperature = 21')
-      expect(prompt).toContain('light[*].power = off')
+      expect(prompt).toContain('@all(light[*])')
       expect(prompt).toContain('speaker.play()')
     })
 
@@ -323,7 +323,7 @@ describe('OpenNestPrompt', () => {
   describe('with user examples', () => {
     const userExamples = [
       `"Play a movie"\n→ tv.play()`,
-      `"Goodnight"\n→ light[*].power = off\ndoor[entrance].lock()`,
+      `"Goodnight"\n→ $lights = @all(light[*])\n$lights.power = off\ndoor[entrance].lock()`,
     ]
     const prompt = new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt({
       examples: userExamples,

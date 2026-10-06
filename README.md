@@ -66,8 +66,10 @@ $it.volume = 20
 $lights = @all(light[salon])
 $lights.power = on
 
-# Wildcard rooms
-light[*].power = off
+# Wildcard rooms (match every room — ambiguous if several devices)
+light[*].power = off   # → asks to pick one
+$lights = @all(light[*])  # → batch across every room
+$lights.power = off
 
 # Owner selectors (who owns the device)
 light[owner:Alice].power = on
@@ -105,7 +107,7 @@ $tv = @oneof(tv)
 | `@all(type[room])` | Expands to all matches, batch execution |
 | `@first(type[room])` | Selects the first match |
 | `@oneof(type[room])` | Resolves immediately to one device, ambiguity if multiple |
-| `[*]` | Wildcard room — matches all rooms |
+| `[*]` | Wildcard room — matches all rooms (still ambiguous if several match) |
 
 ### Selectors (room, owner, tag)
 
@@ -116,7 +118,7 @@ Devices can be targeted by three selector types, chainable as `[room][owner:name
 | Room | `type[room_name]` | Physical location (where) |
 | Owner | `type[owner:name]` | Person who owns the device (whose) |
 | Tag | `type[tag:name]` | Category / feature / role (what) |
-| Wildcard | `[*]` | All rooms |
+| Wildcard | `[*]` | All rooms (match every room, subject to ambiguity) |
 
 Owners and tags are optional fields on each device. If a device has no `owners`/`tags`, it will match only queries without `owner:`/`tag:` selectors.
 
