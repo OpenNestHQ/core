@@ -4,6 +4,7 @@ import type {
   DeviceSelectionInteraction,
   UserResponse,
 } from './types.js'
+import { InteractionError } from './errors.js'
 
 export interface DeviceSelectionContext {
   devices: Device[]
@@ -43,10 +44,20 @@ export const deviceSelectionHandler: InteractionHandler<DeviceSelectionContext> 
       context: DeviceSelectionContext,
       response: UserResponse,
     ): void {
-      if (response.type !== 'device_selection') return
+      if (response.type !== 'device_selection') {
+        throw new InteractionError(
+          'interaction_type_mismatch',
+          `Expected a response of type "device_selection", got "${response.type}"`,
+        )
+      }
 
       const selected = context.devices.find(d => d.id === response.deviceId)
-      if (!selected) return
+      if (!selected) {
+        throw new InteractionError(
+          'unknown_device_id',
+          `Unknown device "${response.deviceId}". Valid choices: ${context.devices.map(d => d.id).join(', ')}`,
+        )
+      }
 
       session.resolvedIds[context.deviceType] = selected.id
       if (context.variableName) {

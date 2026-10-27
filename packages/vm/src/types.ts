@@ -55,7 +55,8 @@ export interface Session {
 }
 
 export interface VMError {
-  statement: Statement
+  statement?: Statement
+  code?: string
   message: string
 }
 

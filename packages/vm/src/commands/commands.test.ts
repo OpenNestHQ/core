@@ -592,6 +592,111 @@ describe('executeCommand', () => {
         ),
       ).rejects.toThrow('no pending')
     })
+
+    it('rejects an unknown deviceId with the valid choices listed', async () => {
+      const session = createSession()
+      const ctx = { devices: await devices(), session }
+
+      const first = await executeCommand(
+        { kind: 'execute_action', action: buildAction('tv', 'turn_on') },
+        ctx,
+      )
+      expect(first.status).toBe('awaiting_interaction')
+      expect(first.interaction!.type).toBe('device_selection')
+
+      const resume = executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: first.interaction!.id,
+            type: 'device_selection',
+            deviceId: 'tv_inexistant',
+          },
+        },
+        { devices: ctx.devices, session },
+      )
+      await expect(resume).rejects.toMatchObject({
+        name: 'InteractionError',
+        code: 'unknown_device_id',
+      })
+      const err: Error = await resume.catch(e => e)
+      expect(err.message).toContain('tv_salon')
+      expect(err.message).toContain('tv_chambre')
+    })
+
+    it('rejects a response whose type does not match the pending interaction', async () => {
+      const session = createSession()
+      const ctx = { devices: await devices(), session }
+
+      const first = await executeCommand(
+        { kind: 'execute_action', action: buildAction('tv', 'turn_on') },
+        ctx,
+      )
+      expect(first.status).toBe('awaiting_interaction')
+      expect(first.interaction!.type).toBe('device_selection')
+
+      await expect(
+        executeCommand(
+          {
+            kind: 'resume_interaction',
+            response: {
+              interactionId: first.interaction!.id,
+              type: 'confirmation',
+              confirmed: true,
+            },
+          },
+          { devices: ctx.devices, session },
+        ),
+      ).rejects.toMatchObject({
+        name: 'InteractionError',
+        code: 'interaction_type_mismatch',
+      })
+    })
+
+    it('keeps the pending interaction after a rejected resume so a corrected retry succeeds', async () => {
+      const session = createSession()
+      const ctx = { devices: await devices(), session }
+
+      const first = await executeCommand(
+        { kind: 'execute_action', action: buildAction('tv', 'turn_on') },
+        ctx,
+      )
+      expect(first.status).toBe('awaiting_interaction')
+      expect(first.interaction!.type).toBe('device_selection')
+
+      await expect(
+        executeCommand(
+          {
+            kind: 'resume_interaction',
+            response: {
+              interactionId: first.interaction!.id,
+              type: 'device_selection',
+              deviceId: 'tv_inexistant',
+            },
+          },
+          { devices: ctx.devices, session },
+        ),
+      ).rejects.toMatchObject({
+        name: 'InteractionError',
+        code: 'unknown_device_id',
+      })
+      expect(session.pendingInteraction).not.toBeNull()
+
+      const second = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: first.interaction!.id,
+            type: 'device_selection',
+            deviceId: 'tv_salon',
+          },
+        },
+        { devices: ctx.devices, session },
+      )
+      expect(second.status).toBe('success')
+      const exec = second.executed[second.executed.length - 1]!
+      expect(exec.resolvedDevices[0]!.id).toBe('tv_salon')
+    })
   })
 
   describe('cancel_execution', () => {

@@ -69,6 +69,9 @@ export type {
   ActionParameterResponse,
 } from './interactions/types.js'
 
+export { InteractionError } from './interactions/errors.js'
+export type { InteractionErrorCode } from './interactions/errors.js'
+
 export { noopMiddleware } from './middleware/noop.js'
 export { createConfirmationMiddleware } from './middleware/confirmation.js'
 export type { ConfirmationMiddlewareConfig } from './middleware/confirmation.js'
