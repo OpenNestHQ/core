@@ -444,14 +444,48 @@ describe('OpenNestClient pending interactions', () => {
     expect(third.status).toBe('success')
     expect(client.getPendingInteraction()).toBeNull()
 
-    // error result → null (clears a pending interaction too)
-    const fourth = await client.runDsl('tv.power = on')
-    expect(fourth.status).toBe('awaiting_interaction')
-    expect(client.getPendingInteraction()).not.toBeNull()
+    // terminal error on a fresh runDsl → null (no interaction in session)
+    const failed = await client.runDsl('camera[salon].snapshot()')
+    expect(failed.status).toBe('error')
+    expect(client.getPendingInteraction()).toBeNull()
+  })
+
+  it('keeps the pending interaction after a blocked run and still resumes', async () => {
+    const { client, driver } = await makeClient()
+
+    const paused = await client.runDsl('tv.power = on')
+    expect(paused.status).toBe('awaiting_interaction')
+
     const blocked = await client.runDsl('tv[salon].power = on')
     expect(blocked.status).toBe('error')
     expect(blocked.errors[0]!.code).toBe('interaction_pending')
+    expect(client.getPendingInteraction()!.id).toBe(paused.interaction!.id)
+
+    const result = await client.resumePending({
+      type: 'device_selection',
+      deviceId: 'tv_salon',
+    })
+
+    expect(result.status).toBe('success')
+    expect(await driver.getProperty('tv_salon', 'power')).toBe(true)
     expect(client.getPendingInteraction()).toBeNull()
+  })
+
+  it('keeps the pending interaction after a failed raw resume', async () => {
+    const { client } = await makeClient()
+
+    const paused = await client.runDsl('tv.power = on')
+    expect(paused.status).toBe('awaiting_interaction')
+
+    const failed = await client.resume({
+      interactionId: 'stale-id',
+      type: 'device_selection',
+      deviceId: 'tv_salon',
+    })
+
+    expect(failed.status).toBe('error')
+    expect(failed.errors[0]!.code).toBe('interaction_id_mismatch')
+    expect(client.getPendingInteraction()!.id).toBe(paused.interaction!.id)
   })
 })
 

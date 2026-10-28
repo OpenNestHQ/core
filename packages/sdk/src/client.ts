@@ -195,16 +195,18 @@ export class OpenNestClient {
   private async run(command: VMCommand): Promise<VMResult> {
     const result = await executeCommand(command, this.buildContext())
     this.session = result.session
-    this.lastInteraction =
-      result.status === 'awaiting_interaction' && result.interaction !== null
-        ? result.interaction
-        : null
     if (
       result.status === 'awaiting_interaction' &&
       result.interaction !== null
     ) {
+      this.lastInteraction = result.interaction
       this.notifyInteraction(result.interaction)
+    } else if (!result.session.pendingInteraction) {
+      // Truly resolved (success/terminal error) or reset (cancel): clear.
+      this.lastInteraction = null
     }
+    // else the VM session still holds the interaction (blocked run, failed
+    // resume) — retain it so getPendingInteraction/resumePending stay usable.
     return result
   }
 
