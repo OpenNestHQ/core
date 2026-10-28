@@ -487,6 +487,29 @@ describe('OpenNestClient pending interactions', () => {
     expect(failed.errors[0]!.code).toBe('interaction_id_mismatch')
     expect(client.getPendingInteraction()!.id).toBe(paused.interaction!.id)
   })
+
+  it('clears the pending interaction when a resume continuation throws', async () => {
+    const boom = new Error('continuation boom')
+    const throwing: Middleware = async ctx => {
+      if (ctx.action.device.id === 'tv_chambre') throw boom
+      return { kind: 'execute', actions: [ctx.action] }
+    }
+    const { client } = await makeClient({ middleware: [throwing] })
+
+    const paused = await client.runDsl('tv.power = on')
+    expect(paused.status).toBe('awaiting_interaction')
+    expect(client.getPendingInteraction()).not.toBeNull()
+
+    await expect(
+      client.resume({
+        interactionId: paused.interaction!.id,
+        type: 'device_selection',
+        deviceId: 'tv_chambre',
+      }),
+    ).rejects.toThrow('continuation boom')
+
+    expect(client.getPendingInteraction()).toBeNull()
+  })
 })
 
 const FROM_YAML = `

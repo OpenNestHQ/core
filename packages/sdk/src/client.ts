@@ -193,7 +193,18 @@ export class OpenNestClient {
   }
 
   private async run(command: VMCommand): Promise<VMResult> {
-    const result = await executeCommand(command, this.buildContext())
+    let result: VMResult
+    try {
+      result = await executeCommand(command, this.buildContext())
+    } catch (error) {
+      // The VM mutates the session in place: a throw mid-resume-continuation
+      // can leave lastInteraction stale (resume already cleared
+      // session.pendingInteraction). Re-sync the cache before rethrowing.
+      if (!this.session.pendingInteraction) {
+        this.lastInteraction = null
+      }
+      throw error
+    }
     this.session = result.session
     if (
       result.status === 'awaiting_interaction' &&
