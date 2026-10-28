@@ -3,6 +3,7 @@ export type {
   OpenNestClientOptions,
   OpenNestClientFromYamlOptions,
   DSLFeedback,
+  ResumeAnswer,
 } from './client.js'
 
 export { toRunResult } from './result.js'

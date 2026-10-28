@@ -21,6 +21,13 @@ import type {
 import { toRunResult } from './result.js'
 import type { RunResult } from './result.js'
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+  ? Omit<T, K>
+  : never
+
+/** A `UserResponse` without its `interactionId` — `resumePending` injects it. */
+export type ResumeAnswer = DistributiveOmit<UserResponse, 'interactionId'>
+
 export interface OpenNestClientOptions {
   devices: Device[] | DeviceRegistry
   promptDefinitions?: PromptDefinitions
@@ -53,6 +60,7 @@ export class OpenNestClient {
   private readonly onInteractionError:
     ((error: unknown, interaction: UserInteraction) => void) | undefined
   private session: Session
+  private lastInteraction: UserInteraction | null = null
 
   constructor(options: OpenNestClientOptions) {
     if (Array.isArray(options.devices)) {
@@ -135,12 +143,45 @@ export class OpenNestClient {
     return toRunResult(await this.run({ kind: 'resume_interaction', response }))
   }
 
+  async resumePending(response: ResumeAnswer): Promise<RunResult> {
+    const pending = this.lastInteraction
+    if (pending === null) {
+      return failedRunResult(
+        'no_pending_interaction',
+        'No interaction is pending. Execute a program first.',
+      )
+    }
+    if (response.type !== pending.type) {
+      return failedRunResult(
+        'interaction_type_mismatch',
+        `Pending interaction is ${pending.type}, got ${response.type}.`,
+      )
+    }
+    if (
+      pending.type === 'device_selection' &&
+      response.type === 'device_selection'
+    ) {
+      const valid = pending.devices.map(d => d.id)
+      if (!valid.includes(response.deviceId)) {
+        return failedRunResult(
+          'unknown_device_id',
+          `Unknown device "${response.deviceId}". Valid choices: ${valid.join(', ')}.`,
+        )
+      }
+    }
+    return this.resume({ ...response, interactionId: pending.id })
+  }
+
   async cancel(): Promise<RunResult> {
     return toRunResult(await this.run({ kind: 'cancel_execution' }))
   }
 
   getSession(): Session {
     return this.session
+  }
+
+  getPendingInteraction(): UserInteraction | null {
+    return this.lastInteraction
   }
 
   async whenReady(): Promise<void> {
@@ -154,6 +195,10 @@ export class OpenNestClient {
   private async run(command: VMCommand): Promise<VMResult> {
     const result = await executeCommand(command, this.buildContext())
     this.session = result.session
+    this.lastInteraction =
+      result.status === 'awaiting_interaction' && result.interaction !== null
+        ? result.interaction
+        : null
     if (
       result.status === 'awaiting_interaction' &&
       result.interaction !== null
@@ -204,5 +249,14 @@ export class OpenNestClient {
       context.eventBus = this.eventBus
     }
     return context
+  }
+}
+
+function failedRunResult(code: string, message: string): RunResult {
+  return {
+    status: 'error',
+    executed: [],
+    interaction: null,
+    errors: [{ code, message }],
   }
 }
