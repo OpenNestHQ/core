@@ -8,7 +8,7 @@ import type {
   Device,
   Middleware,
   UserInteraction,
-  UserResponse,
+  ResumeAnswer,
   RunResult,
   VMEvent,
   PlannedAction,
@@ -133,8 +133,8 @@ export class VMAdapter {
     return result
   }
 
-  async resumeInteraction(response: UserResponse): Promise<RunResult> {
-    const result = await this.client.resume(response)
+  async resumeInteraction(response: ResumeAnswer): Promise<RunResult> {
+    const result = await this.client.resumePending(response)
 
     this.onSessionUpdate(this.client.getSession())
     return result

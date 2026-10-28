@@ -8,7 +8,7 @@ import {
   useRef,
   type ReactNode,
 } from 'react'
-import type { UserResponse } from '@opennest/sdk'
+import type { ResumeAnswer, VMError } from '@opennest/sdk'
 import {
   VMAdapter,
   buildTimelineEntries,
@@ -16,6 +16,12 @@ import {
   formatInteractionMessage,
 } from '@/lib/vm/adapter'
 import type { VMState, VMAction, VMEventLogEntry } from '@/lib/vm/types'
+
+function formatErrorMessages(errors: VMError[]): string {
+  return errors
+    .map(e => (e.code ? `❌ [${e.code}] ${e.message}` : `❌ ${e.message}`))
+    .join('\n')
+}
 
 // ── Reducer ──
 
@@ -86,7 +92,7 @@ const initialState: VMState = {
 interface VMContextValue {
   state: VMState
   executeDSL: (source: string) => Promise<void>
-  respondToInteraction: (response: UserResponse) => Promise<void>
+  respondToInteraction: (response: ResumeAnswer) => Promise<void>
   cancelExecution: () => Promise<void>
   resetAll: () => void
   runDemo: () => Promise<void>
@@ -203,7 +209,7 @@ export function VMProvider({ children }: { children: ReactNode }) {
       if (result.status === 'error') {
         dispatch({ type: 'SET_ERRORS', errors: result.errors })
         dispatch({ type: 'SET_STATUS', status: 'error' })
-        const errorMsg = result.errors.map(e => `❌ ${e.message}`).join('\n')
+        const errorMsg = formatErrorMessages(result.errors)
         dispatch({
           type: 'ADD_MESSAGE',
           message: buildChatMessage('vm', errorMsg),
@@ -217,7 +223,7 @@ export function VMProvider({ children }: { children: ReactNode }) {
   )
 
   const respondToInteraction = useCallback(
-    async (response: UserResponse) => {
+    async (response: ResumeAnswer) => {
       dispatch({ type: 'SET_STATUS', status: 'running' })
       dispatch({ type: 'SET_INTERACTION', interaction: null })
 
@@ -272,7 +278,7 @@ export function VMProvider({ children }: { children: ReactNode }) {
       if (result.status === 'error') {
         dispatch({ type: 'SET_ERRORS', errors: result.errors })
         dispatch({ type: 'SET_STATUS', status: 'error' })
-        const errorMsg = result.errors.map(e => `❌ ${e.message}`).join('\n')
+        const errorMsg = formatErrorMessages(result.errors)
         dispatch({
           type: 'ADD_MESSAGE',
           message: buildChatMessage('vm', errorMsg),

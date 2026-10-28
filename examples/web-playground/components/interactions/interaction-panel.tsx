@@ -43,7 +43,6 @@ export function InteractionPanel() {
             interaction={interaction}
             onSelect={deviceId =>
               respondToInteraction({
-                interactionId: interaction.id,
                 type: 'device_selection',
                 deviceId,
               })
@@ -55,14 +54,12 @@ export function InteractionPanel() {
             interaction={interaction}
             onConfirm={() =>
               respondToInteraction({
-                interactionId: interaction.id,
                 type: 'confirmation',
                 confirmed: true,
               })
             }
             onDeny={() =>
               respondToInteraction({
-                interactionId: interaction.id,
                 type: 'confirmation',
                 confirmed: false,
               })
