@@ -747,6 +747,7 @@ describe('executeCommand', () => {
         { devices: ctx.devices, session, middleware: [mw] },
       )
       expect(third.status).toBe('success')
+      expect(third.executed).toHaveLength(1)
       // MockDriver's executeAction is a no-op: the applied effect is recorded
       // as a change rather than as device state.
       const exec = third.executed[third.executed.length - 1]!
