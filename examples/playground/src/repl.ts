@@ -5,7 +5,7 @@ import type {
   Device,
   UserInteraction,
   DeviceSelectionInteraction,
-  UserResponse,
+  ResumeAnswer,
   RunResult,
 } from '@opennest/sdk'
 import {
@@ -110,7 +110,7 @@ async function handleInteraction(
     return null
   }
 
-  let response: UserResponse
+  let response: ResumeAnswer
 
   if (interaction.type === 'device_selection') {
     const idx = parseInt(trimmed, 10)
@@ -120,7 +120,6 @@ async function handleInteraction(
     }
     const chosen = interaction.devices[idx - 1]!
     response = {
-      interactionId: interaction.id,
       type: 'device_selection',
       deviceId: chosen.id,
     }
@@ -132,7 +131,6 @@ async function handleInteraction(
       return null
     }
     response = {
-      interactionId: interaction.id,
       type: 'confirmation',
       confirmed,
     }
@@ -158,7 +156,6 @@ async function handleInteraction(
       }
     }
     response = {
-      interactionId: interaction.id,
       type: 'action_parameter',
       values,
     }
@@ -171,7 +168,7 @@ async function handleInteraction(
 
   state.telemetry?.beginCycle()
 
-  const result = await state.client.resume(response)
+  const result = await state.client.resumePending(response)
 
   state.telemetry?.endCycle(result.status === 'awaiting_interaction')
   return presentResult(result, prevHistoryLen)

@@ -138,7 +138,9 @@ export function formatErrors(errors: VMError[]): string {
     `\n${R}${B}\u2717${N} ${R}Error${errors.length > 1 ? 's' : ''}:${N}`,
   )
   for (const err of errors) {
-    lines.push(`  ${R}\u2022${N} ${err.message}`)
+    lines.push(
+      `  ${R}\u2022${N} ${err.code ? `[${err.code}] ` : ''}${err.message}`,
+    )
   }
   return lines.join('\n')
 }
