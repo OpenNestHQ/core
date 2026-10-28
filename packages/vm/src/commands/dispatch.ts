@@ -57,6 +57,22 @@ async function runProgram(
   context: VMContext,
   deviceId?: string,
 ): Promise<VMResult> {
+  const pending = context.session?.pendingInteraction
+  if (pending !== null && pending !== undefined) {
+    return {
+      status: 'error',
+      session: context.session!,
+      executed: [],
+      interaction: null,
+      errors: [
+        {
+          code: 'interaction_pending',
+          message: `Interaction ${pending.id} (${pending.type}) is pending. Answer it with resume_interaction, or cancel the execution first.`,
+        },
+      ],
+    }
+  }
+
   return interpretProgram(
     program,
     deviceId !== undefined
