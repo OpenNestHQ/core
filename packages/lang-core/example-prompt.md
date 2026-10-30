@@ -41,19 +41,85 @@ Rooms are specified using bracket selectors:
 
 Room selector syntax:
 
-- device[room_name] — targets a specific room
-- light[*] — targets ALL rooms (bypasses ambiguity, batch execution)
+- device[room] — targets a specific room
+- light[*] — targets ALL rooms (matches every room, may be ambiguous)
 
 Rooms are logical labels — they describe where a device is placed.
-Devices are matched to rooms at runtime based on the actual inventory.
+Devices are matched to rooms based on the actual inventory.
 
-The wildcard [*] bypasses ambiguity: light[*].power = off
-turns off lights in every room without requiring resolution.
+The wildcard [*] matches every room but is still subject to ambiguity:
+light[*].power = off asks the user to pick one if several match.
 
-[*] can be combined with @all: @all(light[*]) stores all lights
-from every room in a single variable.
+To batch across every room, use @all: $lights = @all(light[*])
+stores every light, then $lights.power = off turns them all off.
 
+# OWNERS
 
+Owners represent people or roles who control specific devices.
+A device can have multiple owners.
+
+Available owners:
+
+- Alice — Alice's personal devices
+- Bob — Bob's personal devices
+- Kids — Devices in the children's rooms
+- Everybody — Shared family devices (default)
+
+Owner selector syntax:
+
+  device[owner:name] — devices belonging to an owner
+  light[owner:Alice] — Alice's lights
+
+Chaining selectors (room + owner):
+
+  light[living_room][owner:Alice] — Alice's lights in the living room
+  door[owner:kids].lock() — lock the children's doors
+
+Collection usage:
+
+  $alice_lights = @all(light[owner:Alice])
+  $alice_lights.power = off
+
+Heuristics:
+
+- "my", "Alice's", "Bob's", "the children's" → use [owner:name]
+- No owner implied → omit (targets all devices regardless of owner)
+- Owner is a device-level concept, independent of room location
+
+# TAGS
+
+Tags are arbitrary category labels attached to devices.
+Unlike rooms (WHERE) and owners (WHOSE), tags describe
+WHAT a device IS (category, feature, role).
+
+Available tags:
+
+- main — Main/default device in a room
+- audio — Devices with audio capabilities
+- video — Devices with video/display capabilities
+- security — Security-related devices
+- outdoor — Outdoor devices
+
+Tag selector syntax:
+
+  device[tag:name] — devices with a specific tag
+  light[tag:main] — main lights across all rooms
+  camera[tag:security].snapshot() — snapshot security cameras
+
+Chaining selectors (room + owner + tag):
+
+  light[living_room][owner:Alice][tag:main] — Alice's main living-room light
+  speaker[tag:audio].volume = 30 — all audio devices volume
+
+Collection usage:
+
+  $audio = @all(speaker[tag:audio])
+  $audio.volume += 10
+
+When to use tags vs rooms vs owners:
+- Room = WHERE (physical location)
+- Owner = WHOSE (person who owns it)
+- Tag = WHAT (category, feature, role)
 
 # CAPABILITIES
 
@@ -74,8 +140,8 @@ Actions (callable):
 Properties:
 - power (on/off)
 - brightness (0–100)
-- color (optional)
-- mode (optional)
+- color (text)
+- mode (text)
 
 ## SPEAKER
 Properties:
@@ -107,7 +173,7 @@ Actions (callable):
 
 ## VACUUM
 Actions (callable):
-- start(room?: salon|chambre|cuisine|bureau, mode?: silent|normal|turbo)
+- start(room?: living_room|bedroom|kitchen|office|bathroom|entrance, mode?: silent|normal|turbo)
 - stop()
 
 ## NIGHTSTAND
@@ -119,7 +185,7 @@ Note: `light.power` is a single property name (not a nested path).
 
 ## DOOR
 Properties:
-- state (optional)
+- state (text)
 
 Actions (callable):
 - lock()
@@ -128,6 +194,48 @@ Actions (callable):
 ## SWITCH
 Properties:
 - power (on/off)
+
+# TYPES & VALUES
+
+HomeDSL values are written as one of four literals:
+
+## Number
+42
+3.5
+-10
+
+Integer or decimal, optional leading minus sign.
+
+## Power (on/off)
+on
+off
+
+Bare keywords, lowercase, unquoted. Used for power properties.
+There is no true/false — use on/off.
+
+## String
+"bonjour"
+
+Double-quoted text. Single quotes are not supported.
+Used for string properties (e.g. color, mode) and string action args.
+
+## Identifier (enum)
+netflix
+silent
+
+A bare word (letters, digits, underscore). Used unquoted for enum values
+(e.g. tv.source = netflix) and enum action params (e.g. mode=silent).
+
+## Assigning to properties
+- power property  → on | off
+- number property → a number (e.g. brightness = 50)
+- enum property   → one of its listed values, unquoted (e.g. source = netflix)
+- string property → a quoted string (e.g. color = "warm")
+
+## Action arguments
+Same value syntax:
+speaker.announce(message="bonjour", volume=80)
+vacuum.start(mode=silent, room=living_room)
 
 # SYNTAX
 
@@ -139,16 +247,33 @@ light[bedroom].brightness = 50
 ## Variable assignment
 $tv = tv[living_room]
 
+A plain reference (no modifier) is lazy: it only records the device type
+and selectors. Resolution happens when the variable is used.
+
+## Collection modifiers (@all, @first, @oneof)
+
 $lights = @all(light[living_room])
-$firstTv = @first(tv) (selects the first matching device)
-$tv = @oneof(tv) (resolves immediately, triggers ambiguity if multiple)
+$firstTv = @first(tv)
+$tv = @oneof(tv)
 
-`@all`, `@first`, and `@oneof` are collection modifiers.
-They are only valid in variable assignments, never inline in property paths.
+Modifiers are only valid on the right side of a variable assignment,
+never inline in a device path.
 
-@oneof forces immediate resolution — the variable stores exactly one
-device. If multiple devices match, an ambiguity dialog is triggered.
-Use @oneof before @if conditions that require a pre-resolved variable.
+- @all(...)   — batch. Lazy. On use, selects ALL matching devices and
+  applies the operation to each (no ambiguity).
+- @first(...) — single. Lazy. On use, selects the FIRST matching device
+  (inventory order) and applies the operation to it only (no ambiguity).
+  Use it when any single device is acceptable.
+- @oneof(...) — pre-resolve. EAGER: resolves at assignment time.
+
+@oneof resolution at assignment:
+- exactly one match → the variable is bound to that specific device.
+- zero matches → error.
+- multiple matches → execution pauses and asks the user to pick one;
+  the variable then holds the chosen device.
+
+Use @oneof when the variable must hold a single concrete device before
+it is used — e.g. in an @if condition, which cannot be ambiguous.
 
 ## Variable usage
 $tv.power = on
@@ -161,14 +286,12 @@ A variable stores a device or collection reference for reuse.
 Variable constraints:
 - Room selectors on variables are invalid:
   $tv[living_room].power = on → INVALID
-- $it is read-only (auto-managed at runtime):
+- $it is read-only (auto-managed):
   $it = tv[living_room] → INVALID
 - Variables remember their collection modifier.
   $lights = @all(light[living_room]) keeps @all semantics.
 - $it is auto-set after every successful device resolution.
-  It persists across statements and across calls within a session.
-- Using $it as the first statement of a program has no effect —
-  it will not be set yet.
+  It persists across statements.
 
 ## Owner selector (who owns the device)
 light[owner:Alice].power = on
@@ -210,13 +333,26 @@ or built field-by-field:
 speaker.announce(?greeting)
 
 A bundle is referenced whole via `?name` inside the parentheses.
-Bundles persist across statements in the session and can be reused.
+Bundles persist across statements and can be reused.
 
 ## Context reference
 $it.power = off
 $it.volume = 20
 
-`$it` refers to the most recently resolved device.
+`$it` always refers to exactly one device — the most recently resolved one.
+It is set after any device statement executes (assignment, query, increment,
+action).
+
+`$it` and collections:
+- @oneof(device) sets `$it` immediately at assignment (eager).
+- @all(...) and @first(...) do NOT set `$it` at assignment — they are lazy.
+  `$it` is set only when the variable is actually used.
+- With @all, the operation runs on every match, but `$it` still holds a
+  single device: the first one in the batch.
+- A plain reference ($x = tv[room]) also leaves `$it` unchanged until
+  the variable is used.
+
+Using `$it` before any device has been resolved is an error.
 
 # MULTIPLE INSTRUCTIONS
 
@@ -241,14 +377,14 @@ Parentheses `()` control grouping — `&` binds tighter than `|`.
 
 ## @if / @else / @endif
 
-$light_salon = light[living_room]
-$light_cuisine = @oneof(light[kitchen])
+$livingLight = light[living_room]
+$kitchenLight = @oneof(light[kitchen])
 
-@if $light_salon.power? == "on"
-    $light_cuisine.power = on
+@if $livingLight.power? == on
+    $kitchenLight.power = on
     speaker[kitchen].play()
 @else
-    $light_cuisine.power = off
+    $kitchenLight.power = off
 @endif
 
 Note: use `@oneof(device[room])` before a condition when the device
@@ -257,16 +393,15 @@ multiple devices of the same type.
 
 ## @oneof for condition variables
 
-Always pre-resolve condition variables with `@oneof`:
+Condition paths must resolve to a single concrete device.
+Pre-resolve the variable with `@oneof` (see Collection modifiers):
 
 $tv = @oneof(tv[living_room])
-@if $tv.power? == "on"
+@if $tv.power? == on
     speaker[living_room].power = on
 @endif
 
 Without @oneof, an ambiguous variable in a condition triggers an error.
-@oneof resolves ambiguity by auto-selecting one device when only one
-matches, or requesting clarification when multiple match.
 
 ## Syntax
 
@@ -304,13 +439,14 @@ Compound conditions:
 ## Rules
 
 - The condition path uses the query syntax (`?`) to read a property value.
-- Conditions compare against `on`, `off`, numbers, or quoted strings.
+- Conditions compare against `on`/`off`, numbers, enum identifiers,
+  or quoted strings.
 - ALWAYS pre-resolve condition devices with `$var = @oneof(device[room])`
   to avoid ambiguity errors.
 - If the device is already unambiguous (exactly one in the room),
   a direct assignment like `$var = device[room]` also works.
 - An ambiguous device in a condition triggers an error — 
-  the VM cannot guess which device to check.
+  there is no way to know which device to check.
 - Multiple conditions can be combined with `&` and `|`.
 - `&` binds tighter than `|` — use `(...)` for explicit grouping.
 - `@if` blocks can be nested.
@@ -323,7 +459,7 @@ Compound conditions:
 - Device expressions are always abstract (device type level).
 - Do not use device-specific IDs — keep expressions generic.
 - If a property or action might not exist for the target device,
-  it is still valid DSL — the runtime handles invalid operations.
+  it is still valid DSL syntax.
 - Owner selectors let you target devices belonging to a specific person.
   Only use owners listed in the OWNERS section.
 
@@ -343,27 +479,27 @@ $tv[living_room].power = on     — room selector on variable
 $it = tv[living_room]             — reassigning read-only $it
 $it.power = on              — $it used before being set
 tv.brightness = 50          — TV has no brightness property
-                              (still valid syntax, runtime handles)
+                              (still valid syntax)
 
 ---
 
-# AMBIGUITY RESOLUTION
+# AMBIGUITY
 
-When a device expression matches multiple devices, the runtime returns
-a waiting state with a candidate list. The caller must pick a device
-and re-submit the program.
+An expression is ambiguous when it matches several devices and no
+disambiguation tool is applied (e.g. tv.power = on with two TVs).
 
-Example:
+Consequences:
+- In a statement: pauses and asks the user to pick one device.
+- In an @if condition: an error — pre-resolve with @oneof.
 
-"Turn on the TV"
-→ tv.power = on
+Disambiguation tools:
+- device[room] / device[owner:name] / device[tag:name] — narrow the match
+- @all(...) — target every match (batch)
+- @first(...)     — target the first match
+- @oneof(...)     — target one device; if several match, let the user choose
 
-If there are multiple TVs, the runtime returns a waiting state —
-the DSL itself does not specify which TV.
-
-Devices can be pre-resolved before execution:
-- session.resolvedIds stores resolved device choices
-- Resume by calling executeCommand({ kind: 'resume_interaction', response }, context)
+Rule of thumb: "all" → @all; "any one" → @first;
+"one I can name" → selector; "one I can't name" → @oneof.
 
 ---
 
@@ -372,20 +508,8 @@ Devices can be pre-resolved before execution:
 HomeDSL describes intent at the device-type level.
 It does not assume which specific devices exist or where they are.
 
-The runtime handles:
-- device selection (matching type + room to inventory)
-- room disambiguation
-- candidate resolution and filtering
-
----
-
-# OUTPUT FORMAT
-
-HomeDSL output consists of raw DSL lines, one per line.
-No markdown fences (```), no backticks, no explanatory text.
-
-If a request cannot be expressed in HomeDSL,
-output nothing (empty response).
+Device selection and disambiguation are handled automatically based on
+device type and room. You never need device-specific IDs.
 
 ---
 
@@ -404,7 +528,8 @@ output nothing (empty response).
 → thermostat.temperature = 21
 
 "Turn off all lights"
-→ light[*].power = off
+→ $lights = @all(light[*])
+$lights.power = off
 
 "Play music"
 → speaker.play()
@@ -451,10 +576,10 @@ $alice.power = off
 → door[owner:Alice].lock()
 
 "If the living room light is on, turn on the kitchen light too"
-→ $salon = light[living_room]
-$cuisine = @oneof(light[kitchen])
-@if $salon.power? == "on"
-$cuisine.power = on
+→ $livingLight = light[living_room]
+$kitchenLight = @oneof(light[kitchen])
+@if $livingLight.power? == on
+$kitchenLight.power = on
 @endif
 
 "If the temperature is above 25, turn on the fan, otherwise turn it off"
@@ -467,16 +592,16 @@ $fan = @oneof(fan[living_room])
 @endif
 
 "If the living room light AND the TV are both on, turn on the speaker"
-→ $salon = light[living_room]
-$salon_tv = @oneof(tv[living_room])
-@if $salon.power? == on & $salon_tv.power? == on
+→ $livingLight = light[living_room]
+$livingTv = @oneof(tv[living_room])
+@if $livingLight.power? == on & $livingTv.power? == on
 speaker[living_room].power = on
 @endif
 
 "If the living room light OR the kitchen light is on, close the blinds"
-→ $salon = light[living_room]
-$cuisine = @oneof(light[kitchen])
-@if $salon.power? == on | $cuisine.power? == on
+→ $livingLight = light[living_room]
+$kitchenLight = @oneof(light[kitchen])
+@if $livingLight.power? == on | $kitchenLight.power? == on
 blind[living_room].position = 0
 @endif
 

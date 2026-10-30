@@ -6,12 +6,19 @@ import {
   OpenNestPrompt,
   DEFAULT_DEVICES,
   DEFAULT_ROOMS,
+  DEFAULT_OWNERS,
+  DEFAULT_TAGS,
 } from '../dist/index.js'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const rootDir = join(__dirname, '..')
 
-const prompt = new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt()
+const prompt = new OpenNestPrompt(
+  DEFAULT_DEVICES,
+  DEFAULT_ROOMS,
+  DEFAULT_OWNERS,
+  DEFAULT_TAGS,
+).prompt()
 const outPath = join(rootDir, 'example-prompt.md')
 
 writeFileSync(outPath, prompt, 'utf-8')

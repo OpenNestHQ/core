@@ -87,7 +87,14 @@ export const DEFAULT_DEVICES = {
           {
             name: 'room',
             type: 'enum',
-            values: ['salon', 'chambre', 'cuisine', 'bureau'],
+            values: [
+              'living_room',
+              'bedroom',
+              'kitchen',
+              'office',
+              'bathroom',
+              'entrance',
+            ],
           },
           { name: 'mode', type: 'enum', values: ['silent', 'normal', 'turbo'] },
         ],
@@ -132,7 +139,7 @@ export const DEFAULT_OWNERS: Record<string, OwnerDefinition> = {
   bob: { name: 'Bob', description: "Bob's personal devices" },
   kids: { name: 'Kids', description: "Devices in the children's rooms" },
   everybody: {
-    name: 'everybody',
+    name: 'Everybody',
     description: 'Shared family devices (default)',
   },
 } satisfies Record<string, OwnerDefinition>

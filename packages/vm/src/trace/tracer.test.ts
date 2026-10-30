@@ -10,6 +10,7 @@ import {
   createConfirmationMiddleware,
 } from '../index.js'
 import type { Device } from '../index.js'
+import { resumeWithResponse } from '../state.js'
 
 function parse(code: string) {
   const result = parseHomeDSL(code)
@@ -664,7 +665,13 @@ describe('VM with event bus', () => {
     const trace1 = tracer1.getTrace()
     expect(trace1.root.status).toBe(NodeStatus.Waiting)
 
-    first.session.resolvedIds['tv'] = 'tv_1'
+    // Resolve the interaction properly — the execution guard rejects any
+    // program while pendingInteraction is set.
+    resumeWithResponse(first.session, {
+      interactionId: first.interaction!.id,
+      type: 'device_selection',
+      deviceId: 'tv_1',
+    })
 
     const tracer2 = new DefaultExecutionTracer()
     const bus2 = new DefaultVMEventBus(tracer2)

@@ -36,7 +36,7 @@ Node-only and not available in the browser bundle.
 | Method                  | Description                                                         |
 | ----------------------- | ------------------------------------------------------------------- |
 | `parse(dsl)`            | Parse HomeDSL into a `Program`. Throws `ParseError` on invalid DSL. |
-| `execute(program)`      | Execute a parsed `Program` → `Promise<VMResult>`.                   |
+| `execute(program)`      | Execute a parsed `Program` → `Promise<RunResult>`.                  |
 | `runDsl(dsl)`           | `execute(parse(dsl))` — parse + execute in one call.                |
 | `resume(response)`      | Resume a suspended interaction with a `UserResponse`.               |
 | `cancel()`              | Cancel the current execution and reset the session.                 |
@@ -89,17 +89,22 @@ the host:
 
 ### Execution result
 
-`execute` / `runDsl` / `resume` / `cancel` all return a `VMResult`:
+`execute` / `runDsl` / `resume` / `cancel` all return a serializable `RunResult`:
 
 ```ts
 {
   status: "success" | "awaiting_interaction" | "error",
-  session: Session,
-  executed: ExecutedStatement[],
+  executed: ExecutedStatementSummary[],
   interaction: UserInteraction | null,
   errors: VMError[],
 }
 ```
+
+`RunResult` is a lightweight, JSON-safe projection: `resolvedDevices` are
+`DeviceSummary` objects (`id`/`type`/`room`/`name`/`owners`/`tags`) with no live
+`DeviceDriver`. The full `Session` (variables, `$it`, history, …) is not part of
+the result — read it via `getSession()`. Power users can still obtain the raw
+`VMResult` shape from `@opennest/vm`.
 
 On `awaiting_interaction`, read `interaction` and reply with a matching `UserResponse` via `resume(response)`.
 
@@ -110,7 +115,7 @@ handler does not block execution. It may return `void` or a `Promise<void>` —
 either is accepted. A synchronous `throw` or a promise rejection is caught and
 routed to `onInteractionError(error, interaction)` when provided, otherwise
 ignored; if `onInteractionError` itself throws, the exception is silently
-swallowed. The callback never rejects the `VMResult` returned by `run()`.
+swallowed. The callback never rejects the `RunResult` returned by `run()`.
 
 The `interaction` is a `UserInteraction` discriminated
 union — `device_selection`, `confirmation`, `text_input`, `number_input`,

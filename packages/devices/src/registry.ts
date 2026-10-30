@@ -16,6 +16,7 @@ export class DeviceRegistry {
   private devices: Device[] = []
   private drivers = new Map<string, DeviceDriver>()
   private inventory: InventoryYaml
+  private initPromises: Promise<void>[] = []
 
   static fromYaml(path: string): DeviceRegistry {
     const raw = readFileSync(path, 'utf-8')
@@ -45,6 +46,20 @@ export class DeviceRegistry {
     return extractPromptDefinitions(this.inventory)
   }
 
+  async whenReady(): Promise<void> {
+    await Promise.all(this.initPromises)
+    const readiness = [...this.drivers.values()].map(driver =>
+      driver.whenReady?.(),
+    )
+    await Promise.all(readiness)
+  }
+
+  async close(): Promise<void> {
+    await Promise.allSettled(this.initPromises)
+    const closings = [...this.drivers.values()].map(driver => driver.close())
+    await Promise.all(closings)
+  }
+
   private initDrivers(inventory: InventoryYaml): void {
     for (const [name, config] of Object.entries(inventory.drivers)) {
       const factory = driverFactories[name]
@@ -61,7 +76,9 @@ export class DeviceRegistry {
           deviceInitConfigs[device.id] = device.init
         }
       }
-      driver.init(config, deviceInitConfigs)
+      const initPromise = driver.init(config, deviceInitConfigs)
+      initPromise.catch(() => {})
+      this.initPromises.push(initPromise)
       this.drivers.set(name, driver)
     }
   }

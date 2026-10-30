@@ -2,6 +2,7 @@ import type { Program } from '@opennest/lang-core'
 import { buildProgram } from '@opennest/lang-core'
 import { createSession } from '../state.js'
 import { resumeAndContinue } from '../state.js'
+import { InteractionError } from '../interactions/errors.js'
 import type { VMContext, VMResult } from '../types.js'
 import type { VMCommand } from './types.js'
 import { interpretProgram } from '../interpreter.js'
@@ -26,7 +27,20 @@ export async function executeCommand(
         command.deviceId,
       )
     case 'resume_interaction':
-      return resumeAndContinue(command.response, context)
+      try {
+        return await resumeAndContinue(command.response, context)
+      } catch (error) {
+        if (error instanceof InteractionError) {
+          return {
+            status: 'error',
+            session: context.session ?? createSession(),
+            executed: [],
+            interaction: null,
+            errors: [{ code: error.code, message: error.message }],
+          }
+        }
+        throw error
+      }
     case 'cancel_execution':
       return {
         status: 'success',
@@ -43,6 +57,22 @@ async function runProgram(
   context: VMContext,
   deviceId?: string,
 ): Promise<VMResult> {
+  const pending = context.session?.pendingInteraction
+  if (pending !== null && pending !== undefined) {
+    return {
+      status: 'error',
+      session: context.session!,
+      executed: [],
+      interaction: null,
+      errors: [
+        {
+          code: 'interaction_pending',
+          message: `Interaction ${pending.id} (${pending.type}) is pending. Answer it with resume_interaction, or cancel the execution first.`,
+        },
+      ],
+    }
+  }
+
   return interpretProgram(
     program,
     deviceId !== undefined

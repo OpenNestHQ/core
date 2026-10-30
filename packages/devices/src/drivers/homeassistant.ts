@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { VerificationStrategy } from '@opennest/lang-core'
 import type { DeviceDriver, DriverRuntimeContext } from './interface.js'
 import {
   interpolateFields,
@@ -33,12 +34,15 @@ const DOMAIN_SERVICES: Record<string, { on: string; off: string }> = {
 
 export const STATE_CACHE_TTL_MS = 5000
 
+export const EVENT_VERIFY_TIMEOUT_MS = 5000
+
 export class HADriver implements DeviceDriver {
   readonly name = 'homeassistant'
   private baseUrl = ''
   private token = ''
   private wsClient: HAWebSocketClient | null = null
   private entityStates = new Map<string, Record<string, unknown>>()
+  private entityListeners = new Map<string, Set<() => void>>()
   private stateCache = new Map<
     string,
     { at: number; state: Record<string, unknown> }
@@ -87,7 +91,16 @@ export class HADriver implements DeviceDriver {
   async close(): Promise<void> {
     const client = this.wsClient
     this.wsClient = null
+    this.entityListeners.clear()
     await client?.close()
+  }
+
+  async whenReady(): Promise<void> {
+    const client = this.wsClient
+    if (!client) {
+      throw new Error('homeassistant driver is not initialized')
+    }
+    await client.whenReady()
   }
 
   validateDeviceConfig(
@@ -301,6 +314,61 @@ export class HADriver implements DeviceDriver {
     this.stateCache.clear()
   }
 
+  getVerificationStrategy(
+    _deviceId: string,
+    targetKind: 'action' | 'property',
+    targetName: string,
+    deviceConfig: Record<string, unknown>,
+  ): VerificationStrategy | null {
+    if (targetKind === 'property') {
+      return this.isSubscribableProperty(deviceConfig, targetName)
+        ? eventVerificationStrategy()
+        : null
+    }
+    const actions = deviceConfig['actions'] as
+      Record<string, { expectedEffects?: Record<string, unknown> }> | undefined
+    const expected = actions?.[targetName]?.expectedEffects
+    if (!expected) return null
+    for (const property of Object.keys(expected)) {
+      if (!this.isSubscribableProperty(deviceConfig, property)) return null
+    }
+    return eventVerificationStrategy()
+  }
+
+  subscribeProperty(
+    _deviceId: string,
+    property: string,
+    deviceConfig: Record<string, unknown>,
+    onStateChange: () => void,
+  ): (() => void) | null {
+    const entry = this.propertyEntry(deviceConfig, property)
+    if (!entry) return null
+    const get = entry.binding.get
+    if (get.kind !== 'state' && get.kind !== 'attribute') return null
+
+    const entityId = entry.raw.entity
+    let listeners = this.entityListeners.get(entityId)
+    if (!listeners) {
+      listeners = new Set()
+      this.entityListeners.set(entityId, listeners)
+    }
+    listeners.add(onStateChange)
+    return () => {
+      listeners.delete(onStateChange)
+      if (listeners.size === 0) this.entityListeners.delete(entityId)
+    }
+  }
+
+  private isSubscribableProperty(
+    deviceConfig: Record<string, unknown>,
+    property: string,
+  ): boolean {
+    const entry = this.propertyEntry(deviceConfig, property)
+    if (!entry) return false
+    const get = entry.binding.get
+    return get.kind === 'state' || get.kind === 'attribute'
+  }
+
   private propertyEntry(
     deviceConfig: Record<string, unknown>,
     property: string,
@@ -360,15 +428,22 @@ export class HADriver implements DeviceDriver {
     // home-assistant-js-websocket): the initial dump and additions come as
     // `a` (compressed states), changes as `c` (a `+`/`-` delta to merge onto
     // the previous state, not a full state) and removals as `r` (id list).
+    const affected = new Set<string>()
     if (isRecord(event['a'])) {
       for (const [entityId, compressed] of Object.entries(event['a'])) {
         if (isRecord(compressed)) {
           this.entityStates.set(entityId, decompressState(compressed))
+          affected.add(entityId)
         }
       }
     }
     if (isRecord(event['c'])) {
       for (const [entityId, diff] of Object.entries(event['c'])) {
+        // A `c` delta can arrive for an entity we dropped from the store after
+        // a write (invalidateEntityState); the delta cannot be merged without
+        // a base, but the listener must still fire so the runtime re-reads via
+        // getProperty (which falls back to REST).
+        affected.add(entityId)
         const current = this.entityStates.get(entityId)
         if (!current) continue
         applyStateDiff(current, diff)
@@ -376,8 +451,16 @@ export class HADriver implements DeviceDriver {
     }
     if (Array.isArray(event['r'])) {
       for (const entityId of event['r']) {
-        if (typeof entityId === 'string') this.entityStates.delete(entityId)
+        if (typeof entityId === 'string') {
+          this.entityStates.delete(entityId)
+          affected.add(entityId)
+        }
       }
+    }
+    for (const entityId of affected) {
+      const listeners = this.entityListeners.get(entityId)
+      if (!listeners) continue
+      for (const listener of listeners) listener()
     }
   }
 
@@ -596,6 +679,10 @@ export class HADriver implements DeviceDriver {
 function extractDomain(entityId: string): string {
   const dot = entityId.indexOf('.')
   return dot === -1 ? entityId : entityId.slice(0, dot)
+}
+
+function eventVerificationStrategy(): VerificationStrategy {
+  return { type: 'event', timeout: EVENT_VERIFY_TIMEOUT_MS }
 }
 
 function templateCacheKey(template: string): string {

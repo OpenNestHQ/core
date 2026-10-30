@@ -1,9 +1,10 @@
 import type {
-  VMResult,
+  RunResult,
   ExecutedStatement,
   StateChange,
   VMError,
   Device,
+  DeviceSummary,
   Session,
   UserInteraction,
   DeviceSelectionInteraction,
@@ -27,7 +28,7 @@ function fmt(val: unknown): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function changeLine(change: StateChange, resolved: Device[]): string {
+function changeLine(change: StateChange, resolved: DeviceSummary[]): string {
   const prop = `${B}${change.property}${N}`
   const oldV = fmt(change.oldValue)
   const newV = fmt(change.newValue)
@@ -46,7 +47,7 @@ function filterLine(filter: NonNullable<ExecutedStatement['filter']>): string {
   return `    ${parts.join(' | ')}`
 }
 
-export function formatSuccess(result: VMResult, since: number = 0): string {
+export function formatSuccess(result: RunResult, since: number = 0): string {
   const lines: string[] = []
   const entries = result.executed.slice(since)
   if (entries.length === 0) return ''
@@ -137,7 +138,9 @@ export function formatErrors(errors: VMError[]): string {
     `\n${R}${B}\u2717${N} ${R}Error${errors.length > 1 ? 's' : ''}:${N}`,
   )
   for (const err of errors) {
-    lines.push(`  ${R}\u2022${N} ${err.message}`)
+    lines.push(
+      `  ${R}\u2022${N} ${err.code ? `[${err.code}] ` : ''}${err.message}`,
+    )
   }
   return lines.join('\n')
 }

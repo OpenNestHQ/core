@@ -1,5 +1,6 @@
 import type { VMContext, VMResult, Session } from './types.js'
 import type { UserResponse } from './interactions/types.js'
+import { InteractionError } from './interactions/errors.js'
 import { processInteractionResponse } from './interactions/registry.js'
 import { interpretProgram } from './interpreter.js'
 
@@ -25,10 +26,14 @@ export function resumeWithResponse(
 ): Session {
   const pending = session.pendingInteraction
   if (!pending) {
-    throw new Error('No pending interaction to resume')
+    throw new InteractionError(
+      'no_pending_interaction',
+      'No pending interaction to resume',
+    )
   }
   if (pending.id !== response.interactionId) {
-    throw new Error(
+    throw new InteractionError(
+      'interaction_id_mismatch',
       `Interaction ID mismatch: expected ${pending.id}, got ${response.interactionId}`,
     )
   }
@@ -50,12 +55,18 @@ export async function resumeAndContinue(
 ): Promise<VMResult> {
   const session = context.session
   if (!session) {
-    throw new Error('Cannot resume: no session in context')
+    throw new InteractionError(
+      'no_session',
+      'Cannot resume: no session in context',
+    )
   }
 
   const program = session._pendingProgram
   if (!program) {
-    throw new Error('Cannot resume: no pending program')
+    throw new InteractionError(
+      'no_pending_program',
+      'Cannot resume: no pending program',
+    )
   }
 
   resumeWithResponse(session, response, context.eventBus)

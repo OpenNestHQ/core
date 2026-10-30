@@ -80,4 +80,14 @@ describe('MockDriver', () => {
     expect(store.has('dev1')).toBe(true)
     expect(store.get('dev1')!.get('temp')).toBe(22)
   })
+
+  it('should clear the store and reset latency on close', async () => {
+    const driver = new MockDriver()
+    await driver.init({ latency: 100 })
+    await driver.setProperty('d1', 'power', true, {})
+
+    await driver.close()
+
+    expect(await driver.getProperty('d1', 'power', {})).toBeNull()
+  })
 })

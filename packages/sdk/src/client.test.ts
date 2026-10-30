@@ -258,9 +258,8 @@ describe('OpenNestClient', () => {
   it('exposes the session through getSession', async () => {
     const { client } = await makeClient()
 
-    const result = await client.runDsl('tv[salon].power = on')
+    await client.runDsl('tv[salon].power = on')
 
-    expect(client.getSession()).toBe(result.session)
     expect(client.getSession().history).toHaveLength(1)
   })
 
@@ -310,6 +309,206 @@ describe('OpenNestClient', () => {
 
     expect(result.status).toBe('success')
     expect(result.executed[0]!.changes[0]!.newValue).toBe(true)
+  })
+
+  it('resolves whenReady with a DeviceRegistry source', async () => {
+    const registry = new DeviceRegistry(makeInventory())
+    const client = new OpenNestClient({ devices: registry })
+
+    await expect(client.whenReady()).resolves.toBeUndefined()
+  })
+
+  it('resolves whenReady with no registry (bare Device[])', async () => {
+    const { client } = await makeClient()
+
+    await expect(client.whenReady()).resolves.toBeUndefined()
+  })
+
+  it('closes the underlying registry drivers', async () => {
+    const registry = new DeviceRegistry(makeInventory())
+    const driver = registry.getDriver('mock')!
+    const spy = vi.spyOn(driver, 'close')
+    const client = new OpenNestClient({ devices: registry })
+
+    await client.close()
+
+    expect(spy).toHaveBeenCalledTimes(1)
+  })
+
+  it('resolves close with no registry (bare Device[])', async () => {
+    const { client } = await makeClient()
+
+    await expect(client.close()).resolves.toBeUndefined()
+  })
+})
+
+describe('OpenNestClient pending interactions', () => {
+  it('resumes without asking for the interaction id', async () => {
+    const { client, driver } = await makeClient()
+
+    const paused = await client.runDsl('tv.power = on')
+    expect(paused.status).toBe('awaiting_interaction')
+
+    const pending = client.getPendingInteraction()
+    expect(pending).not.toBeNull()
+    expect(pending!.id).toBe(paused.interaction!.id)
+    expect(pending).toMatchObject({
+      type: 'device_selection',
+      devices: [{ id: 'tv_salon' }, { id: 'tv_chambre' }],
+    })
+
+    const result = await client.resumePending({
+      type: 'device_selection',
+      deviceId: 'tv_salon',
+    })
+
+    expect(result.status).toBe('success')
+    expect(result.errors).toHaveLength(0)
+    expect(await driver.getProperty('tv_salon', 'power')).toBe(true)
+  })
+
+  it('rejects a type mismatch against the pending interaction', async () => {
+    const { client } = await makeClient()
+
+    const paused = await client.runDsl('tv.power = on')
+    expect(paused.status).toBe('awaiting_interaction')
+
+    const rejected = await client.resumePending({
+      type: 'confirmation',
+      confirmed: true,
+    })
+
+    expect(rejected.status).toBe('error')
+    expect(rejected.errors[0]!.code).toBe('interaction_type_mismatch')
+    expect(client.getPendingInteraction()!.id).toBe(paused.interaction!.id)
+
+    const result = await client.resumePending({
+      type: 'device_selection',
+      deviceId: 'tv_chambre',
+    })
+    expect(result.status).toBe('success')
+  })
+
+  it('rejects an unknown deviceId and lists the valid ones', async () => {
+    const { client } = await makeClient()
+
+    await client.runDsl('tv.power = on')
+
+    const rejected = await client.resumePending({
+      type: 'device_selection',
+      deviceId: 'inconnu',
+    })
+
+    expect(rejected.status).toBe('error')
+    expect(rejected.errors[0]!.code).toBe('unknown_device_id')
+    expect(rejected.errors[0]!.message).toContain('tv_salon')
+    expect(rejected.errors[0]!.message).toContain('tv_chambre')
+  })
+
+  it('rejects resumePending when nothing is pending', async () => {
+    const { client } = await makeClient()
+
+    const result = await client.resumePending({
+      type: 'device_selection',
+      deviceId: 'tv_salon',
+    })
+
+    expect(result.status).toBe('error')
+    expect(result.errors[0]!.code).toBe('no_pending_interaction')
+    expect(client.getPendingInteraction()).toBeNull()
+  })
+
+  it('getPendingInteraction is null after success and after cancel', async () => {
+    const { client } = await makeClient()
+
+    // awaiting → cancel() → null
+    const first = await client.runDsl('tv.power = on')
+    expect(first.status).toBe('awaiting_interaction')
+    expect(client.getPendingInteraction()).not.toBeNull()
+    const cancelled = await client.cancel()
+    expect(cancelled.status).toBe('success')
+    expect(client.getPendingInteraction()).toBeNull()
+
+    // awaiting → valid resume → success → null
+    const second = await client.runDsl('tv.power = on')
+    expect(second.status).toBe('awaiting_interaction')
+    const resumed = await client.resumePending({
+      type: 'device_selection',
+      deviceId: 'tv_salon',
+    })
+    expect(resumed.status).toBe('success')
+    expect(client.getPendingInteraction()).toBeNull()
+
+    // runDsl success → null
+    const third = await client.runDsl('tv[salon].power = on')
+    expect(third.status).toBe('success')
+    expect(client.getPendingInteraction()).toBeNull()
+
+    // terminal error on a fresh runDsl → null (no interaction in session)
+    const failed = await client.runDsl('camera[salon].snapshot()')
+    expect(failed.status).toBe('error')
+    expect(client.getPendingInteraction()).toBeNull()
+  })
+
+  it('keeps the pending interaction after a blocked run and still resumes', async () => {
+    const { client, driver } = await makeClient()
+
+    const paused = await client.runDsl('tv.power = on')
+    expect(paused.status).toBe('awaiting_interaction')
+
+    const blocked = await client.runDsl('tv[salon].power = on')
+    expect(blocked.status).toBe('error')
+    expect(blocked.errors[0]!.code).toBe('interaction_pending')
+    expect(client.getPendingInteraction()!.id).toBe(paused.interaction!.id)
+
+    const result = await client.resumePending({
+      type: 'device_selection',
+      deviceId: 'tv_salon',
+    })
+
+    expect(result.status).toBe('success')
+    expect(await driver.getProperty('tv_salon', 'power')).toBe(true)
+    expect(client.getPendingInteraction()).toBeNull()
+  })
+
+  it('keeps the pending interaction after a failed raw resume', async () => {
+    const { client } = await makeClient()
+
+    const paused = await client.runDsl('tv.power = on')
+    expect(paused.status).toBe('awaiting_interaction')
+
+    const failed = await client.resume({
+      interactionId: 'stale-id',
+      type: 'device_selection',
+      deviceId: 'tv_salon',
+    })
+
+    expect(failed.status).toBe('error')
+    expect(failed.errors[0]!.code).toBe('interaction_id_mismatch')
+    expect(client.getPendingInteraction()!.id).toBe(paused.interaction!.id)
+  })
+
+  it('clears the pending interaction when a resume continuation throws', async () => {
+    const boom = new Error('continuation boom')
+    const throwing: Middleware = async ctx => {
+      if (ctx.action.device.id === 'tv_chambre') throw boom
+      return { kind: 'execute', actions: [ctx.action] }
+    }
+    const { client } = await makeClient({ middleware: [throwing] })
+
+    const paused = await client.runDsl('tv.power = on')
+    expect(paused.status).toBe('awaiting_interaction')
+    expect(client.getPendingInteraction()).not.toBeNull()
+
+    await expect(
+      client.resume({
+        interactionId: paused.interaction!.id,
+        type: 'device_selection',
+        deviceId: 'tv_chambre',
+      }),
+    ).rejects.toThrow('continuation boom')
+
+    expect(client.getPendingInteraction()).toBeNull()
   })
 })
 

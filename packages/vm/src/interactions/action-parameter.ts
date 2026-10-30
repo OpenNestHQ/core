@@ -6,6 +6,7 @@ import type {
   MissingParameter,
   UserResponse,
 } from './types.js'
+import { InteractionError } from './errors.js'
 
 export interface ActionParameterContext {
   stmt: Action
@@ -65,7 +66,12 @@ export const actionParameterHandler: InteractionHandler<ActionParameterContext> 
       context: ActionParameterContext,
       response: UserResponse,
     ): void {
-      if (response.type !== 'action_parameter') return
+      if (response.type !== 'action_parameter') {
+        throw new InteractionError(
+          'interaction_type_mismatch',
+          `Expected a response of type "action_parameter", got "${response.type}"`,
+        )
+      }
 
       for (const param of context.missing) {
         const raw = response.values[param.name]

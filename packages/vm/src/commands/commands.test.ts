@@ -165,19 +165,15 @@ describe('executeCommand', () => {
       expect(exec.resolvedDevices[0]!.id).toBe('tv_chambre')
     })
 
-    it('should expand wildcard rooms in batch without ambiguity', async () => {
+    it('should trigger device selection for wildcard rooms', async () => {
       const ctx = { devices: await devices() }
       const result = await executeCommand(
         { kind: 'execute_action', action: buildAction('tv', 'turn_on', '*') },
         ctx,
       )
 
-      expect(result.status).toBe('success')
-      const exec = result.executed[0]!
-      expect(exec.resolvedDevices.map(d => d.id).sort()).toEqual([
-        'tv_chambre',
-        'tv_salon',
-      ])
+      expect(result.status).toBe('awaiting_interaction')
+      expect(result.interaction!.type).toBe('device_selection')
     })
 
     it('should go through the middleware pipeline and pause on confirmation', async () => {
@@ -582,19 +578,337 @@ describe('executeCommand', () => {
 
     it('should error when resuming without a pending program', async () => {
       const ctx = { devices: await devices(), session: createSession() }
-      await expect(
-        executeCommand(
-          {
-            kind: 'resume_interaction',
-            response: {
-              interactionId: 'x',
-              type: 'confirmation',
-              confirmed: true,
-            },
+      const result = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: 'x',
+            type: 'confirmation',
+            confirmed: true,
           },
-          ctx,
-        ),
-      ).rejects.toThrow('no pending')
+        },
+        ctx,
+      )
+      expect(result.status).toBe('error')
+      expect(result.errors[0]?.code).toBe('no_pending_program')
+    })
+
+    it('rejects an unknown deviceId with the valid choices listed', async () => {
+      const session = createSession()
+      const ctx = { devices: await devices(), session }
+
+      const first = await executeCommand(
+        { kind: 'execute_action', action: buildAction('tv', 'turn_on') },
+        ctx,
+      )
+      expect(first.status).toBe('awaiting_interaction')
+      expect(first.interaction!.type).toBe('device_selection')
+
+      const result = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: first.interaction!.id,
+            type: 'device_selection',
+            deviceId: 'tv_inexistant',
+          },
+        },
+        { devices: ctx.devices, session },
+      )
+      expect(result.status).toBe('error')
+      expect(result.errors[0]?.code).toBe('unknown_device_id')
+      expect(result.errors[0]?.message).toContain('tv_salon')
+      expect(result.errors[0]?.message).toContain('tv_chambre')
+    })
+
+    it('rejects a response whose type does not match the pending interaction', async () => {
+      const session = createSession()
+      const ctx = { devices: await devices(), session }
+
+      const first = await executeCommand(
+        { kind: 'execute_action', action: buildAction('tv', 'turn_on') },
+        ctx,
+      )
+      expect(first.status).toBe('awaiting_interaction')
+      expect(first.interaction!.type).toBe('device_selection')
+
+      const result = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: first.interaction!.id,
+            type: 'confirmation',
+            confirmed: true,
+          },
+        },
+        { devices: ctx.devices, session },
+      )
+      expect(result.status).toBe('error')
+      expect(result.errors[0]?.code).toBe('interaction_type_mismatch')
+    })
+
+    it('keeps the pending interaction after a rejected resume so a corrected retry succeeds', async () => {
+      const session = createSession()
+      const ctx = { devices: await devices(), session }
+
+      const first = await executeCommand(
+        { kind: 'execute_action', action: buildAction('tv', 'turn_on') },
+        ctx,
+      )
+      expect(first.status).toBe('awaiting_interaction')
+      expect(first.interaction!.type).toBe('device_selection')
+
+      const rejected = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: first.interaction!.id,
+            type: 'device_selection',
+            deviceId: 'tv_inexistant',
+          },
+        },
+        { devices: ctx.devices, session },
+      )
+      expect(rejected.status).toBe('error')
+      expect(rejected.errors[0]?.code).toBe('unknown_device_id')
+      expect(rejected.executed).toEqual([])
+      expect(rejected.interaction).toBeNull()
+      expect(session.pendingInteraction).not.toBeNull()
+
+      const second = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: first.interaction!.id,
+            type: 'device_selection',
+            deviceId: 'tv_salon',
+          },
+        },
+        { devices: ctx.devices, session },
+      )
+      expect(second.status).toBe('success')
+      const exec = second.executed[second.executed.length - 1]!
+      expect(exec.resolvedDevices[0]!.id).toBe('tv_salon')
+    })
+
+    it('rejects a stale interaction id after a new interaction superseded it', async () => {
+      const mw = createConfirmationMiddleware({
+        requireConfirmation: action => action.kind === 'invoke_action',
+      })
+      const session = createSession()
+      const ctx = { devices: await devices(), session, middleware: [mw] }
+
+      const first = await executeCommand(
+        { kind: 'execute_action', action: buildAction('tv', 'turn_on') },
+        ctx,
+      )
+      expect(first.status).toBe('awaiting_interaction')
+      expect(first.interaction!.type).toBe('device_selection')
+      const staleId = first.interaction!.id
+
+      const second = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: staleId,
+            type: 'device_selection',
+            deviceId: 'tv_salon',
+          },
+        },
+        { devices: ctx.devices, session, middleware: [mw] },
+      )
+      expect(second.status).toBe('awaiting_interaction')
+      expect(second.interaction!.type).toBe('confirmation')
+      const currentId = second.interaction!.id
+
+      const stale = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: staleId,
+            type: 'confirmation',
+            confirmed: true,
+          },
+        },
+        { devices: ctx.devices, session, middleware: [mw] },
+      )
+      expect(stale.status).toBe('error')
+      expect(stale.errors[0]?.code).toBe('interaction_id_mismatch')
+
+      const third = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: currentId,
+            type: 'confirmation',
+            confirmed: true,
+          },
+        },
+        { devices: ctx.devices, session, middleware: [mw] },
+      )
+      expect(third.status).toBe('success')
+      expect(third.executed).toHaveLength(1)
+      // MockDriver's executeAction is a no-op: the applied effect is recorded
+      // as a change rather than as device state.
+      const exec = third.executed[third.executed.length - 1]!
+      expect(exec.resolvedDevices[0]!.id).toBe('tv_salon')
+      expect(exec.changes[0]).toMatchObject({
+        deviceId: 'tv_salon',
+        property: 'action:turn_on',
+        newValue: 'called',
+      })
+    })
+
+    it('executes the action exactly once across a rejected resume and a valid resume', async () => {
+      const session = createSession()
+      const ctx = { devices: await devices(), session }
+
+      const first = await executeCommand(
+        { kind: 'execute_action', action: buildAction('tv', 'turn_on') },
+        ctx,
+      )
+      expect(first.status).toBe('awaiting_interaction')
+      expect(first.interaction!.type).toBe('device_selection')
+
+      const rejected = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: first.interaction!.id,
+            type: 'device_selection',
+            deviceId: 'tv_inconnu',
+          },
+        },
+        { devices: ctx.devices, session },
+      )
+      expect(rejected.status).toBe('error')
+      expect(rejected.errors[0]?.code).toBe('unknown_device_id')
+      expect(rejected.executed).toHaveLength(0)
+
+      const second = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: first.interaction!.id,
+            type: 'device_selection',
+            deviceId: 'tv_salon',
+          },
+        },
+        { devices: ctx.devices, session },
+      )
+      expect(second.status).toBe('success')
+
+      // MockDriver's executeAction is a no-op: the applied effect is recorded
+      // as a change rather than as device state.
+      expect(second.executed).toHaveLength(1)
+      expect(second.executed[0]!.changes[0]).toMatchObject({
+        deviceId: 'tv_salon',
+        property: 'action:turn_on',
+        newValue: 'called',
+      })
+    })
+  })
+
+  describe('execution guard while an interaction is pending', () => {
+    it('rejects run_program while an interaction is pending and preserves the session', async () => {
+      const ctx = { devices: await devices(), session: createSession() }
+
+      // execute_action tv.turn_on → awaiting device_selection
+      const first = await executeCommand(
+        { kind: 'execute_action', action: buildAction('tv', 'turn_on') },
+        ctx,
+      )
+      expect(first.status).toBe('awaiting_interaction')
+      expect(first.interaction!.type).toBe('device_selection')
+      const pendingId = first.session.pendingInteraction!.id
+      const pendingCursor = first.session.cursor
+
+      const blocked = await executeCommand(
+        { kind: 'run_program', program: parse('light[salon].power = on') },
+        { devices: ctx.devices, session: first.session },
+      )
+      expect(blocked.status).toBe('error')
+      expect(blocked.errors[0]!.code).toBe('interaction_pending')
+      expect(blocked.errors[0]!.message).toContain(pendingId)
+      expect(blocked.errors[0]!.message).toContain('cancel')
+      expect(blocked.session.pendingInteraction!.id).toBe(pendingId)
+      expect(blocked.session.cursor).toBe(pendingCursor)
+
+      // resume the first interaction (deviceId 'tv_salon') → success
+      const resumed = await executeCommand(
+        {
+          kind: 'resume_interaction',
+          response: {
+            interactionId: pendingId,
+            type: 'device_selection',
+            deviceId: 'tv_salon',
+          },
+        },
+        { devices: ctx.devices, session: blocked.session },
+      )
+      expect(resumed.status).toBe('success')
+      // MockDriver's executeAction is a no-op: the applied effect is recorded
+      // as a change rather than as device state.
+      expect(resumed.executed).toHaveLength(1)
+      expect(resumed.executed[0]!.changes[0]).toMatchObject({
+        deviceId: 'tv_salon',
+        property: 'action:turn_on',
+        newValue: 'called',
+      })
+    })
+
+    it('rejects execute_action while an interaction is pending', async () => {
+      const ctx = { devices: await devices(), session: createSession() }
+
+      const first = await executeCommand(
+        { kind: 'execute_action', action: buildAction('tv', 'turn_on') },
+        ctx,
+      )
+      expect(first.status).toBe('awaiting_interaction')
+
+      const viaAction = await executeCommand(
+        {
+          kind: 'execute_action',
+          action: buildAction('vacuum', 'start', 'salon'),
+        },
+        { devices: ctx.devices, session: first.session },
+      )
+      expect(viaAction.status).toBe('error')
+      expect(viaAction.errors[0]!.code).toBe('interaction_pending')
+
+      // the same guard covers execute_statement through runProgram()
+      const viaStatement = await executeCommand(
+        {
+          kind: 'execute_statement',
+          statement: buildAssignment('light', 'power', on(), 'salon'),
+        },
+        { devices: ctx.devices, session: first.session },
+      )
+      expect(viaStatement.status).toBe('error')
+      expect(viaStatement.errors[0]!.code).toBe('interaction_pending')
+    })
+
+    it('allows a new program after cancel_execution', async () => {
+      const ctx = { devices: await devices(), session: createSession() }
+
+      const first = await executeCommand(
+        { kind: 'execute_action', action: buildAction('tv', 'turn_on') },
+        ctx,
+      )
+      expect(first.status).toBe('awaiting_interaction')
+
+      const cancelled = await executeCommand(
+        { kind: 'cancel_execution' },
+        { devices: ctx.devices, session: first.session },
+      )
+      expect(cancelled.status).toBe('success')
+
+      const result = await executeCommand(
+        { kind: 'run_program', program: parse('light[salon].power = on') },
+        { devices: ctx.devices, session: cancelled.session },
+      )
+      expect(result.status).toBe('success')
+      expect(result.executed[0]!.changes[0]!.newValue).toBe(true)
     })
   })
 

@@ -13,6 +13,7 @@ import type {
   ConditionExpr,
   SimpleCondition,
   Value,
+  ActionOutcome,
 } from '@opennest/lang-core'
 import type {
   Device,
@@ -21,6 +22,7 @@ import type {
   VMError,
   ResolutionIntent,
   ResolutionResult,
+  StateChange,
 } from './types.js'
 import type { UserInteraction, MissingParameter } from './interactions/types.js'
 import type { DeviceSelectionContext } from './interactions/device-selection.js'
@@ -37,6 +39,7 @@ import { resolveDevices } from './resolver.js'
 import { validateProgram } from './validate.js'
 import { createInteraction } from './interactions/registry.js'
 import { executePlannedAction, evaluateCondition } from './executor.js'
+import type { ExecutedAction } from './executor.js'
 import { runMiddlewarePipeline } from './middleware/pipeline.js'
 
 export async function interpretProgram(
@@ -569,14 +572,16 @@ async function applyMiddlewareAndFinish(
   eventBus?: VMEventBus,
 ): Promise<InterpretResult> {
   if (!middleware || middleware.length === 0) {
-    const changes = await Promise.all(
+    const results = await Promise.all(
       actions.map(action => executePlannedAction(action, runtime, eventBus)),
     )
+    const { changes, outcomes } = splitExecuted(results)
 
     session.history.push({
       statement,
       resolvedDevices: resolutionResult.devices,
       changes,
+      ...(outcomes.length > 0 ? { outcomes } : {}),
       ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
     })
 
@@ -647,9 +652,10 @@ async function applyMiddlewareAndFinish(
     return { kind: 'success' }
   }
 
-  const changes = await Promise.all(
+  const results = await Promise.all(
     approved.map(action => executePlannedAction(action, runtime, eventBus)),
   )
+  const { changes, outcomes } = splitExecuted(results)
 
   const resolvedIds = new Set(approved.map(a => a.device.id))
   const executedDevices = resolutionResult.devices.filter(d =>
@@ -660,6 +666,7 @@ async function applyMiddlewareAndFinish(
     statement,
     resolvedDevices: executedDevices,
     changes,
+    ...(outcomes.length > 0 ? { outcomes } : {}),
     ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
   })
 
@@ -668,6 +675,19 @@ async function applyMiddlewareAndFinish(
   }
 
   return { kind: 'success' }
+}
+
+function splitExecuted(results: ExecutedAction[]): {
+  changes: StateChange[]
+  outcomes: ActionOutcome[]
+} {
+  const changes = results
+    .map(r => r.change)
+    .filter((c): c is StateChange => c !== null)
+  const outcomes = results
+    .map(r => r.outcome)
+    .filter((o): o is ActionOutcome => o !== null)
+  return { changes, outcomes }
 }
 
 async function interpretVariableAssignment(

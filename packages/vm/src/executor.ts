@@ -1,14 +1,25 @@
-import type { Value, SimpleCondition } from '@opennest/lang-core'
+import type { Value, SimpleCondition, ActionOutcome } from '@opennest/lang-core'
 import type { DriverRuntimeContext } from '@opennest/devices'
 import type { Device, StateChange } from './types.js'
 import type { PlannedAction } from './middleware/types.js'
 import type { VMEventBus } from './trace/event-bus.js'
+import {
+  readExpectedEffects,
+  resolveVerificationStrategy,
+  verifyState,
+} from './execution.js'
+import type { VerificationTarget } from './execution.js'
+
+export interface ExecutedAction {
+  change: StateChange | null
+  outcome: ActionOutcome | null
+}
 
 export async function executePlannedAction(
   action: PlannedAction,
   runtime: DriverRuntimeContext,
   eventBus?: VMEventBus,
-): Promise<StateChange> {
+): Promise<ExecutedAction> {
   eventBus?.emit({
     kind: 'action:begin',
     timestamp: Date.now(),
@@ -22,45 +33,9 @@ export async function executePlannedAction(
     ...('args' in action && action.args ? { args: action.args } : {}),
   })
 
+  let change: StateChange
   try {
-    let change: StateChange
-    switch (action.kind) {
-      case 'set_property':
-        change = await executeAssignment(
-          action.device,
-          action.property,
-          action.value,
-          runtime,
-        )
-        break
-      case 'increment_property':
-        change = await executeIncrement(
-          action.device,
-          action.property,
-          action.value,
-          runtime,
-        )
-        break
-      case 'read_property':
-        change = await executeQuery(action.device, action.property, runtime)
-        break
-      case 'invoke_action':
-        change = await executeAction(
-          action.device,
-          action.method,
-          action.args,
-          runtime,
-        )
-        break
-    }
-
-    eventBus?.emit({
-      kind: 'action:end',
-      timestamp: Date.now(),
-      status: 'success',
-    })
-
-    return change
+    change = await dispatchCommand(action, runtime)
   } catch (err) {
     eventBus?.emit({
       kind: 'action:end',
@@ -68,7 +43,107 @@ export async function executePlannedAction(
       status: 'failed',
       error: err instanceof Error ? err.message : String(err),
     })
-    throw err
+    return {
+      change: null,
+      outcome: {
+        deviceId: action.device.id,
+        execution: {
+          status: 'failed',
+          error: err instanceof Error ? err.message : String(err),
+        },
+        verification: { status: 'not_observable' },
+      },
+    }
+  }
+
+  eventBus?.emit({
+    kind: 'action:end',
+    timestamp: Date.now(),
+    status: 'success',
+  })
+
+  return { change, outcome: await buildOutcome(action, change, runtime) }
+}
+
+async function dispatchCommand(
+  action: PlannedAction,
+  runtime: DriverRuntimeContext,
+): Promise<StateChange> {
+  switch (action.kind) {
+    case 'set_property':
+      return executeAssignment(
+        action.device,
+        action.property,
+        action.value,
+        runtime,
+      )
+    case 'increment_property':
+      return executeIncrement(
+        action.device,
+        action.property,
+        action.value,
+        runtime,
+      )
+    case 'read_property':
+      return executeQuery(action.device, action.property, runtime)
+    case 'invoke_action':
+      return executeAction(action.device, action.method, action.args, runtime)
+  }
+}
+
+async function buildOutcome(
+  action: PlannedAction,
+  change: StateChange,
+  runtime: DriverRuntimeContext,
+): Promise<ActionOutcome | null> {
+  switch (action.kind) {
+    case 'set_property':
+    case 'increment_property': {
+      const expected = { [action.property]: change.newValue }
+      return verifyOutcome(
+        action.device,
+        { kind: 'property', name: action.property },
+        expected,
+        runtime,
+      )
+    }
+    case 'invoke_action': {
+      const target: VerificationTarget = { kind: 'action', name: action.method }
+      const expected = readExpectedEffects(action.device, target)
+      if (expected === undefined) {
+        return {
+          deviceId: action.device.id,
+          execution: { status: 'accepted' },
+          verification: { status: 'not_observable' },
+        }
+      }
+      return verifyOutcome(action.device, target, expected, runtime)
+    }
+    case 'read_property':
+      return null
+  }
+}
+
+async function verifyOutcome(
+  device: Device,
+  target: VerificationTarget,
+  expected: Record<string, unknown>,
+  runtime: DriverRuntimeContext,
+): Promise<ActionOutcome> {
+  const strategy = resolveVerificationStrategy(device, target)
+  try {
+    const verification = await verifyState(device, expected, strategy, runtime)
+    return {
+      deviceId: device.id,
+      execution: { status: 'accepted' },
+      verification,
+    }
+  } catch {
+    return {
+      deviceId: device.id,
+      execution: { status: 'accepted' },
+      verification: { status: 'not_observable' },
+    }
   }
 }
 

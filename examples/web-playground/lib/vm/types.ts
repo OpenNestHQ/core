@@ -1,7 +1,7 @@
 import type {
   Device,
   Session,
-  ExecutedStatement,
+  ExecutedStatementSummary,
   VMError,
   UserInteraction,
   VMEvent,
@@ -44,7 +44,7 @@ export interface VMState {
   session: Session | null
   status: ExecutionStatus
   dslSource: string
-  executedStatements: ExecutedStatement[]
+  executedStatements: ExecutedStatementSummary[]
   errors: VMError[]
   interaction: UserInteraction | null
   policies: PolicyInfo[]
@@ -59,7 +59,7 @@ export type VMAction =
   | { type: 'SET_STATUS'; status: ExecutionStatus }
   | { type: 'SET_DSL'; source: string }
   | { type: 'SET_POLICIES'; policies: PolicyInfo[] }
-  | { type: 'ADD_EXECUTED'; statements: ExecutedStatement[] }
+  | { type: 'ADD_EXECUTED'; statements: ExecutedStatementSummary[] }
   | { type: 'SET_ERRORS'; errors: VMError[] }
   | { type: 'SET_INTERACTION'; interaction: UserInteraction | null }
   | { type: 'ADD_EVENT'; entry: VMEventLogEntry }

@@ -174,11 +174,6 @@ function resolveByTypeAndSelectors(
     return { devices: matches, ambiguous: false, ...(filter ? { filter } : {}) }
   }
 
-  const hasWildcard = selectors.some(s => s.kind === 'wildcard')
-  if (hasWildcard) {
-    return { devices: matches, ambiguous: false, ...(filter ? { filter } : {}) }
-  }
-
   if (forceFirst) {
     return {
       devices: [matches[0]!],

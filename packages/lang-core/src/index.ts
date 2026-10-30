@@ -65,3 +65,14 @@ export {
   buildOwnerSelector,
   buildTagSelector,
 } from './ast/index.js'
+
+export type {
+  ExecutionStatus,
+  ActionExecution,
+  VerificationStatus,
+  Verification,
+  ActionOutcome,
+  VerificationStrategy,
+  PollVerificationStrategy,
+  EventVerificationStrategy,
+} from './execution/index.js'
