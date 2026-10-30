@@ -1,0 +1,44 @@
+{
+  "name": "@opennest/mcp",
+  "version": "0.1.0",
+  "description": "OpenNest MCP server — stdio access to the HomeDSL runtime for AI agents",
+  "license": "ISC",
+  "author": "Zepoze",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenNestHQ/core.git"
+  },
+  "type": "module",
+  "bin": {
+    "opennest-mcp": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@opennest/devices": "workspace:*",
+    "@opennest/sdk": "workspace:*",
+    "@opennest/vm": "workspace:*",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}
