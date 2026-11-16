@@ -72,7 +72,12 @@ Every tool returns a `ToolResult` envelope, both as JSON text content and as `st
 
 ```ts
 type ToolResult =
-  | { status: 'completed'; result?: RunResultSummary; session?: SessionSummary }
+  | {
+      status: 'completed'
+      result?: RunResultSummary
+      session?: SessionSummary
+      deviceFailures?: { deviceId: string; message: string }[]
+    }
   | { status: 'waiting_for_user'; interaction: InteractionPrompt }
   | {
       status: 'blocked'
@@ -88,14 +93,15 @@ type ToolResult =
     }
 ```
 
-- `completed` — the program ran (or `dryRun` checked it). `result` holds `{ status, executed, errors }`; `get_session` returns `session` instead.
+- `completed` — the program ran (or `dryRun` checked it). After a run, `result` holds `{ status, executed, errors }`, where `executed` lists only the statements of this program. A successful `dryRun` returns a bare `{ status: 'completed' }` with no `result`. `get_session` returns `session` instead.
+- `deviceFailures` — present on `completed` only when a device driver rejected a command (action or property write). The program itself ran, so the status stays `completed`: **report `deviceFailures` to the user**. `execution_failed` covers VM/runtime errors.
 - `waiting_for_user` — execution is suspended until the user answers `interaction`.
 - `blocked` — the call is not allowed in the current state (see error codes).
 - `failed` — the call failed; `error.code` is one of the codes below.
 
 ### InteractionPrompt
 
-Interaction ids are never exposed: `respond` targets the single pending interaction automatically. `choices[].id` values are device or option ids and are what you send back.
+Interaction ids are never exposed: `respond` targets the single pending interaction automatically. `choices[].id` values are device or option ids and are what you send back: as `deviceId` for `device_selection`, as `value` for `choice`.
 
 ```ts
 type InteractionPrompt =
@@ -127,21 +133,23 @@ type InteractionPrompt =
 
 ### Error codes
 
-| Code                           | Status    | Meaning                                                                                              |
-| ------------------------------ | --------- | ---------------------------------------------------------------------------------------------------- |
-| `parse_error`                  | `failed`  | The HomeDSL program has a syntax error.                                                              |
-| `validation_error`             | `failed`  | The program parsed but failed static validation (unknown device, unsupported property, ...).         |
-| `execution_failed`             | `failed`  | The program was valid but execution reported errors.                                                 |
-| `interaction_pending`          | `blocked` | `run_dsl` was called while an interaction is pending. `respond` or `cancel` first.                   |
-| `no_pending_interaction`       | `blocked` | `respond` was called with nothing pending. (Also a retryable `failed` code, see below.)              |
-| `interaction_id_mismatch`      | `failed`  | The answer targeted a stale interaction. Retryable.                                                  |
-| `interaction_type_mismatch`    | `failed`  | The answer `type` does not match the pending interaction. Retryable.                                 |
-| `unknown_device_id`            | `failed`  | A `device_selection` answer named a device that is not among the choices. Retryable.                 |
-| `no_pending_program`           | `failed`  | The session lost its suspended program. Retryable.                                                   |
-| `no_session`                   | `failed`  | The core could not resume because there is no active session.                                        |
-| `interaction_aborted`          | `failed`  | Too many invalid answers (`OPENNEST_MAX_FAILED_RESUMES`); the interaction was cancelled. Start over. |
-| `unsupported_interaction_type` | `failed`  | The runtime suspended on an interaction type this server cannot present.                             |
-| `core_error`                   | `failed`  | Unexpected error from the OpenNest core.                                                             |
+| Code                           | Status    | Meaning                                                                                                 |
+| ------------------------------ | --------- | ------------------------------------------------------------------------------------------------------- |
+| `parse_error`                  | `failed`  | The HomeDSL program has a syntax error.                                                                 |
+| `validation_error`             | `failed`  | The program parsed but failed static validation (unknown device, unsupported property, ...).            |
+| `execution_failed`             | `failed`  | The program was valid but the VM/runtime reported errors (device driver failures are `deviceFailures`). |
+| `interaction_pending`          | `blocked` | `run_dsl` was called while an interaction is pending. `respond` or `cancel` first.                      |
+| `no_pending_interaction`       | `blocked` | `respond` was called with nothing pending. (Also a retryable `failed` code, see below.)                 |
+| `interaction_id_mismatch`      | `failed`  | The answer targeted a stale interaction. Retryable.                                                     |
+| `interaction_type_mismatch`    | `failed`  | The answer `type` does not match the pending interaction. Retryable.                                    |
+| `unknown_device_id`            | `failed`  | A `device_selection` answer named a device that is not among the choices. Retryable.                    |
+| `no_pending_program`           | `failed`  | The session lost its suspended program. Retryable.                                                      |
+| `no_session`                   | `failed`  | The core could not resume because there is no active session.                                           |
+| `interaction_aborted`          | `failed`  | Too many invalid answers (`OPENNEST_MAX_FAILED_RESUMES`); the interaction was cancelled. Start over.    |
+| `unsupported_interaction_type` | `failed`  | The runtime suspended on an interaction type this server cannot present.                                |
+| `core_error`                   | `failed`  | Unexpected error from the OpenNest core.                                                                |
+
+Malformed tool input (schema violations, e.g. `respond` without `deviceId`) is rejected by the MCP layer as an `isError` transport error with plain text; it is not a `ToolResult` and does not consume the retry budget.
 
 Retryable state errors can be repeated up to `OPENNEST_MAX_FAILED_RESUMES` times; beyond that the server cancels the interaction and returns `interaction_aborted`.
 

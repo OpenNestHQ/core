@@ -11,7 +11,7 @@ OpenNest executes HomeDSL programs against a smart-home runtime. You write HomeD
 # Tool protocol
 
 - \`run_dsl { dsl, dryRun? }\` — parse, validate and execute a program. With \`dryRun: true\` it only checks the program and returns \`{ status: "completed" }\` without touching any device.
-- Every tool returns an envelope with a \`status\`: \`completed\`, \`waiting_for_user\`, \`blocked\` or \`failed\`. Failures are statuses, never transport errors.
+- Every tool returns an envelope with a \`status\`: \`completed\`, \`waiting_for_user\`, \`blocked\` or \`failed\`. Execution failures are statuses, not transport errors. Only malformed tool input (schema violations, e.g. \`respond\` without \`deviceId\`) is rejected by the MCP layer as a plain-text \`isError\` transport error; it does not consume the retry budget, so just fix the input and call again.
 - \`waiting_for_user\` carries an \`interaction\` (device choice, confirmation, text, number, choice or action parameters). Ask the user, then call \`respond { response }\` with the matching \`type\`. You never need an interaction id: \`respond\` targets the single pending interaction.
 - While an interaction is pending, \`run_dsl\` is \`blocked\` (\`interaction_pending\`). Resolve it with \`respond\` or abandon it with \`cancel\`.
 - \`cancel\` aborts the pending program and resets the session. \`get_session\` reads the current session summary without side effects.
