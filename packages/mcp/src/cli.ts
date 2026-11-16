@@ -66,7 +66,16 @@ export function toDeviceEntries(devices: Device[]): DeviceResourceEntry[] {
   })
 }
 
-export async function runCli(env: Env): Promise<void> {
+export interface CliOptions {
+  /** Called once the transport closed and the client was released. */
+  onClosed?: () => void
+}
+
+/** Resolves once the server is connected; returns an idempotent shutdown. */
+export async function runCli(
+  env: Env,
+  options: CliOptions = {},
+): Promise<() => Promise<void>> {
   const { yamlPath, maxFailedResumes } = resolveConfig(env)
   if (!existsSync(yamlPath)) {
     throw new CliConfigError(
@@ -93,8 +102,26 @@ export async function runCli(env: Env): Promise<void> {
     )
   }
 
+  let closing: Promise<void> | null = null
+  const shutdown = (): Promise<void> => {
+    closing ??= client.close().catch((error: unknown) => {
+      // Best-effort: diagnostics go to stderr, never stdout.
+      console.error(`Failed to close devices: ${(error as Error).message}`)
+    })
+    return closing
+  }
+
   const server = createOpenNestServer({ client, devices, maxFailedResumes })
-  await server.connect(new StdioServerTransport())
+  // The host closing stdin closes the transport: release the drivers.
+  server.server.onclose = () => {
+    void shutdown().then(() => options.onClosed?.())
+  }
+  const transport = new StdioServerTransport()
+  await server.connect(transport)
+  process.stdin.once('end', () => {
+    void server.close()
+  })
+  return shutdown
 }
 
 function isEntryPoint(): boolean {
@@ -108,9 +135,17 @@ function isEntryPoint(): boolean {
 }
 
 if (isEntryPoint()) {
-  runCli(process.env).catch((error: unknown) => {
-    // stdout is reserved for the MCP protocol: diagnostics go to stderr.
-    console.error((error as Error).message ?? String(error))
-    process.exit(1)
-  })
+  runCli(process.env, { onClosed: () => process.exit(0) })
+    .then(shutdown => {
+      for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+        process.once(signal, () => {
+          void shutdown().then(() => process.exit(0))
+        })
+      }
+    })
+    .catch((error: unknown) => {
+      // stdout is reserved for the MCP protocol: diagnostics go to stderr.
+      console.error((error as Error).message ?? String(error))
+      process.exit(1)
+    })
 }
