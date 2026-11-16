@@ -6,6 +6,17 @@ import type { Device } from '@opennest/vm'
 import { createGuardedRuntime } from './runtime.js'
 import { cancelTool, getSessionTool, respondTool, runDslTool } from './tools.js'
 import type { ToolDeps } from './tools.js'
+import { toSessionSummary } from './session.js'
+
+// getSession() returns the live session, so snapshot a detached view.
+function snapshot(deps: ToolDeps) {
+  const session = deps.client.getSession()
+  return structuredClone({
+    summary: toSessionSummary(session),
+    cursor: session.cursor,
+    historyLength: session.history.length,
+  })
+}
 
 async function makeDeps(): Promise<ToolDeps & { driver: MockDriver }> {
   const driver = new MockDriver()
@@ -70,7 +81,7 @@ describe('tool handlers', () => {
 
   it('dryRun on an invalid program fails with validation_error and no side effects', async () => {
     const deps = await makeDeps()
-    const before = deps.client.getSession()
+    const before = snapshot(deps)
     const result = await runDslTool(deps, {
       dsl: 'tv[chambre].power = on',
       dryRun: true,
@@ -79,7 +90,7 @@ describe('tool handlers', () => {
       status: 'failed',
       error: { code: 'validation_error' },
     })
-    expect(deps.client.getSession()).toEqual(before)
+    expect(snapshot(deps)).toEqual(before)
   })
 
   it('dryRun on a valid program does not execute or suspend', async () => {
