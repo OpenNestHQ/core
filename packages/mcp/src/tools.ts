@@ -1,5 +1,5 @@
 import type { Session } from '@opennest/sdk'
-import { toToolResult } from './result.js'
+import { toInteractionPrompt, toToolResult } from './result.js'
 import type { ToolResult } from './result.js'
 import type { GuardedRuntime, InteractionClient } from './runtime.js'
 import type { RespondInput, RunDslInput } from './schemas.js'
@@ -44,9 +44,15 @@ export async function cancelTool(deps: ToolDeps): Promise<ToolResult> {
 
 export function getSessionTool(deps: ToolDeps): ToolResult {
   try {
+    const session = toSessionSummary(deps.client.getSession())
+    // Prefer the core's verbatim prompt over the lossy session-context
+    // reconstruction (which stays as the fallback when the client has none).
+    const pending = deps.client.getPendingInteraction()
+    const prompt = pending === null ? null : toInteractionPrompt(pending)
     return {
       status: 'completed',
-      session: toSessionSummary(deps.client.getSession()),
+      session:
+        prompt === null ? session : { ...session, pendingInteraction: prompt },
     }
   } catch (error) {
     return coreError(error)

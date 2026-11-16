@@ -50,8 +50,23 @@ export interface ToolError {
 /** A `RunResult` without its interaction payload — the flat completed body. */
 export type RunResultSummary = Omit<RunResult, 'interaction'>
 
+/**
+ * A device whose driver rejected a command (action or property write). The
+ * VM records these as failed outcomes rather than errors, so a run can be
+ * `completed` while a device did not do what was asked.
+ */
+export interface DeviceFailure {
+  deviceId: string
+  message: string
+}
+
 export type ToolResult =
-  | { status: 'completed'; result?: RunResultSummary; session?: SessionSummary }
+  | {
+      status: 'completed'
+      result?: RunResultSummary
+      session?: SessionSummary
+      deviceFailures?: DeviceFailure[]
+    }
   | { status: 'waiting_for_user'; interaction: InteractionPrompt }
   | {
       status: 'blocked'
@@ -134,7 +149,10 @@ function failed(code: string, message: string): ToolResult {
  * The `session` field of the completed variant is left to callers that hold
  * session state (`get_session`); this projection only sees the run.
  */
-export function toToolResult(result: RunResult): ToolResult {
+export function toToolResult(
+  result: RunResult,
+  options?: { executedFrom?: number },
+): ToolResult {
   if (result.interaction !== null) {
     const prompt = toInteractionPrompt(result.interaction)
     if (prompt === null) {
@@ -154,12 +172,29 @@ export function toToolResult(result: RunResult): ToolResult {
     )
   }
 
+  // `executed` is the whole session history; keep only this program's tail.
+  const executed = result.executed.slice(options?.executedFrom ?? 0)
+  const deviceFailures = collectDeviceFailures(executed)
   return {
     status: 'completed',
-    result: {
-      status: result.status,
-      executed: result.executed,
-      errors: result.errors,
-    },
+    result: { status: result.status, executed, errors: result.errors },
+    ...(deviceFailures.length > 0 ? { deviceFailures } : {}),
   }
+}
+
+function collectDeviceFailures(
+  executed: RunResult['executed'],
+): DeviceFailure[] {
+  const failures: DeviceFailure[] = []
+  for (const entry of executed) {
+    for (const outcome of entry.outcomes ?? []) {
+      if (outcome.execution.status === 'failed') {
+        failures.push({
+          deviceId: outcome.deviceId,
+          message: outcome.execution.error ?? 'Device command failed',
+        })
+      }
+    }
+  }
+  return failures
 }

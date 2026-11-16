@@ -4,6 +4,7 @@ import type {
   ExecutedStatementSummary,
   ResumeAnswer,
   RunResult,
+  Session,
   UserInteraction,
 } from '@opennest/sdk'
 import { createGuardedRuntime, DEFAULT_MAX_FAILED_RESUMES } from './runtime.js'
@@ -14,7 +15,7 @@ type Statement = ExecutedStatementSummary['statement']
 const RUN_DSL_BLOCKED_MESSAGE =
   'Resolve the pending interaction with `respond`, or call `cancel`. `run_dsl` is disabled until then.'
 const CHECK_BLOCKED_MESSAGE =
-  'Resolve the pending interaction with `respond`, or call `cancel`. `check` is disabled until then.'
+  'Resolve the pending interaction with `respond`, or call `cancel`. `run_dsl` (including `dryRun`) is disabled until then.'
 const NO_PENDING_MESSAGE = 'No interaction is pending. Execute a program first.'
 const ABORT_MESSAGE =
   'Too many invalid answers; the pending interaction was cancelled. Ask the user again from the start.'
@@ -131,7 +132,10 @@ function fakeClient(pending: UserInteraction | null) {
   const resumePending = vi.fn<(answer: ResumeAnswer) => Promise<RunResult>>()
   const getPendingInteraction = vi.fn((): UserInteraction | null => pending)
   const cancel = vi.fn<() => Promise<RunResult>>()
+  const session = { history: [] as unknown[] }
+  const getSession = vi.fn(() => session as unknown as Session)
   const client: InteractionClient = {
+    getSession,
     runDsl,
     analyze,
     resumePending,
@@ -145,6 +149,7 @@ function fakeClient(pending: UserInteraction | null) {
     resumePending,
     getPendingInteraction,
     cancel,
+    session,
   }
 }
 

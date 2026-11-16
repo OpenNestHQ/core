@@ -6,6 +6,7 @@ import type { Device } from '@opennest/vm'
 import { createGuardedRuntime } from './runtime.js'
 import { cancelTool, getSessionTool, respondTool, runDslTool } from './tools.js'
 import type { ToolDeps } from './tools.js'
+import { toInteractionPrompt } from './result.js'
 import { toSessionSummary } from './session.js'
 
 // getSession() returns the live session, so snapshot a detached view.
@@ -18,7 +19,9 @@ function snapshot(deps: ToolDeps) {
   })
 }
 
-async function makeDeps(): Promise<ToolDeps & { driver: MockDriver }> {
+async function makeDeps(
+  confirm: (kind: string) => boolean = () => true,
+): Promise<ToolDeps & { driver: MockDriver }> {
   const driver = new MockDriver()
   await driver.init({})
   const devices: Device[] = [
@@ -35,11 +38,104 @@ async function makeDeps(): Promise<ToolDeps & { driver: MockDriver }> {
   const client = new OpenNestClient({
     devices,
     middleware: [
-      createConfirmationMiddleware({ requireConfirmation: () => true }),
+      createConfirmationMiddleware({
+        requireConfirmation: action => confirm(action.kind),
+      }),
     ],
   })
   return { client, runtime: createGuardedRuntime(client), driver }
 }
+
+function runtimeWaiting(deps: ToolDeps) {
+  const pending = deps.client.getPendingInteraction()
+  if (pending === null) throw new Error('expected a pending interaction')
+  return Promise.resolve(toInteractionPrompt(pending))
+}
+
+class FailingDriver extends MockDriver {
+  override setProperty(): Promise<void> {
+    return Promise.reject(new Error('write refused'))
+  }
+  override executeAction(): Promise<void> {
+    return Promise.reject(new Error('action exploded'))
+  }
+}
+
+async function makeFailingDeps(): Promise<ToolDeps> {
+  const driver = new FailingDriver()
+  await driver.init({})
+  driver.seed('tv_salon', { power: false })
+  const devices: Device[] = [
+    {
+      id: 'tv_salon',
+      type: 'tv',
+      room: 'salon',
+      name: 'Salon TV',
+      driver,
+      driverConfig: {},
+    },
+  ]
+  const client = new OpenNestClient({ devices })
+  return { client, runtime: createGuardedRuntime(client) }
+}
+
+describe('executed scoping (F1)', () => {
+  const writesOnly = (kind: string) => kind === 'set_property'
+
+  it('reports exactly one entry for the same program run three times', async () => {
+    const deps = await makeDeps(writesOnly)
+    for (let i = 0; i < 3; i++) {
+      const r = await runDslTool(deps, { dsl: 'tv[salon].power?' })
+      if (r.status !== 'completed') throw new Error('expected completed')
+      expect(r.result?.executed).toHaveLength(1)
+    }
+  })
+
+  it('a suspended program reports only its own entries after respond', async () => {
+    const deps = await makeDeps(writesOnly)
+    await runDslTool(deps, { dsl: 'tv[salon].volume?' })
+    const waiting = await runDslTool(deps, {
+      dsl: 'tv[salon].volume?\ntv[salon].power = on',
+    })
+    expect(waiting.status).toBe('waiting_for_user')
+    const done = await respondTool(deps, {
+      response: { type: 'confirmation', confirmed: true },
+    })
+    if (done.status !== 'completed') throw new Error('expected completed')
+    expect(done.result?.executed).toHaveLength(2)
+  })
+
+  it('resets the baseline after cancel', async () => {
+    const deps = await makeDeps(writesOnly)
+    await runDslTool(deps, { dsl: 'tv[salon].volume?' })
+    await runDslTool(deps, { dsl: 'tv[salon].power = on' })
+    await cancelTool(deps)
+    const r = await runDslTool(deps, { dsl: 'tv[salon].volume?' })
+    if (r.status !== 'completed') throw new Error('expected completed')
+    expect(r.result?.executed).toHaveLength(1)
+  })
+})
+
+describe('device failures (F2)', () => {
+  it('reports a throwing action as deviceFailures', async () => {
+    const deps = await makeFailingDeps()
+    const r = await runDslTool(deps, { dsl: 'tv[salon].play()' })
+    expect(r).toMatchObject({
+      status: 'completed',
+      deviceFailures: [{ deviceId: 'tv_salon', message: 'action exploded' }],
+    })
+  })
+
+  it('reports a throwing property write as deviceFailures (outcomes path)', async () => {
+    const deps = await makeFailingDeps()
+    const r = await runDslTool(deps, { dsl: 'tv[salon].power = on' })
+    expect(r).toMatchObject({
+      status: 'completed',
+      result: { errors: [] },
+      deviceFailures: [{ deviceId: 'tv_salon', message: 'write refused' }],
+    })
+  })
+})
 
 describe('tool handlers', () => {
   it('runs the full confirm loop', async () => {
@@ -55,7 +151,8 @@ describe('tool handlers', () => {
     })
     expect(done.status).toBe('completed')
     if (done.status !== 'completed') return
-    expect(done.result?.executed.length).toBeGreaterThan(0)
+    expect(done.result?.executed).toHaveLength(1)
+    expect(done).not.toHaveProperty('deviceFailures')
   })
 
   it('respond without a pending interaction is blocked', async () => {
@@ -112,6 +209,9 @@ describe('tool handlers', () => {
     expect(during.status).toBe('completed')
     if (during.status !== 'completed') return
     expect(during.session?.pendingInteraction).not.toBeNull()
+    // Verbatim core prompt, identical to the waiting_for_user result.
+    const waiting = await runtimeWaiting(deps)
+    expect(during.session?.pendingInteraction).toEqual(waiting)
 
     expect((await cancelTool(deps)).status).toBe('completed')
 

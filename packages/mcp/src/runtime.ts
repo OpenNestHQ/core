@@ -2,6 +2,7 @@ import type {
   DSLFeedback,
   ResumeAnswer,
   RunResult,
+  Session,
   UserInteraction,
 } from '@opennest/sdk'
 import { toToolResult } from './result.js'
@@ -14,6 +15,7 @@ export interface InteractionClient {
   resumePending(answer: ResumeAnswer): Promise<RunResult>
   getPendingInteraction(): UserInteraction | null
   cancel(): Promise<RunResult>
+  getSession(): Session
 }
 
 export interface GuardedRuntime {
@@ -37,7 +39,7 @@ const RETRYABLE_CODES = [
 const RUN_DSL_BLOCKED_MESSAGE =
   'Resolve the pending interaction with `respond`, or call `cancel`. `run_dsl` is disabled until then.'
 const CHECK_BLOCKED_MESSAGE =
-  'Resolve the pending interaction with `respond`, or call `cancel`. `check` is disabled until then.'
+  'Resolve the pending interaction with `respond`, or call `cancel`. `run_dsl` (including `dryRun`) is disabled until then.'
 const NO_PENDING_MESSAGE = 'No interaction is pending. Execute a program first.'
 const ABORT_MESSAGE =
   'Too many invalid answers; the pending interaction was cancelled. Ask the user again from the start.'
@@ -104,6 +106,9 @@ export function createGuardedRuntime(
   const maxFailedResumes =
     options?.maxFailedResumes ?? DEFAULT_MAX_FAILED_RESUMES
   let failedResumes = 0
+  // Length of `session.history` when the current program started: the SDK's
+  // `executed` is the whole history, so results are sliced from here.
+  let executedBaseline = 0
 
   const runDsl = async (dsl: string): Promise<ToolResult> => {
     let pending: UserInteraction | null
@@ -131,12 +136,13 @@ export function createGuardedRuntime(
     }
     let result: RunResult
     try {
+      executedBaseline = client.getSession().history.length
       result = await client.runDsl(dsl)
     } catch (error) {
       return coreErrorResult(error)
     }
     failedResumes = 0
-    return toToolResult(result)
+    return toToolResult(result, { executedFrom: executedBaseline })
   }
 
   const check = async (dsl: string): Promise<ToolResult> => {
@@ -193,6 +199,8 @@ export function createGuardedRuntime(
       if (failedResumes > maxFailedResumes) {
         try {
           await client.cancel()
+          // The core reset the session: re-read rather than assume 0.
+          executedBaseline = client.getSession().history.length
         } catch {
           // cancel is best-effort once the retry budget is exhausted
         }
@@ -205,7 +213,7 @@ export function createGuardedRuntime(
       )
     }
     failedResumes = 0
-    return toToolResult(result)
+    return toToolResult(result, { executedFrom: executedBaseline })
   }
 
   return { runDsl, check, respond }

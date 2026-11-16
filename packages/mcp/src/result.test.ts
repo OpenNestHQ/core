@@ -212,6 +212,51 @@ describe('toInteractionPrompt', () => {
 })
 
 describe('toToolResult', () => {
+  it('slices executed from the given baseline', () => {
+    const result = toToolResult(
+      runResult({ executed: [...executed, ...executed] }),
+      {
+        executedFrom: executed.length,
+      },
+    )
+    expect(result).toMatchObject({ status: 'completed' })
+    if (result.status !== 'completed') return
+    expect(result.result?.executed).toHaveLength(executed.length)
+  })
+
+  it('reports failed outcomes as deviceFailures with a default message', () => {
+    const failing = [
+      {
+        ...executed[0]!,
+        outcomes: [
+          {
+            deviceId: 'tv_salon',
+            execution: { status: 'failed' as const, error: 'boom' },
+            verification: { status: 'not_observable' as const },
+          },
+          {
+            deviceId: 'lamp',
+            execution: { status: 'failed' as const },
+            verification: { status: 'not_observable' as const },
+          },
+          {
+            deviceId: 'ok',
+            execution: { status: 'accepted' as const },
+            verification: { status: 'not_observable' as const },
+          },
+        ],
+      },
+    ]
+    const result = toToolResult(runResult({ executed: failing }))
+    expect(result).toMatchObject({
+      status: 'completed',
+      deviceFailures: [
+        { deviceId: 'tv_salon', message: 'boom' },
+        { deviceId: 'lamp', message: 'Device command failed' },
+      ],
+    })
+  })
+
   it('maps a successful run to a flat completed envelope', () => {
     const result = toToolResult(runResult({ executed }))
 
