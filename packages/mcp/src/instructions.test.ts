@@ -20,6 +20,13 @@ describe('buildInstructions', () => {
     expect(text.trimEnd().endsWith('<REF>')).toBe(true)
   })
 
+  it('documents deviceFailures and the choice-id contract', () => {
+    expect(text).toContain('deviceFailures')
+    expect(text).not.toContain('a device or the runtime failed')
+    expect(text).toContain('as `deviceId` for `device_selection`')
+    expect(text).toContain('as `value` for `choice`')
+  })
+
   it('lists the main public error codes', () => {
     for (const code of [
       'parse_error',
