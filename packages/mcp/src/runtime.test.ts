@@ -519,7 +519,7 @@ describe('createGuardedRuntime', () => {
       expect(cancel).not.toHaveBeenCalled()
     })
 
-    it('resets the budget when a check completes, even on an invalid program', async () => {
+    it('leaves the budget unchanged when a check fails', async () => {
       const { client, analyze, resumePending, getPendingInteraction, cancel } =
         fakeClient(deviceSelection)
       resumePending.mockResolvedValue(
@@ -546,6 +546,31 @@ describe('createGuardedRuntime', () => {
           FIX_PROGRAM_HINT,
         ),
       )
+
+      getPendingInteraction.mockReturnValue(deviceSelection)
+      const third = await runtime.respond(answer)
+      expect(third).toStrictEqual(failed('interaction_aborted', ABORT_MESSAGE))
+      expect(cancel).toHaveBeenCalledTimes(1)
+    })
+
+    it('resets the budget when a check succeeds', async () => {
+      const { client, resumePending, getPendingInteraction, cancel } =
+        fakeClient(deviceSelection)
+      resumePending.mockResolvedValue(
+        errorResult('unknown_device_id', 'Unknown device id: x'),
+      )
+      const runtime = createGuardedRuntime(client, { maxFailedResumes: 2 })
+
+      expect(await runtime.respond(answer)).toStrictEqual(
+        failed('unknown_device_id', 'Unknown device id: x'),
+      )
+      expect(await runtime.respond(answer)).toStrictEqual(
+        failed('unknown_device_id', 'Unknown device id: x'),
+      )
+
+      getPendingInteraction.mockReturnValue(null)
+      const check = await runtime.check('tv[salon].power = on')
+      expect(check).toStrictEqual({ status: 'completed' })
 
       getPendingInteraction.mockReturnValue(deviceSelection)
       const third = await runtime.respond(answer)
@@ -679,6 +704,46 @@ describe('createGuardedRuntime', () => {
 
       expect(result).toStrictEqual(failed('core_error', 'analyze boom'))
       expect(runDsl).not.toHaveBeenCalled()
+    })
+
+    it('returns core_error when getPendingInteraction throws, on every entry point', async () => {
+      const { client, getPendingInteraction, runDsl, analyze, resumePending } =
+        fakeClient(null)
+      getPendingInteraction.mockImplementation(() => {
+        throw new Error('pending boom')
+      })
+      const runtime = createGuardedRuntime(client)
+
+      expect(await runtime.runDsl('tv.power=on')).toStrictEqual(
+        failed('core_error', 'pending boom'),
+      )
+      expect(await runtime.check('tv.power=on')).toStrictEqual(
+        failed('core_error', 'pending boom'),
+      )
+      expect(await runtime.respond(answer)).toStrictEqual(
+        failed('core_error', 'pending boom'),
+      )
+      expect(runDsl).not.toHaveBeenCalled()
+      expect(analyze).not.toHaveBeenCalled()
+      expect(resumePending).not.toHaveBeenCalled()
+    })
+
+    it('normalizes a nullish throw to core_error instead of crashing', async () => {
+      const nullThrowing = fakeClient(deviceSelection)
+      nullThrowing.resumePending.mockRejectedValue(null)
+      const nullRuntime = createGuardedRuntime(nullThrowing.client)
+
+      expect(await nullRuntime.respond(answer)).toStrictEqual(
+        failed('core_error', 'null'),
+      )
+
+      const undefinedThrowing = fakeClient(deviceSelection)
+      undefinedThrowing.resumePending.mockRejectedValue(undefined)
+      const undefinedRuntime = createGuardedRuntime(undefinedThrowing.client)
+
+      expect(await undefinedRuntime.respond(answer)).toStrictEqual(
+        failed('core_error', 'undefined'),
+      )
     })
   })
 })

@@ -55,7 +55,8 @@ function failedResult(
 }
 
 function coreErrorResult(error: unknown): ToolResult {
-  return failedResult('core_error', String((error as Error).message ?? error))
+  const message = (error as Error | null | undefined)?.message
+  return failedResult('core_error', String(message ?? error))
 }
 
 function blockedResult(
@@ -105,7 +106,12 @@ export function createGuardedRuntime(
   let failedResumes = 0
 
   const runDsl = async (dsl: string): Promise<ToolResult> => {
-    const pending = client.getPendingInteraction()
+    let pending: UserInteraction | null
+    try {
+      pending = client.getPendingInteraction()
+    } catch (error) {
+      return coreErrorResult(error)
+    }
     if (pending !== null) {
       return blockedResult(
         'interaction_pending',
@@ -134,7 +140,12 @@ export function createGuardedRuntime(
   }
 
   const check = async (dsl: string): Promise<ToolResult> => {
-    const pending = client.getPendingInteraction()
+    let pending: UserInteraction | null
+    try {
+      pending = client.getPendingInteraction()
+    } catch (error) {
+      return coreErrorResult(error)
+    }
     if (pending !== null) {
       return blockedResult(
         'interaction_pending',
@@ -148,16 +159,21 @@ export function createGuardedRuntime(
     } catch (error) {
       return coreErrorResult(error)
     }
-    failedResumes = 0
     const preclassified = classifyFeedback(feedback)
     if (preclassified !== null) {
       return preclassified
     }
+    failedResumes = 0
     return { status: 'completed' }
   }
 
   const respond = async (answer: ResumeAnswer): Promise<ToolResult> => {
-    const pending = client.getPendingInteraction()
+    let pending: UserInteraction | null
+    try {
+      pending = client.getPendingInteraction()
+    } catch (error) {
+      return coreErrorResult(error)
+    }
     if (pending === null) {
       return blockedResult('no_pending_interaction', NO_PENDING_MESSAGE, null)
     }
