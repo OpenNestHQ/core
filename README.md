@@ -22,6 +22,7 @@ Natural Language → HomeAgent (LLM) → HomeDSL → VM (executeCommand) → Dev
 | [vm](./packages/vm/) | `@opennest/vm` | Interpreter: resolution, middleware, interactions, validation, tracing |
 | [playground](./examples/playground/) | `@opennest/playground` | Interactive TUI REPL with 14 mock devices + NL→DSL AI agent |
 | [sdk](./packages/sdk/) | `@opennest/sdk` | High-level `OpenNestClient` facade over parser + VM + devices |
+| [mcp](./packages/mcp/) | `@opennest/mcp` | Stdio MCP server exposing the runtime (HomeDSL execution, interactions, session) to AI agents |
 
 ---
 
@@ -409,6 +410,13 @@ packages/
   sdk/               # High-level client facade
     src/
       client.ts       # OpenNestClient (parse/execute/runDsl/resume/cancel/getSession)
+      index.ts        # Public exports
+  mcp/               # Stdio MCP server for AI agents
+    src/
+      cli.ts          # stdio entry point (opennest-mcp)
+      server.ts       # createOpenNestServer(), tools + resources
+      tools.ts        # run_dsl / respond / cancel / get_session handlers
+      runtime.ts      # createGuardedRuntime(), pending guard + retry budget
       index.ts        # Public exports
 examples/
   playground/        # Interactive TUI REPL
