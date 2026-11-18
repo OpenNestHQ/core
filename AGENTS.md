@@ -16,6 +16,7 @@ No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm w
 | `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers | *none* (only `js-yaml`) |
 | `packages/vm` | `@opennest/vm` | interpreter: `executeCommand()`, resolution, middleware, interactions, validation, tracing | `lang-core`, `devices` |
 | `packages/sdk` | `@opennest/sdk` | Deterministic execution facade (`OpenNestClient`) over parser + devices + VM | `lang-core`, `devices`, `vm` |
+| `packages/mcp` | `@opennest/mcp` | Stdio MCP server exposing the runtime (HomeDSL execution, interactions, session) to AI agents | `sdk`, `vm`, `devices` |
 | `examples/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `sdk` |
 
 Cross-package deps use `"workspace:*"` in package.json, resolved by pnpm.
@@ -64,8 +65,9 @@ pnpm handles topological ordering automatically. The dependency graph is:
 1. `devices` and `lang-core` — no cross-package deps, build independently (parallel-safe).
 2. `vm` — depends on both `devices` + `lang-core`.
 3. `sdk` — depends on `lang-core` + `devices` + `vm`.
-4. `examples/playground` (TUI) and `examples/web-playground` — depend on `sdk`.
-5. `lang-core`'s `build:prompt` requires `dist/` to exist, so `build` must run first.
+4. `mcp` — depends on `sdk` + `vm` + `devices`; nothing depends on it.
+5. `examples/playground` (TUI) and `examples/web-playground` — depend on `sdk`.
+6. `lang-core`'s `build:prompt` requires `dist/` to exist, so `build` must run first.
 
 ## Module system
 
@@ -347,6 +349,17 @@ packages/
       index.ts           # Re-exports (OpenNestClient + types)
       client.ts          # OpenNestClient facade (parse/execute/runDsl/resume/cancel/getSession)
       client.test.ts     # vitest tests (e2e via MockDriver)
+  mcp/
+    src/
+      index.ts           # Public API — createOpenNestServer, createGuardedRuntime, types
+      cli.ts             # stdio entry point (bin): loads inventory, connects transport, clean shutdown
+      server.ts          # createOpenNestServer() — registers tools/resources, single-flight queue
+      tools.ts           # run_dsl / respond / cancel / get_session handlers
+      runtime.ts         # createGuardedRuntime() — pending guard, retry budget, executed scoping
+      result.ts          # ToolResult envelope, InteractionPrompt projection, deviceFailures
+      session.ts         # toSessionSummary() — sanitized session projection
+      schemas.ts         # zod input schemas for the tools
+      instructions.ts    # buildInstructions() — handshake instructions + DSL reference
 examples/
   playground/
     src/

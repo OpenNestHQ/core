@@ -4,3 +4,5 @@ dist
 .next
 .vscode
 .opencode
+.worktrees/
+.superpowers/
