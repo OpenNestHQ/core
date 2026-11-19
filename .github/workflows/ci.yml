@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 
 permissions:
@@ -43,3 +43,9 @@ jobs:
 
       - name: Test
         run: pnpm run test
+
+      - name: Check generated prompt is up to date
+        run: |
+          pnpm run build:prompt
+          git diff --exit-code -- packages/lang-core/example-prompt.md \
+            || (echo "::error::example-prompt.md is stale — run 'pnpm run build:prompt' and commit the result" && exit 1)
