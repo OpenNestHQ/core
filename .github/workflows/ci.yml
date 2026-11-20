@@ -16,6 +16,9 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Secrets can't be read in step `if:` conditions; expose presence here.
+      BOT_CLIENT_ID: ${{ secrets.OPENNEST_BOT_CLIENT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,8 +44,36 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      - name: Test
-        run: pnpm run test
+      - name: Test (with coverage)
+        run: pnpm run test:coverage
+
+      # Coverage reporting is best-effort: it never fails the job.
+      # The PR comment is posted by the OpenNest GitHub App, only for PRs from
+      # this repository when the App secrets are configured; otherwise the
+      # report goes to the Job Summary only.
+      - name: Create GitHub App token
+        id: app-token
+        if: >-
+          always() &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          env.BOT_CLIENT_ID != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ secrets.OPENNEST_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.OPENNEST_BOT_PRIVATE_KEY }}
+          permission-pull-requests: write
+
+      - name: Coverage report
+        if: always()
+        continue-on-error: true
+        uses: davelosert/vitest-coverage-report-action@74c2d9210b4fc44c84d8213f61d7ec99837b7aa0 # v2.13.2
+        with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          comment-on: ${{ steps.app-token.outputs.token && 'pr' || 'none' }}
+          vite-config-path: vitest.coverage.config.ts
+          file-coverage-mode: changes
 
       - name: Check generated prompt is up to date
         run: |
