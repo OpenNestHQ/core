@@ -6,3 +6,4 @@ dist
 .opencode
 .worktrees/
 .superpowers/
+*.tsbuildinfo

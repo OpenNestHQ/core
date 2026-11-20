@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 
 permissions:
@@ -43,3 +43,13 @@ jobs:
 
       - name: Test
         run: pnpm run test
+
+      - name: Check generated prompt is up to date
+        run: |
+          pnpm run build:prompt
+          if [ -n "$(git status --porcelain -- packages/lang-core/)" ]; then
+            git status --porcelain -- packages/lang-core/
+            git diff -- packages/lang-core/
+            echo "::error::Generated prompt is stale — run 'pnpm run build:prompt' and commit the result"
+            exit 1
+          fi
