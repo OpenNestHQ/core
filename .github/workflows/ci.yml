@@ -73,7 +73,9 @@ jobs:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           comment-on: ${{ steps.app-token.outputs.token && 'pr' || 'none' }}
           vite-config-path: vitest.coverage.config.ts
-          file-coverage-mode: changes
+          # Changed-files mode needs the PR number, which the action only
+          # resolves when commenting; without a token, list all files instead.
+          file-coverage-mode: ${{ steps.app-token.outputs.token && 'changes' || 'all' }}
 
       - name: Check generated prompt is up to date
         run: |
