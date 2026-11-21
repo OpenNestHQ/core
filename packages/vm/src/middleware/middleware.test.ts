@@ -2,7 +2,11 @@ import { describe, it, expect, vi } from 'vitest'
 import { parseHomeDSL } from '@opennest/lang-core'
 import { MockDriver } from '@opennest/devices'
 import { executeCommand, createSession } from '../index.js'
-import { runMiddlewarePipeline } from '../middleware/pipeline.js'
+import { Cause, Effect, Exit, Option } from 'effect'
+import {
+  runMiddlewarePipeline,
+  runMiddlewarePipelineEffect,
+} from '../middleware/pipeline.js'
 import { noopMiddleware } from '../middleware/noop.js'
 import { block, skip, pause } from '../middleware/outcomes.js'
 import {
@@ -522,5 +526,41 @@ describe('returned outcome helpers', () => {
 
     expect(result.status).toBe('awaiting_interaction')
     expect(result.interaction).toEqual(interaction)
+  })
+})
+
+describe('non-signal middleware errors', () => {
+  const err = new Error('kaboom')
+  const boom: Middleware = async () => {
+    throw err
+  }
+  Object.defineProperty(boom, 'name', { value: 'boom' })
+
+  it('runMiddlewarePipelineEffect fails with MiddlewareError carrying the thrown error', async () => {
+    const exit = await Effect.runPromiseExit(
+      runMiddlewarePipelineEffect(makeAction(), [boom], {
+        session: createSession(),
+        devices: [],
+      }),
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const failure = Cause.findErrorOption(exit.cause)
+      expect(Option.isSome(failure)).toBe(true)
+      if (Option.isSome(failure)) {
+        expect(failure.value._tag).toBe('MiddlewareError')
+        expect(failure.value.middlewareName).toBe('boom')
+        expect(failure.value.cause).toBe(err)
+      }
+    }
+  })
+
+  it('executeCommand rejects with the original middleware error instance', async () => {
+    await expect(
+      executeCommand(
+        { kind: 'run_program', program: parse('tv[salon].power = on') },
+        await ctx(undefined, [boom]),
+      ),
+    ).rejects.toBe(err)
   })
 })
