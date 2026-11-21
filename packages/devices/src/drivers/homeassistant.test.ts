@@ -3078,9 +3078,8 @@ describe('HADriver', () => {
 
     it('forwards runtime.signal to fetch on reads', async () => {
       const signals: Array<AbortSignal | null | undefined> = []
-      mockFetch((url, init) => {
+      mockFetch((_url, init) => {
         signals.push(init?.signal)
-        if (url.includes('/api/template')) return textResponse('on', 200)
         return jsonResponse({ state: 'on', attributes: {} })
       })
       const signal = new AbortController().signal
@@ -3090,14 +3089,38 @@ describe('HADriver', () => {
         programId: 'p',
         signal,
       })
-      await driver.getProperty('d1', 'label', templateConfig, {
-        programId: 'p',
-        signal,
-      })
 
-      expect(signals).toHaveLength(2)
-      expect(signals[0]).toBe(signal)
-      expect(signals[1]).toBe(signal)
+      expect(signals).toEqual([signal])
+    })
+
+    it('rejects an aborted template read without aborting the shared render', async () => {
+      let release: () => void = () => {}
+      const gate = new Promise<void>(resolve => {
+        release = resolve
+      })
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        expect(init?.signal).toBeUndefined()
+        await gate
+        return textResponse('on', 200)
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const first = new AbortController()
+
+      const driver = await initDriver()
+      const a = driver.getProperty('d1', 'label', templateConfig, {
+        programId: 'pa',
+        signal: first.signal,
+      })
+      const b = driver.getProperty('d1', 'label', templateConfig, {
+        programId: 'pb',
+      })
+      const aExpectation = expect(a).rejects.toThrow()
+      first.abort()
+      await aExpectation
+      release()
+
+      await expect(b).resolves.toBe('on')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
     })
 
     it('does not send a write whose signal is already aborted', async () => {

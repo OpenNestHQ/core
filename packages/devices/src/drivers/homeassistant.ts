@@ -620,8 +620,14 @@ export class HADriver implements DeviceDriver {
   ): Promise<string> {
     const key = templateCacheKey(template)
     const inFlight = this.templateInFlight.get(key)
-    if (inFlight) return inFlight
-    const pending = this.renderTemplateRemote(template, signal).finally(() => {
+    const shared = inFlight ?? this.startSharedRender(template, key)
+    return signal ? raceAbort(shared, signal) : shared
+  }
+
+  private startSharedRender(template: string, key: string): Promise<string> {
+    // The shared request is deliberately unsignalled: it serves every
+    // concurrent caller, so no single caller's abort may cancel it.
+    const pending = this.renderTemplateRemote(template).finally(() => {
       this.templateInFlight.delete(key)
     })
     this.templateInFlight.set(key, pending)
@@ -637,10 +643,7 @@ export class HADriver implements DeviceDriver {
     }
   }
 
-  private async renderTemplateRemote(
-    template: string,
-    signal?: AbortSignal,
-  ): Promise<string> {
+  private async renderTemplateRemote(template: string): Promise<string> {
     const res = await fetch(`${this.baseUrl}/api/template`, {
       method: 'POST',
       headers: {
@@ -648,7 +651,6 @@ export class HADriver implements DeviceDriver {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ template }),
-      ...(signal ? { signal } : {}),
     })
     if (!res.ok) {
       const body = await res.text()
@@ -704,6 +706,31 @@ function extractDomain(entityId: string): string {
 
 function eventVerificationStrategy(): VerificationStrategy {
   return { type: 'event', timeout: EVENT_VERIFY_TIMEOUT_MS }
+}
+
+// Rejects only this caller when its signal aborts; the shared promise keeps
+// running for the other callers.
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    promise.catch(() => {})
+    return Promise.reject(signal.reason ?? new Error('HA read aborted'))
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(signal.reason ?? new Error('HA read aborted'))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      value => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      error => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
 }
 
 function templateCacheKey(template: string): string {
