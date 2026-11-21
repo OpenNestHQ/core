@@ -175,8 +175,8 @@ function buildVerification(
 
 /**
  * Observes immediately, then reacts to driver notifications until the state
- * matches or the deadline passes. Subscriptions and the deadline timer belong
- * to a `Scope`, so they are released on completion and on interruption.
+ * matches or the deadline passes. Subscriptions belong to a `Scope`, so they
+ * are released on completion and on interruption.
  */
 function waitForStateEvent(
   device: Device,
@@ -193,9 +193,8 @@ function waitForStateEvent(
         return buildVerification('confirmed', expected, observed)
       }
 
-      const deadline = Date.now() + strategy.timeout
-      // Each notification (and the deadline) enqueues one "check" wake-up.
-      const wakeups = yield* Queue.unbounded<void>()
+      // Notifications are coalesced: one pending wake-up is enough to re-read.
+      const wakeups = yield* Queue.sliding<void>(1)
       const wake = () => void Queue.offerUnsafe(wakeups, undefined)
 
       let subscribed = 0
@@ -220,27 +219,31 @@ function waitForStateEvent(
         return buildVerification('mismatch', expected, observed)
       }
 
-      yield* Effect.forkScoped(
-        Effect.sleep(strategy.timeout).pipe(Effect.andThen(Effect.sync(wake))),
-      )
-      wake()
+      const reactToNotifications = Effect.gen(function* () {
+        for (;;) {
+          yield* Queue.take(wakeups)
+          const next = yield* observeStateEffect(
+            device,
+            properties,
+            runtime,
+          ).pipe(Effect.option)
+          if (Option.isNone(next)) return buildVerification('not_observable')
+          observed = next.value
+          if (matchesEffects(expected, observed)) {
+            return buildVerification('confirmed', expected, observed)
+          }
+        }
+      })
 
-      for (;;) {
-        yield* Queue.take(wakeups)
-        if (Date.now() >= deadline) {
-          return buildVerification('timeout', expected, observed)
-        }
-        const next = yield* observeStateEffect(
-          device,
-          properties,
-          runtime,
-        ).pipe(Effect.option)
-        if (Option.isNone(next)) return buildVerification('not_observable')
-        observed = next.value
-        if (matchesEffects(expected, observed)) {
-          return buildVerification('confirmed', expected, observed)
-        }
-      }
+      // The deadline races the reads: it wins even while a read is in flight
+      // (the loser is interrupted, which aborts the driver call).
+      const deadline = Effect.sleep(strategy.timeout).pipe(
+        Effect.map(() => buildVerification('timeout', expected, observed)),
+      )
+
+      // A notification may have arrived while the immediate observation ran.
+      wake()
+      return yield* Effect.raceFirst(reactToNotifications, deadline)
     }),
   )
 }

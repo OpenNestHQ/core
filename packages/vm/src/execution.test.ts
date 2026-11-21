@@ -400,6 +400,86 @@ describe('verifyStateEffect', () => {
   })
 })
 
+describe('verifyStateEffect event deadline', () => {
+  function makeNotifyingDevice(
+    getProperty: DeviceDriver['getProperty'],
+    listeners: Set<() => void>,
+  ): Device {
+    const driver: DeviceDriver = {
+      name: 'test',
+      async init() {},
+      async close() {},
+      getProperty,
+      async setProperty() {},
+      async executeAction() {},
+      subscribeProperty: (_id, _property, _config, onChange) => {
+        listeners.add(onChange)
+        return () => listeners.delete(onChange)
+      },
+    }
+    return {
+      id: 'light_salon',
+      type: 'light',
+      room: 'salon',
+      name: 'light_salon',
+      driver,
+      driverConfig: {},
+    }
+  }
+
+  it('event verification times out at the deadline even if a read hangs', async () => {
+    vi.useFakeTimers()
+    const listeners = new Set<() => void>()
+    let reads = 0
+    let hungSignal: AbortSignal | undefined
+    const dev = makeNotifyingDevice((_id, _property, _config, runtime) => {
+      if (reads++ === 0) return Promise.resolve(false)
+      hungSignal = runtime?.signal
+      return new Promise<unknown>(() => {})
+    }, listeners)
+
+    const promise = verifyState(
+      dev,
+      { power: true },
+      { type: 'event', timeout: 1000 },
+      { programId: 'p1' },
+    )
+    await vi.advanceTimersByTimeAsync(10)
+    for (const listener of listeners) listener()
+    await vi.advanceTimersByTimeAsync(1000)
+
+    const verification = await promise
+    expect(verification.status).toBe('timeout')
+    expect(hungSignal?.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('a burst of notifications does not delay the timeout', async () => {
+    vi.useFakeTimers()
+    const listeners = new Set<() => void>()
+    const dev = makeNotifyingDevice(async () => {
+      await new Promise(resolve => setTimeout(resolve, 10))
+      return false
+    }, listeners)
+
+    const promise = verifyState(
+      dev,
+      { power: true },
+      { type: 'event', timeout: 100 },
+      { programId: 'p1' },
+    )
+    await vi.advanceTimersByTimeAsync(10)
+    for (let i = 0; i < 50; i++) {
+      for (const listener of listeners) listener()
+    }
+    await vi.advanceTimersByTimeAsync(100)
+
+    const verification = await promise
+    expect(verification.status).toBe('timeout')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
 describe('backward compatibility', () => {
   it('keeps the low-level executeAction result unchanged', async () => {
     const driver = new TestDriver()
