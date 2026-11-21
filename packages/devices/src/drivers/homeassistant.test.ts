@@ -3057,4 +3057,94 @@ describe('HADriver', () => {
       }
     })
   })
+
+  describe('AbortSignal propagation', () => {
+    const switchConfig = {
+      properties: { power: { entity: 'switch.test' } },
+    }
+    const templateConfig = {
+      properties: {
+        label: { get: { kind: 'template', template: '{{ 1 }}' } },
+      },
+    }
+    const playConfig = {
+      actions: {
+        play: {
+          service: 'media_player.media_play',
+          target: { entity_id: 'media_player.test' },
+        },
+      },
+    }
+
+    it('forwards runtime.signal to fetch on reads', async () => {
+      const signals: Array<AbortSignal | null | undefined> = []
+      mockFetch((url, init) => {
+        signals.push(init?.signal)
+        if (url.includes('/api/template')) return textResponse('on', 200)
+        return jsonResponse({ state: 'on', attributes: {} })
+      })
+      const signal = new AbortController().signal
+
+      const driver = await initDriver()
+      await driver.getProperty('d1', 'power', switchConfig, {
+        programId: 'p',
+        signal,
+      })
+      await driver.getProperty('d1', 'label', templateConfig, {
+        programId: 'p',
+        signal,
+      })
+
+      expect(signals).toHaveLength(2)
+      expect(signals[0]).toBe(signal)
+      expect(signals[1]).toBe(signal)
+    })
+
+    it('does not send a write whose signal is already aborted', async () => {
+      const fetchMock = vi.fn(async () => jsonResponse([]))
+      vi.stubGlobal('fetch', fetchMock)
+      const controller = new AbortController()
+      controller.abort()
+      const runtime = { programId: 'p', signal: controller.signal }
+
+      const driver = await initDriver()
+      await expect(
+        driver.setProperty('d1', 'power', true, switchConfig, runtime),
+      ).rejects.toThrow('HA command aborted before sending')
+      await expect(
+        driver.executeAction('d1', 'play', {}, playConfig, runtime),
+      ).rejects.toThrow('HA command aborted before sending')
+
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('does not abort an in-flight write', async () => {
+      const controller = new AbortController()
+      let postInit: RequestInit | undefined
+      let release: () => void = () => {}
+      const gate = new Promise<void>(resolve => {
+        release = resolve
+      })
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (_url: string, init?: RequestInit) => {
+          postInit = init
+          await gate
+          return jsonResponse([])
+        }),
+      )
+
+      const driver = await initDriver()
+      const write = driver.setProperty('d1', 'power', true, switchConfig, {
+        programId: 'p',
+        signal: controller.signal,
+      })
+      await vi.waitFor(() => expect(postInit).toBeDefined())
+      controller.abort()
+      release()
+
+      await expect(write).resolves.toBeUndefined()
+      expect(postInit?.signal).toBeUndefined()
+    })
+  })
 })

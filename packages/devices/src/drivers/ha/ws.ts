@@ -263,7 +263,7 @@ export class HAWebSocketClient {
     domain: string,
     service: string,
     payload: Record<string, unknown> = {},
-    options: { returnResponse?: boolean } = {},
+    options: { returnResponse?: boolean; signal?: AbortSignal } = {},
   ): Promise<unknown> {
     const message: Record<string, unknown> = {
       ...payload,
@@ -274,39 +274,74 @@ export class HAWebSocketClient {
     if (options.returnResponse === true) {
       message['return_response'] = true
     }
-    return this.command(message)
+    return this.command(message, options.signal)
   }
 
-  private command(message: Record<string, unknown>): Promise<unknown> {
+  private command(
+    message: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     if (this.stopped) {
       return Promise.reject(
         this.fatalError ?? new Error('HA websocket client is closed'),
       )
     }
+    if (signal?.aborted) return Promise.reject(abortError())
     if (this.state === 'ready') {
-      return this.send(message)
+      return this.send(message, signal)
     }
     return new Promise((resolve, reject) => {
-      this.queue.push({
+      const onAbort = (): void => {
+        const index = this.queue.indexOf(queued)
+        if (index !== -1) this.queue.splice(index, 1)
+        reject(abortError())
+      }
+      const queued: QueuedCommand = {
         start: () => {
-          this.send(message).then(resolve, reject)
+          signal?.removeEventListener('abort', onAbort)
+          this.send(message, signal).then(resolve, reject)
         },
-        reject,
-      })
+        reject: error => {
+          signal?.removeEventListener('abort', onAbort)
+          reject(error)
+        },
+      }
+      this.queue.push(queued)
+      signal?.addEventListener('abort', onAbort, { once: true })
     })
   }
 
-  private send(message: Record<string, unknown>): Promise<unknown> {
+  private send(
+    message: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     const ws = this.ws
     if (!ws || this.state !== 'ready') {
       return Promise.reject(new Error('HA websocket is not connected'))
     }
+    if (signal?.aborted) return Promise.reject(abortError())
     const id = this.nextId++
     return new Promise((resolve, reject) => {
-      const pending: PendingCommand = { resolve, reject, timer: undefined }
+      const onAbort = (): void => {
+        this.pending.delete(id)
+        this.clearPendingTimer(pending)
+        reject(abortError())
+      }
+      const cleanup = (): void => signal?.removeEventListener('abort', onAbort)
+      const pending: PendingCommand = {
+        resolve: value => {
+          cleanup()
+          resolve(value)
+        },
+        reject: error => {
+          cleanup()
+          reject(error)
+        },
+        timer: undefined,
+      }
       pending.timer = setTimeout(() => {
         this.pending.delete(id)
-        reject(
+        pending.reject(
           new Error(
             `HA websocket command "${String(message['type'])}" timed out after ${this.commandTimeoutMs}ms`,
           ),
@@ -314,12 +349,15 @@ export class HAWebSocketClient {
       }, this.commandTimeoutMs)
       unrefTimer(pending.timer)
       this.pending.set(id, pending)
+      signal?.addEventListener('abort', onAbort, { once: true })
       try {
         ws.send(JSON.stringify({ ...message, id }))
       } catch (error) {
         this.pending.delete(id)
         this.clearPendingTimer(pending)
-        reject(error instanceof Error ? error : new Error(String(error)))
+        pending.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        )
       }
     })
   }
@@ -480,6 +518,10 @@ function commandError(message: HAIncomingMessage): Error {
   const code = message.error?.code ?? 'unknown_error'
   const detail = message.error?.message ?? 'no details'
   return new Error(`HA websocket command failed: ${code} — ${detail}`)
+}
+
+function abortError(): Error {
+  return new Error('HA websocket command aborted')
 }
 
 function sleep(ms: number): Promise<void> {

@@ -155,6 +155,7 @@ export class HADriver implements DeviceDriver {
           'script',
           deviceId,
           property,
+          runtime?.signal,
         )
         value = unwrapResponseVariable(result)
         break
@@ -168,6 +169,7 @@ export class HADriver implements DeviceDriver {
           'service_response',
           deviceId,
           property,
+          runtime?.signal,
         )
         break
       }
@@ -188,6 +190,7 @@ export class HADriver implements DeviceDriver {
     property: string,
     value: unknown,
     deviceConfig: Record<string, unknown>,
+    runtime?: DriverRuntimeContext,
   ): Promise<void> {
     const entry = this.propertyEntry(deviceConfig, property)
     if (!entry) return
@@ -247,7 +250,7 @@ export class HADriver implements DeviceDriver {
       }
     }
 
-    await this.callService(domain, service, payload)
+    await this.callService(domain, service, payload, runtime?.signal)
     this.invalidateEntityState(writtenEntities)
     this.stateCache.clear()
   }
@@ -257,6 +260,7 @@ export class HADriver implements DeviceDriver {
     action: string,
     args: Record<string, unknown>,
     deviceConfig: Record<string, unknown>,
+    runtime?: DriverRuntimeContext,
   ): Promise<void> {
     const actions = deviceConfig['actions'] as
       Record<string, HARawActionConfig> | undefined
@@ -307,7 +311,7 @@ export class HADriver implements DeviceDriver {
       }
     }
 
-    await this.callService(domain, service, payload)
+    await this.callService(domain, service, payload, runtime?.signal)
     this.invalidateEntityState(
       strategy.kind === 'service' ? targetEntityIds(strategy.target) : [],
     )
@@ -478,6 +482,7 @@ export class HADriver implements DeviceDriver {
     strategy: string,
     deviceId: string,
     property: string,
+    signal?: AbortSignal,
   ): Promise<unknown> {
     const client = this.wsClient
     if (!client || !client.isReady()) {
@@ -486,7 +491,10 @@ export class HADriver implements DeviceDriver {
       )
     }
     return client
-      .callService(domain, service, payload, { returnResponse: true })
+      .callService(domain, service, payload, {
+        returnResponse: true,
+        ...(signal ? { signal } : {}),
+      })
       .catch((error: Error) => {
         throw new Error(
           `HA get strategy "${strategy}" for device "${deviceId}", property "${property}" failed: ${error.message}`,
@@ -540,11 +548,11 @@ export class HADriver implements DeviceDriver {
       if (cached !== undefined) {
         return cached.state
       }
-      const state = await this.fetchStateRemote(entityId)
+      const state = await this.fetchStateRemote(entityId, runtime?.signal)
       this.stateCache.set(entityId, { at: Date.now(), state })
       return state
     }
-    return this.fetchStateRemote(entityId)
+    return this.fetchStateRemote(entityId, runtime?.signal)
   }
 
   private evictExpired(): void {
@@ -558,6 +566,7 @@ export class HADriver implements DeviceDriver {
 
   private async fetchStateRemote(
     entityId: string,
+    signal?: AbortSignal,
   ): Promise<Record<string, unknown>> {
     const url = `${this.baseUrl}/api/states/${entityId}`
     const res = await fetch(url, {
@@ -565,6 +574,7 @@ export class HADriver implements DeviceDriver {
         Authorization: `Bearer ${this.token}`,
         'Content-Type': 'application/json',
       },
+      ...(signal ? { signal } : {}),
     })
     if (!res.ok) {
       throw new Error(
@@ -594,7 +604,7 @@ export class HADriver implements DeviceDriver {
         return cached.value
       }
     }
-    const value = await this.renderTemplateShared(template)
+    const value = await this.renderTemplateShared(template, runtime?.signal)
     if (runtime?.programId) {
       this.templateCache.set(templateCacheKey(template), {
         at: Date.now(),
@@ -604,11 +614,14 @@ export class HADriver implements DeviceDriver {
     return value
   }
 
-  private renderTemplateShared(template: string): Promise<string> {
+  private renderTemplateShared(
+    template: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const key = templateCacheKey(template)
     const inFlight = this.templateInFlight.get(key)
     if (inFlight) return inFlight
-    const pending = this.renderTemplateRemote(template).finally(() => {
+    const pending = this.renderTemplateRemote(template, signal).finally(() => {
       this.templateInFlight.delete(key)
     })
     this.templateInFlight.set(key, pending)
@@ -624,7 +637,10 @@ export class HADriver implements DeviceDriver {
     }
   }
 
-  private async renderTemplateRemote(template: string): Promise<string> {
+  private async renderTemplateRemote(
+    template: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const res = await fetch(`${this.baseUrl}/api/template`, {
       method: 'POST',
       headers: {
@@ -632,6 +648,7 @@ export class HADriver implements DeviceDriver {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ template }),
+      ...(signal ? { signal } : {}),
     })
     if (!res.ok) {
       const body = await res.text()
@@ -648,7 +665,11 @@ export class HADriver implements DeviceDriver {
     domain: string,
     service: string,
     payload: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<void> {
+    // The signal is only honored before sending: once the POST is on the wire
+    // it must run to completion, so it is deliberately not passed to fetch.
+    if (signal?.aborted) throw new Error('HA command aborted before sending')
     const url = `${this.baseUrl}/api/services/${domain}/${service}`
     const res = await fetch(url, {
       method: 'POST',

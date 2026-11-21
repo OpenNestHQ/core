@@ -408,6 +408,65 @@ describe('HAWebSocketClient', () => {
     })
   })
 
+  describe('callService abort signal', () => {
+    it('rejects a queued callService when its signal aborts', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const client = new HAWebSocketClient({ url: URL, token: TOKEN })
+      const controller = new AbortController()
+      const result = client.callService(
+        'light',
+        'turn_on',
+        {},
+        { signal: controller.signal },
+      )
+      const expectation = expect(result).rejects.toThrow(
+        'HA websocket command aborted',
+      )
+      controller.abort()
+      await expectation
+
+      client.start()
+      const ws = MockWebSocket.last()
+      ws.serverOpen()
+      ws.serverMessage({ type: 'auth_required' })
+      ws.serverMessage({ type: 'auth_ok' })
+      await Promise.resolve()
+
+      expect(ws.sent.some(raw => raw.includes('call_service'))).toBe(false)
+      await client.close()
+    })
+
+    it('stops waiting for an in-flight command when its signal aborts', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client, ws } = await connectClient()
+      const controller = new AbortController()
+
+      const result = client.callService(
+        'light',
+        'turn_on',
+        {},
+        { signal: controller.signal },
+      )
+      expect(ws.lastSent()).toMatchObject({ id: 1, type: 'call_service' })
+
+      const expectation = expect(result).rejects.toThrow(
+        'HA websocket command aborted',
+      )
+      controller.abort()
+      await expectation
+
+      expect(() =>
+        ws.serverMessage({
+          id: 1,
+          type: 'result',
+          success: true,
+          result: null,
+        }),
+      ).not.toThrow()
+      await client.close()
+    })
+  })
+
   describe('subscriptions', () => {
     it('should ack the subscribe command and keep forwarding events', async () => {
       vi.stubGlobal('WebSocket', MockWebSocket)
