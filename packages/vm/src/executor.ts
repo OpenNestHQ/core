@@ -1,4 +1,4 @@
-import { Effect, Result } from 'effect'
+import { Cause, Effect, Result } from 'effect'
 import type { Value, SimpleCondition, ActionOutcome } from '@opennest/lang-core'
 import type { DriverRuntimeContext } from '@opennest/devices'
 import type { Device, StateChange } from './types.js'
@@ -160,12 +160,17 @@ function verifyOutcome(
       execution: { status: 'accepted' },
       verification,
     })),
-    Effect.catch(() =>
-      Effect.succeed<ActionOutcome>({
-        deviceId: device.id,
-        execution: { status: 'accepted' },
-        verification: { status: 'not_observable' },
-      }),
+    // Any verification failure (typed or defect, e.g. a driver throwing
+    // synchronously on subscribe) is not_observable, but an interruption must
+    // keep propagating so a cooperative stop still works.
+    Effect.catchCause(cause =>
+      Cause.hasInterrupts(cause)
+        ? Effect.interrupt
+        : Effect.succeed<ActionOutcome>({
+            deviceId: device.id,
+            execution: { status: 'accepted' },
+            verification: { status: 'not_observable' },
+          }),
     ),
   )
 }

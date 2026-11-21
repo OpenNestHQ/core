@@ -515,3 +515,30 @@ describe('backward compatibility', () => {
     expect(await driver.getProperty('light_salon', 'volume')).toBe(20)
   })
 })
+
+describe('ActionOutcome — verification defects', () => {
+  it('not_observable when the driver subscription throws synchronously', async () => {
+    class ThrowingSubscribeDriver extends TestDriver {
+      override strategy: VerificationStrategy = {
+        type: 'event',
+        timeout: 1000,
+      }
+      subscribeProperty(): never {
+        throw new Error('subscribe boom')
+      }
+    }
+    const driver = new ThrowingSubscribeDriver()
+    // The effect is not applied, so verification has to subscribe and wait.
+    const dev = await makeDevice(driver, TURN_ON)
+
+    const result = await executeCommand(
+      { kind: 'run_program', program: parse('light[salon].turnOn()') },
+      { devices: [dev] },
+    )
+
+    expect(result.status).toBe('success')
+    const outcome = result.executed[0]!.outcomes![0]!
+    expect(outcome.execution.status).toBe('accepted')
+    expect(outcome.verification.status).toBe('not_observable')
+  })
+})
