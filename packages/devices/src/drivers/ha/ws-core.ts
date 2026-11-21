@@ -138,7 +138,14 @@ export function makeHAWsCore(config: HAWsCoreConfig): HAWsCore {
 
   const markReady = (): void => {
     phase = 'ready'
-    for (const callback of readyCallbacks) callback()
+    // A consumer callback must not take the connection loop down with it.
+    for (const callback of readyCallbacks) {
+      try {
+        callback()
+      } catch (error) {
+        console.warn('HA websocket onReady callback failed:', error)
+      }
+    }
     Deferred.doneUnsafe(ready, Exit.void)
     for (const turn of queue.splice(0)) Deferred.doneUnsafe(turn, Exit.void)
   }
@@ -367,6 +374,14 @@ export function makeHAWsCore(config: HAWsCoreConfig): HAWsCore {
     }
   }).pipe(
     Effect.catchTag('HAWsAuthError', error => Effect.sync(() => stop(error))),
+    // Safety net: an unexpected defect must not leave the client looking
+    // ready with a dead loop; stop it so every waiter rejects instead.
+    Effect.catchDefect(defect =>
+      Effect.sync(() => {
+        console.warn('HA websocket connection loop crashed:', defect)
+        stop(new HAWsClosedError())
+      }),
+    ),
   )
 
   return {

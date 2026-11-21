@@ -888,6 +888,41 @@ describe('HAWebSocketClient', () => {
   })
 
   describe('lifecycle', () => {
+    it('keeps working when an onReady callback throws', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const client = new HAWebSocketClient({ url: URL, token: TOKEN })
+        const calls: string[] = []
+        client.onReady(() => {
+          calls.push('throwing')
+          throw new Error('callback failed')
+        })
+        client.onReady(() => {
+          calls.push('later')
+        })
+        const ready = client.whenReady()
+        const queued = client.callService('switch', 'turn_on', {})
+        client.start()
+
+        const ws = MockWebSocket.last()
+        ws.serverOpen()
+        ws.serverMessage({ type: 'auth_required' })
+        ws.serverMessage({ type: 'auth_ok' })
+
+        await expect(ready).resolves.toBeUndefined()
+        expect(calls).toEqual(['throwing', 'later'])
+        expect(client.isReady()).toBe(true)
+        expect(ws.lastSent()).toMatchObject({ id: 1, type: 'call_service' })
+        ws.serverMessage({ id: 1, type: 'result', success: true, result: 'ok' })
+        await expect(queued).resolves.toBe('ok')
+        expect(warn).toHaveBeenCalled()
+        await client.close()
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
     it('close() leaves no pending timer', async () => {
       vi.useFakeTimers()
       try {
