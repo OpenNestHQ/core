@@ -4,6 +4,7 @@ import { MockDriver } from '@opennest/devices'
 import { executeCommand, createSession } from '../index.js'
 import { runMiddlewarePipeline } from '../middleware/pipeline.js'
 import { noopMiddleware } from '../middleware/noop.js'
+import { block, skip, pause } from '../middleware/outcomes.js'
 import {
   BlockSignal,
   SkipSignal,
@@ -471,5 +472,55 @@ describe('VM with middleware', () => {
     )
 
     expect(result.status).toBe('error')
+  })
+})
+
+// ──── Returned outcome helpers ────
+
+describe('returned outcome helpers', () => {
+  it('returned block() produces the same VMResult error as a thrown BlockSignal', async () => {
+    const guard: Middleware = async () => block('nope')
+    Object.defineProperty(guard, 'name', { value: 'guard' })
+
+    const result = await executeCommand(
+      { kind: 'run_program', program: parse('tv[salon].power = on') },
+      await ctx(undefined, [guard]),
+    )
+
+    expect(result.status).toBe('error')
+    expect(result.errors[0]!.message).toBe(
+      'Blocked by middleware "guard": nope',
+    )
+  })
+
+  it('returned skip() skips the action', async () => {
+    const skipper: Middleware = async () => skip('not now')
+    const context = await ctx(undefined, [skipper])
+
+    const result = await executeCommand(
+      { kind: 'run_program', program: parse('tv[salon].power = on') },
+      context,
+    )
+
+    expect(result.status).toBe('success')
+    const tv = context.devices.find(d => d.id === 'tv_salon')!
+    expect(await tv.driver.getProperty('tv_salon', 'power')).toBe(false)
+  })
+
+  it('returned pause() suspends with the interaction', async () => {
+    const interaction = {
+      id: 'confirm-2',
+      type: 'confirmation' as const,
+      message: 'Proceed?',
+    }
+    const pauser: Middleware = async () => pause(interaction)
+
+    const result = await executeCommand(
+      { kind: 'run_program', program: parse('tv[salon].power = on') },
+      await ctx(undefined, [pauser]),
+    )
+
+    expect(result.status).toBe('awaiting_interaction')
+    expect(result.interaction).toEqual(interaction)
   })
 })

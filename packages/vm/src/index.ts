@@ -73,6 +73,7 @@ export { InteractionError } from './interactions/errors.js'
 export type { InteractionErrorCode } from './interactions/errors.js'
 
 export { noopMiddleware } from './middleware/noop.js'
+export { block, skip, pause } from './middleware/outcomes.js'
 export { createConfirmationMiddleware } from './middleware/confirmation.js'
 export type { ConfirmationMiddlewareConfig } from './middleware/confirmation.js'
 export {

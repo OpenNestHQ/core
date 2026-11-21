@@ -44,7 +44,10 @@ async function evaluateAt(
   }
 
   try {
-    const outcome = await middleware(ctx, next)
+    let outcome = await middleware(ctx, next)
+    if (outcome.kind === 'blocked' && outcome.middlewareName === '') {
+      outcome = { ...outcome, middlewareName: getMiddlewareName(middleware) }
+    }
     eventBus?.emit({
       kind: 'middleware:end',
       timestamp: Date.now(),
