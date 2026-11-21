@@ -1,3 +1,4 @@
+import { Effect } from 'effect'
 import type {
   Program,
   Statement,
@@ -34,126 +35,174 @@ import type {
 } from '@opennest/devices'
 import type { Middleware, PlannedAction } from './middleware/types.js'
 import type { VMEventBus } from './trace/event-bus.js'
+import type { DriverError, VMInfraError } from './effect/errors.js'
 import { createSession } from './state.js'
 import { resolveDevices } from './resolver.js'
 import { validateProgram } from './validate.js'
 import { createInteraction } from './interactions/registry.js'
-import { executePlannedAction, evaluateCondition } from './executor.js'
+import { executePlannedActionEffect, evaluateCondition } from './executor.js'
 import type { ExecutedAction } from './executor.js'
-import { runMiddlewarePipeline } from './middleware/pipeline.js'
+import { runMiddlewarePipelineEffect } from './middleware/pipeline.js'
+import { readProperty } from './effect/driver.js'
+import { runPromiseRethrowingOriginal } from './effect/run.js'
 
-export async function interpretProgram(
+/** Everything a statement needs to run; built once per program run. */
+interface InterpreterEnv {
+  readonly devices: Device[]
+  readonly session: Session
+  readonly middleware: Middleware[] | undefined
+  readonly eventBus: VMEventBus | undefined
+  readonly runtime: DriverRuntimeContext
+}
+
+type InterpretResult =
+  | { kind: 'success' }
+  | {
+      kind: 'awaiting_interaction'
+      interaction: UserInteraction
+      pendingContext: unknown
+    }
+  | { kind: 'error'; errors: VMError[] }
+
+type AwaitingInteraction = Extract<
+  InterpretResult,
+  { kind: 'awaiting_interaction' }
+>
+
+/**
+ * Runs a program. Business outcomes (validation errors, ambiguity, blocked
+ * actions, driver write failures…) are part of the `VMResult`; only
+ * infrastructure failures that abort the run (an `@if` condition read, a
+ * middleware throwing a non-signal) are in the error channel.
+ */
+export function interpretProgramEffect(
+  program: Program,
+  devices: Device[],
+  existingSession?: Session,
+  middleware?: Middleware[],
+  eventBus?: VMEventBus,
+): Effect.Effect<VMResult, VMInfraError> {
+  return Effect.gen(function* () {
+    const session = existingSession ?? createSession()
+    const isFresh = !existingSession || existingSession.cursor === 0
+
+    if (isFresh) {
+      const validationErrors = validateProgram(program, devices, session)
+      if (validationErrors.length > 0) {
+        return rejectInvalidProgram(session, validationErrors, eventBus)
+      }
+    }
+
+    const env: InterpreterEnv = {
+      devices,
+      session,
+      middleware,
+      eventBus,
+      runtime: { programId: session.programId },
+    }
+
+    eventBus?.emit({ kind: 'program:begin', timestamp: Date.now() })
+    const run = yield* runStatements(program, env)
+    return finishProgram(run, env)
+  })
+}
+
+/** Promise façade of {@link interpretProgramEffect}; rejects with the original error. */
+export function interpretProgram(
   program: Program,
   devices: Device[],
   existingSession?: Session,
   middleware?: Middleware[],
   eventBus?: VMEventBus,
 ): Promise<VMResult> {
-  const session = existingSession ?? createSession()
-  const isFresh = !existingSession || existingSession.cursor === 0
-  const runtime: DriverRuntimeContext = { programId: session.programId }
-
-  if (isFresh) {
-    const validationErrors = validateProgram(program, devices, session)
-    if (validationErrors.length > 0) {
-      eventBus?.emit({
-        kind: 'program:begin',
-        timestamp: Date.now(),
-      })
-      eventBus?.emit({
-        kind: 'program:end',
-        timestamp: Date.now(),
-        status: 'failed',
-        errorCount: validationErrors.length,
-      })
-      return {
-        status: 'error',
-        session,
-        executed: [],
-        interaction: null,
-        errors: validationErrors,
-      }
-    }
-  }
-
-  eventBus?.emit({
-    kind: 'program:begin',
-    timestamp: Date.now(),
-  })
-
-  const errors: VMError[] = []
-  let awaiting = false
-  let interactionResult: UserInteraction | null = null
-
-  for (let i = session.cursor; i < program.statements.length; i++) {
-    const statement = program.statements[i]!
-
-    eventBus?.emit({
-      kind: 'statement:begin',
-      timestamp: Date.now(),
-      index: i,
-      statementKind: statement.kind,
-    })
-
-    const result = await interpretStatement(
-      statement,
+  return runPromiseRethrowingOriginal(
+    interpretProgramEffect(
+      program,
       devices,
-      session,
+      existingSession,
       middleware,
       eventBus,
-      runtime,
-    )
+    ),
+  )
+}
 
-    if (result.kind === 'awaiting_interaction') {
-      eventBus?.emit({
-        kind: 'statement:end',
-        timestamp: Date.now(),
-        status: 'waiting',
-      })
-      awaiting = true
-      interactionResult = result.interaction
-      session.pendingInteraction = {
-        id: result.interaction.id,
-        type: result.interaction.type,
-        context: result.pendingContext,
+function rejectInvalidProgram(
+  session: Session,
+  validationErrors: VMError[],
+  eventBus: VMEventBus | undefined,
+): VMResult {
+  eventBus?.emit({ kind: 'program:begin', timestamp: Date.now() })
+  eventBus?.emit({
+    kind: 'program:end',
+    timestamp: Date.now(),
+    status: 'failed',
+    errorCount: validationErrors.length,
+  })
+  return {
+    status: 'error',
+    session,
+    executed: [],
+    interaction: null,
+    errors: validationErrors,
+  }
+}
+
+interface StatementsRun {
+  errors: VMError[]
+  /** Set when a statement suspended the run for a user interaction. */
+  interaction: UserInteraction | null
+}
+
+/**
+ * The top-level statement loop, from `session.cursor` on. A failing statement
+ * does not stop the loop; an interaction suspends it and records where to
+ * resume.
+ */
+function runStatements(
+  program: Program,
+  env: InterpreterEnv,
+): Effect.Effect<StatementsRun, VMInfraError> {
+  return Effect.gen(function* () {
+    const { session } = env
+    const errors: VMError[] = []
+
+    for (let i = session.cursor; i < program.statements.length; i++) {
+      const result = yield* runTracedStatement(program.statements[i]!, i, env)
+
+      if (result.kind === 'awaiting_interaction') {
+        suspendProgram(session, program, i, result)
+        return { errors, interaction: result.interaction }
       }
-      session._pendingProgram = program
-      session.cursor = i
-      break
+
+      if (result.kind === 'error') errors.push(...result.errors)
+
+      session.resolvedIds = {}
+      session.cursor = i + 1
     }
 
-    if (result.kind === 'error') {
-      eventBus?.emit({
-        kind: 'statement:end',
-        timestamp: Date.now(),
-        status: 'failed',
-        errors: result.errors,
-      })
-      errors.push(...result.errors)
-    } else {
-      const lastEntry = session.history[session.history.length - 1]
-      const resolvedCount = lastEntry?.resolvedDevices.length ?? 0
-      const changeCount = lastEntry?.changes.length ?? 0
-      eventBus?.emit({
-        kind: 'statement:end',
-        timestamp: Date.now(),
-        status: 'success',
-        resolvedDeviceCount: resolvedCount,
-        changeCount,
-      })
-    }
+    return { errors, interaction: null }
+  })
+}
 
-    session.resolvedIds = {}
-
-    session.cursor = i + 1
+function suspendProgram(
+  session: Session,
+  program: Program,
+  index: number,
+  awaiting: AwaitingInteraction,
+): void {
+  session.pendingInteraction = {
+    id: awaiting.interaction.id,
+    type: awaiting.interaction.type,
+    context: awaiting.pendingContext,
   }
+  session._pendingProgram = program
+  session.cursor = index
+}
 
-  if (!awaiting) {
-    session.cursor = 0
-    delete session._pendingProgram
-  }
+function finishProgram(run: StatementsRun, env: InterpreterEnv): VMResult {
+  const { session, eventBus } = env
 
-  if (awaiting) {
+  if (run.interaction !== null) {
     eventBus?.emit({
       kind: 'program:end',
       timestamp: Date.now(),
@@ -163,24 +212,27 @@ export async function interpretProgram(
       status: 'awaiting_interaction',
       session,
       executed: session.history,
-      interaction: interactionResult,
-      errors,
+      interaction: run.interaction,
+      errors: run.errors,
     }
   }
 
-  if (errors.length > 0) {
+  session.cursor = 0
+  delete session._pendingProgram
+
+  if (run.errors.length > 0) {
     eventBus?.emit({
       kind: 'program:end',
       timestamp: Date.now(),
       status: 'failed',
-      errorCount: errors.length,
+      errorCount: run.errors.length,
     })
     return {
       status: 'error',
       session,
       executed: session.history,
       interaction: null,
-      errors,
+      errors: run.errors,
     }
   }
 
@@ -198,76 +250,84 @@ export async function interpretProgram(
   }
 }
 
-type InterpretResult =
-  | { kind: 'success' }
-  | {
-      kind: 'awaiting_interaction'
-      interaction: UserInteraction
-      pendingContext: unknown
-    }
-  | { kind: 'error'; errors: VMError[] }
-
-async function interpretStatement(
+/** Runs one statement between its `statement:begin` and `statement:end` events. */
+function runTracedStatement(
   statement: Statement,
-  devices: Device[],
-  session: Session,
-  middleware: Middleware[] | undefined,
-  eventBus: VMEventBus | undefined,
-  runtime: DriverRuntimeContext,
-): Promise<InterpretResult> {
-  switch (statement.kind) {
-    case 'assignment':
-      return interpretAssignment(
-        statement,
-        devices,
-        session,
-        middleware,
-        eventBus,
-        runtime,
-      )
-    case 'query':
-      return interpretQuery(
-        statement,
-        devices,
-        session,
-        middleware,
-        eventBus,
-        runtime,
-      )
-    case 'increment':
-      return interpretIncrement(
-        statement,
-        devices,
-        session,
-        middleware,
-        eventBus,
-        runtime,
-      )
-    case 'action':
-      return interpretAction(
-        statement,
-        devices,
-        session,
-        middleware,
-        eventBus,
-        runtime,
-      )
-    case 'variable_assignment':
-      return interpretVariableAssignment(statement, devices, session, eventBus)
-    case 'arg_field_assignment':
-      return interpretArgFieldAssignment(statement, session)
-    case 'arg_bundle_assignment':
-      return interpretArgBundleAssignment(statement, session)
-    case 'if':
-      return interpretIfStatement(
-        statement,
-        devices,
-        session,
-        middleware,
-        eventBus,
-        runtime,
-      )
-  }
+  index: number,
+  env: InterpreterEnv,
+): Effect.Effect<InterpretResult, VMInfraError> {
+  return Effect.gen(function* () {
+    const { eventBus, session } = env
+    eventBus?.emit({
+      kind: 'statement:begin',
+      timestamp: Date.now(),
+      index,
+      statementKind: statement.kind,
+    })
+
+    const result = yield* interpretStatement(statement, env)
+
+    switch (result.kind) {
+      case 'awaiting_interaction':
+        eventBus?.emit({
+          kind: 'statement:end',
+          timestamp: Date.now(),
+          status: 'waiting',
+        })
+        break
+      case 'error':
+        eventBus?.emit({
+          kind: 'statement:end',
+          timestamp: Date.now(),
+          status: 'failed',
+          errors: result.errors,
+        })
+        break
+      case 'success': {
+        const lastEntry = session.history[session.history.length - 1]
+        eventBus?.emit({
+          kind: 'statement:end',
+          timestamp: Date.now(),
+          status: 'success',
+          resolvedDeviceCount: lastEntry?.resolvedDevices.length ?? 0,
+          changeCount: lastEntry?.changes.length ?? 0,
+        })
+        break
+      }
+    }
+
+    return result
+  })
+}
+
+function interpretStatement(
+  statement: Statement,
+  env: InterpreterEnv,
+): Effect.Effect<InterpretResult, VMInfraError> {
+  return Effect.suspend(() => {
+    switch (statement.kind) {
+      case 'assignment':
+        return interpretAssignment(statement, env)
+      case 'query':
+        return interpretQuery(statement, env)
+      case 'increment':
+        return interpretIncrement(statement, env)
+      case 'action':
+        return interpretAction(statement, env)
+      case 'variable_assignment':
+        return Effect.succeed(interpretVariableAssignment(statement, env))
+      case 'arg_field_assignment':
+        return Effect.succeed(
+          interpretArgFieldAssignment(statement, env.session),
+        )
+      case 'arg_bundle_assignment':
+        return Effect.succeed(
+          interpretArgBundleAssignment(statement, env.session),
+        )
+      case 'if':
+        return interpretIfStatement(statement, env)
+    }
+  })
 }
 
 function awaitDeviceSelection(
@@ -308,35 +368,33 @@ function extractDeviceContext(
 
 type DeviceStatement = Assignment | Query | Increment | Action
 
-interface DeviceStatementSpec {
-  intentKind: ResolutionIntent['kind']
-  emptyMessage: string
-  buildActions: (devices: Device[], name: string) => PlannedAction[]
-}
-
-async function interpretDeviceStatement(
+/**
+ * Resolves the devices a statement targets. Returns the resolution when the
+ * statement can proceed, or the result that ends it (ambiguity, no match).
+ */
+function resolveStatementDevices(
   stmt: DeviceStatement,
-  spec: DeviceStatementSpec,
-  devices: Device[],
-  session: Session,
-  middleware: Middleware[] | undefined,
-  eventBus: VMEventBus | undefined,
-  runtime: DriverRuntimeContext,
-): Promise<InterpretResult> {
-  const name = lastPropertyName(stmt.path)
-  const intent: ResolutionIntent = { kind: spec.intentKind, name }
-  const resolutionResult = resolveDevices(stmt.path, devices, session, intent)
+  intent: ResolutionIntent,
+  emptyMessage: string,
+  env: InterpreterEnv,
+): ResolutionResult | InterpretResult {
+  const resolutionResult = resolveDevices(
+    stmt.path,
+    env.devices,
+    env.session,
+    intent,
+  )
 
   if (resolutionResult.ambiguous) {
     const { deviceType, variableName } = extractDeviceContext(
       stmt.path,
-      session,
+      env.session,
     )
     return awaitDeviceSelection(
       resolutionResult,
       deviceType,
       variableName,
-      eventBus,
+      env.eventBus,
     )
   }
 
@@ -346,41 +404,53 @@ async function interpretDeviceStatement(
       errors: [
         {
           statement: stmt,
-          message: resolutionResult.noMatchDescription ?? spec.emptyMessage,
+          message: resolutionResult.noMatchDescription ?? emptyMessage,
         },
       ],
     }
   }
 
-  const actions: PlannedAction[] = spec.buildActions(
-    resolutionResult.devices,
-    name,
-  )
-
-  return applyMiddlewareAndFinish(
-    actions,
-    middleware,
-    session,
-    devices,
-    stmt,
-    resolutionResult,
-    runtime,
-    eventBus,
-  )
+  return resolutionResult
 }
 
-async function interpretAssignment(
+function isInterpretResult(
+  value: ResolutionResult | InterpretResult,
+): value is InterpretResult {
+  return 'kind' in value
+}
+
+interface PropertyStatementSpec {
+  emptyMessage: string
+  buildActions: (devices: Device[], name: string) => PlannedAction[]
+}
+
+function interpretPropertyStatement(
+  stmt: Assignment | Query | Increment,
+  spec: PropertyStatementSpec,
+  env: InterpreterEnv,
+): Effect.Effect<InterpretResult, VMInfraError> {
+  return Effect.suspend(() => {
+    const name = lastPropertyName(stmt.path)
+    const resolution = resolveStatementDevices(
+      stmt,
+      { kind: 'property', name },
+      spec.emptyMessage,
+      env,
+    )
+    if (isInterpretResult(resolution)) return Effect.succeed(resolution)
+
+    const actions = spec.buildActions(resolution.devices, name)
+    return applyMiddlewareAndFinish(actions, stmt, resolution, env)
+  })
+}
+
+function interpretAssignment(
   stmt: Assignment,
-  devices: Device[],
-  session: Session,
-  middleware: Middleware[] | undefined,
-  eventBus: VMEventBus | undefined,
-  runtime: DriverRuntimeContext,
-): Promise<InterpretResult> {
-  return interpretDeviceStatement(
+  env: InterpreterEnv,
+): Effect.Effect<InterpretResult, VMInfraError> {
+  return interpretPropertyStatement(
     stmt,
     {
-      intentKind: 'property',
       emptyMessage: 'No devices found for path',
       buildActions: (devices, name) =>
         devices.map(device => ({
@@ -390,26 +460,17 @@ async function interpretAssignment(
           value: stmt.value,
         })),
     },
-    devices,
-    session,
-    middleware,
-    eventBus,
-    runtime,
+    env,
   )
 }
 
-async function interpretQuery(
+function interpretQuery(
   stmt: Query,
-  devices: Device[],
-  session: Session,
-  middleware: Middleware[] | undefined,
-  eventBus: VMEventBus | undefined,
-  runtime: DriverRuntimeContext,
-): Promise<InterpretResult> {
-  return interpretDeviceStatement(
+  env: InterpreterEnv,
+): Effect.Effect<InterpretResult, VMInfraError> {
+  return interpretPropertyStatement(
     stmt,
     {
-      intentKind: 'property',
       emptyMessage: 'No devices found for query',
       buildActions: (devices, name) =>
         devices.map(device => ({
@@ -418,26 +479,17 @@ async function interpretQuery(
           property: name,
         })),
     },
-    devices,
-    session,
-    middleware,
-    eventBus,
-    runtime,
+    env,
   )
 }
 
-async function interpretIncrement(
+function interpretIncrement(
   stmt: Increment,
-  devices: Device[],
-  session: Session,
-  middleware: Middleware[] | undefined,
-  eventBus: VMEventBus | undefined,
-  runtime: DriverRuntimeContext,
-): Promise<InterpretResult> {
-  return interpretDeviceStatement(
+  env: InterpreterEnv,
+): Effect.Effect<InterpretResult, VMInfraError> {
+  return interpretPropertyStatement(
     stmt,
     {
-      intentKind: 'property',
       emptyMessage: 'No devices found for increment',
       buildActions: (devices, name) =>
         devices.map(device => ({
@@ -447,55 +499,54 @@ async function interpretIncrement(
           value: stmt.value,
         })),
     },
-    devices,
-    session,
-    middleware,
-    eventBus,
-    runtime,
+    env,
   )
 }
 
-async function interpretAction(
+function interpretAction(
   stmt: Action,
-  devices: Device[],
-  session: Session,
-  middleware: Middleware[] | undefined,
+  env: InterpreterEnv,
+): Effect.Effect<InterpretResult, VMInfraError> {
+  return Effect.suspend(() => {
+    const method = lastPropertyName(stmt.path)
+    const resolution = resolveStatementDevices(
+      stmt,
+      { kind: 'action', name: method },
+      'No devices found for action',
+      env,
+    )
+    if (isInterpretResult(resolution)) return Effect.succeed(resolution)
+
+    const effectiveArgs = materializeArgs(stmt, env.session)
+    const awaitingParameters = awaitMissingParameters(
+      stmt,
+      method,
+      resolution.devices[0]!,
+      effectiveArgs,
+      env.eventBus,
+    )
+    if (awaitingParameters) return Effect.succeed(awaitingParameters)
+
+    const hasArgs = Object.keys(effectiveArgs).length > 0
+    const actions: PlannedAction[] = resolution.devices.map(d => ({
+      kind: 'invoke_action' as const,
+      device: d,
+      method,
+      ...(hasArgs ? { args: effectiveArgs } : {}),
+    }))
+
+    return applyMiddlewareAndFinish(actions, stmt, resolution, env)
+  })
+}
+
+/** Suspends for an `action_parameter` interaction when required arguments are missing. */
+function awaitMissingParameters(
+  stmt: Action,
+  method: string,
+  device: Device,
+  effectiveArgs: Record<string, Value>,
   eventBus: VMEventBus | undefined,
-  runtime: DriverRuntimeContext,
-): Promise<InterpretResult> {
-  const method = lastPropertyName(stmt.path)
-  const intent: ResolutionIntent = { kind: 'action', name: method }
-  const resolutionResult = resolveDevices(stmt.path, devices, session, intent)
-
-  if (resolutionResult.ambiguous) {
-    const { deviceType, variableName } = extractDeviceContext(
-      stmt.path,
-      session,
-    )
-    return awaitDeviceSelection(
-      resolutionResult,
-      deviceType,
-      variableName,
-      eventBus,
-    )
-  }
-
-  if (resolutionResult.devices.length === 0) {
-    return {
-      kind: 'error',
-      errors: [
-        {
-          statement: stmt,
-          message:
-            resolutionResult.noMatchDescription ??
-            'No devices found for action',
-        },
-      ],
-    }
-  }
-
-  const effectiveArgs = materializeArgs(stmt, session)
-  const device = resolutionResult.devices[0]!
+): AwaitingInteraction | undefined {
   const missing: MissingParameter[] = getActionParameters(device, method)
     .filter(p => p.required && !(p.name in effectiveArgs))
     .map(p => ({
@@ -504,41 +555,22 @@ async function interpretAction(
       ...(p.values ? { values: p.values } : {}),
     }))
 
-  if (missing.length > 0) {
-    const ctx: ActionParameterContext = {
-      stmt,
-      method,
-      deviceName: device.name,
-      missing,
-      ...(stmt.argBundle?.name !== undefined
-        ? { bundleName: stmt.argBundle.name }
-        : {}),
-    }
-    return {
-      kind: 'awaiting_interaction',
-      interaction: createInteraction('action_parameter', ctx, eventBus),
-      pendingContext: ctx,
-    }
-  }
+  if (missing.length === 0) return undefined
 
-  const hasArgs = Object.keys(effectiveArgs).length > 0
-  const actions: PlannedAction[] = resolutionResult.devices.map(d => ({
-    kind: 'invoke_action' as const,
-    device: d,
-    method,
-    ...(hasArgs ? { args: effectiveArgs } : {}),
-  }))
-
-  return applyMiddlewareAndFinish(
-    actions,
-    middleware,
-    session,
-    devices,
+  const ctx: ActionParameterContext = {
     stmt,
-    resolutionResult,
-    runtime,
-    eventBus,
-  )
+    method,
+    deviceName: device.name,
+    missing,
+    ...(stmt.argBundle?.name !== undefined
+      ? { bundleName: stmt.argBundle.name }
+      : {}),
+  }
+  return {
+    kind: 'awaiting_interaction',
+    interaction: createInteraction('action_parameter', ctx, eventBus),
+    pendingContext: ctx,
+  }
 }
 
 function materializeArgs(
@@ -561,120 +593,166 @@ function getActionParameters(
   return actions[method]?.parameters ?? []
 }
 
-async function applyMiddlewareAndFinish(
+/**
+ * Executes a batch of planned actions concurrently (all `@all` targets at
+ * once, like `Promise.all`). Never fails: driver errors become outcomes.
+ */
+function executeBatch(
   actions: PlannedAction[],
-  middleware: Middleware[] | undefined,
-  session: Session,
-  devices: Device[],
+  env: InterpreterEnv,
+): Effect.Effect<ExecutedAction[]> {
+  return Effect.forEach(
+    actions,
+    action => executePlannedActionEffect(action, env.runtime, env.eventBus),
+    { concurrency: 'unbounded' },
+  )
+}
+
+type Approval =
+  | { kind: 'approved'; actions: PlannedAction[] }
+  | { kind: 'stopped'; result: InterpretResult }
+
+/**
+ * Runs each planned action through the middleware chain, in order. Stops at
+ * the first block or pause; skipped actions are dropped.
+ */
+function approveActions(
+  actions: PlannedAction[],
+  middleware: Middleware[],
+  statement: Statement,
+  env: InterpreterEnv,
+): Effect.Effect<Approval, VMInfraError> {
+  return Effect.gen(function* () {
+    const { eventBus } = env
+    const pipelineEnv = { session: env.session, devices: env.devices }
+    const approved: PlannedAction[] = []
+
+    for (const action of actions) {
+      const outcome = yield* runMiddlewarePipelineEffect(
+        action,
+        middleware,
+        pipelineEnv,
+        eventBus,
+      )
+
+      switch (outcome.kind) {
+        case 'execute':
+          approved.push(...outcome.actions)
+          break
+
+        case 'skipped':
+          break
+
+        case 'blocked':
+          return {
+            kind: 'stopped',
+            result: {
+              kind: 'error',
+              errors: [
+                {
+                  statement,
+                  message: `Blocked by middleware "${outcome.middlewareName}": ${outcome.reason}`,
+                },
+              ],
+            },
+          } satisfies Approval
+
+        case 'paused':
+          eventBus?.emit({
+            kind: 'handler:begin',
+            timestamp: Date.now(),
+            name: outcome.interaction.type,
+          })
+          eventBus?.emit({
+            kind: 'handler:end',
+            timestamp: Date.now(),
+            status: 'waiting',
+          })
+          return {
+            kind: 'stopped',
+            result: {
+              kind: 'awaiting_interaction',
+              interaction: outcome.interaction,
+              pendingContext: outcome.context ?? null,
+            },
+          } satisfies Approval
+      }
+    }
+
+    return { kind: 'approved', actions: approved } satisfies Approval
+  })
+}
+
+function applyMiddlewareAndFinish(
+  actions: PlannedAction[],
   statement: Statement,
   resolutionResult: ResolutionResult,
-  runtime: DriverRuntimeContext,
-  eventBus?: VMEventBus,
-): Promise<InterpretResult> {
-  if (!middleware || middleware.length === 0) {
-    const results = await Promise.all(
-      actions.map(action => executePlannedAction(action, runtime, eventBus)),
+  env: InterpreterEnv,
+): Effect.Effect<InterpretResult, VMInfraError> {
+  return Effect.gen(function* () {
+    const { session, middleware } = env
+    const filter = resolutionResult.filter
+      ? { filter: resolutionResult.filter }
+      : {}
+
+    if (!middleware || middleware.length === 0) {
+      const { changes, outcomes } = splitExecuted(
+        yield* executeBatch(actions, env),
+      )
+
+      session.history.push({
+        statement,
+        resolvedDevices: resolutionResult.devices,
+        changes,
+        ...(outcomes.length > 0 ? { outcomes } : {}),
+        ...filter,
+      })
+
+      if (resolutionResult.devices[0]) {
+        session.it = resolutionResult.devices[0]
+      }
+
+      return { kind: 'success' } satisfies InterpretResult
+    }
+
+    const approval = yield* approveActions(actions, middleware, statement, env)
+    if (approval.kind === 'stopped') return approval.result
+    const approved = approval.actions
+
+    if (approved.length === 0) {
+      session.history.push({
+        statement,
+        resolvedDevices: resolutionResult.devices,
+        changes: [],
+        ...filter,
+      })
+
+      return { kind: 'success' } satisfies InterpretResult
+    }
+
+    const { changes, outcomes } = splitExecuted(
+      yield* executeBatch(approved, env),
     )
-    const { changes, outcomes } = splitExecuted(results)
+
+    const resolvedIds = new Set(approved.map(a => a.device.id))
+    const executedDevices = resolutionResult.devices.filter(d =>
+      resolvedIds.has(d.id),
+    )
 
     session.history.push({
       statement,
-      resolvedDevices: resolutionResult.devices,
+      resolvedDevices: executedDevices,
       changes,
       ...(outcomes.length > 0 ? { outcomes } : {}),
-      ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
+      ...filter,
     })
 
-    if (resolutionResult.devices[0]) {
-      session.it = resolutionResult.devices[0]
+    if (executedDevices[0]) {
+      session.it = executedDevices[0]
     }
 
-    return { kind: 'success' }
-  }
-
-  const env = { session, devices }
-  const approved: PlannedAction[] = []
-
-  for (const action of actions) {
-    const outcome = await runMiddlewarePipeline(
-      action,
-      middleware,
-      env,
-      eventBus,
-    )
-
-    switch (outcome.kind) {
-      case 'execute':
-        approved.push(...outcome.actions)
-        break
-
-      case 'blocked':
-        return {
-          kind: 'error',
-          errors: [
-            {
-              statement,
-              message: `Blocked by middleware "${outcome.middlewareName}": ${outcome.reason}`,
-            },
-          ],
-        }
-
-      case 'skipped':
-        continue
-
-      case 'paused':
-        eventBus?.emit({
-          kind: 'handler:begin',
-          timestamp: Date.now(),
-          name: outcome.interaction.type,
-        })
-        eventBus?.emit({
-          kind: 'handler:end',
-          timestamp: Date.now(),
-          status: 'waiting',
-        })
-        return {
-          kind: 'awaiting_interaction',
-          interaction: outcome.interaction,
-          pendingContext: outcome.context ?? null,
-        }
-    }
-  }
-
-  if (approved.length === 0) {
-    session.history.push({
-      statement,
-      resolvedDevices: resolutionResult.devices,
-      changes: [],
-      ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
-    })
-
-    return { kind: 'success' }
-  }
-
-  const results = await Promise.all(
-    approved.map(action => executePlannedAction(action, runtime, eventBus)),
-  )
-  const { changes, outcomes } = splitExecuted(results)
-
-  const resolvedIds = new Set(approved.map(a => a.device.id))
-  const executedDevices = resolutionResult.devices.filter(d =>
-    resolvedIds.has(d.id),
-  )
-
-  session.history.push({
-    statement,
-    resolvedDevices: executedDevices,
-    changes,
-    ...(outcomes.length > 0 ? { outcomes } : {}),
-    ...(resolutionResult.filter ? { filter: resolutionResult.filter } : {}),
+    return { kind: 'success' } satisfies InterpretResult
   })
-
-  if (executedDevices[0]) {
-    session.it = executedDevices[0]
-  }
-
-  return { kind: 'success' }
 }
 
 function splitExecuted(results: ExecutedAction[]): {
@@ -690,12 +768,12 @@ function splitExecuted(results: ExecutedAction[]): {
   return { changes, outcomes }
 }
 
-async function interpretVariableAssignment(
+function interpretVariableAssignment(
   stmt: VariableAssignment,
-  devices: Device[],
-  session: Session,
-  eventBus?: VMEventBus,
-): Promise<InterpretResult> {
+  env: InterpreterEnv,
+): InterpretResult {
+  const { session } = env
+
   if (stmt.value.kind === 'device_ref') {
     session.variables[stmt.name] = stmt.value
     delete session.variableResolvedIds[stmt.name]
@@ -722,14 +800,18 @@ async function interpretVariableAssignment(
         },
       ]
 
-      const resolutionResult = resolveDevices(pseudoSegments, devices, session)
+      const resolutionResult = resolveDevices(
+        pseudoSegments,
+        env.devices,
+        session,
+      )
 
       if (resolutionResult.ambiguous) {
         return awaitDeviceSelection(
           resolutionResult,
           stmt.value.device.deviceType,
           stmt.name,
-          eventBus,
+          env.eventBus,
         )
       }
 
@@ -813,193 +895,129 @@ function interpretArgBundleAssignment(
   return { kind: 'success' }
 }
 
-async function interpretIfStatement(
+/**
+ * Evaluates the condition, then runs the chosen branch. Unlike the top-level
+ * loop, the first failing or suspending body statement ends the `@if`.
+ */
+function interpretIfStatement(
   stmt: IfStatement,
-  devices: Device[],
-  session: Session,
-  middleware: Middleware[] | undefined,
-  eventBus: VMEventBus | undefined,
-  runtime: DriverRuntimeContext,
-): Promise<InterpretResult> {
-  const evalResult = await evaluateConditionExpr(
-    stmt.condition,
-    devices,
-    session,
-    runtime,
-    eventBus,
-  )
+  env: InterpreterEnv,
+): Effect.Effect<InterpretResult, VMInfraError> {
+  return Effect.gen(function* () {
+    const { session } = env
+    const evalResult = yield* evaluateConditionExpr(stmt.condition, env)
 
-  if (evalResult.kind === 'error') {
-    return {
-      kind: 'error',
-      errors: [{ statement: stmt, message: evalResult.message }],
+    if (evalResult.kind === 'error') {
+      return {
+        kind: 'error',
+        errors: [{ statement: stmt, message: evalResult.message }],
+      } satisfies InterpretResult
     }
-  }
 
-  const conditionMet = evalResult.value
+    const conditionMet = evalResult.value
+    const statementsToExecute = conditionMet ? stmt.body : (stmt.elseBody ?? [])
+    // Body statements are traced under the index of the enclosing `@if`.
+    const stmtIndex = session.cursor
 
-  const statementsToExecute = conditionMet ? stmt.body : (stmt.elseBody ?? [])
+    for (const bodyStmt of statementsToExecute) {
+      const result = yield* runTracedStatement(bodyStmt, stmtIndex, env)
+      if (result.kind !== 'success') return result
+    }
 
-  const stmtIndex = session.cursor
-
-  for (let bi = 0; bi < statementsToExecute.length; bi++) {
-    const bodyStmt = statementsToExecute[bi]!
-
-    eventBus?.emit({
-      kind: 'statement:begin',
-      timestamp: Date.now(),
-      index: stmtIndex,
-      statementKind: bodyStmt.kind,
+    session.history.push({
+      statement: stmt,
+      resolvedDevices: [],
+      changes: [
+        {
+          deviceId: '',
+          property: 'condition',
+          oldValue: null,
+          newValue: conditionMet,
+        },
+      ],
     })
 
-    const result = await interpretStatement(
-      bodyStmt,
-      devices,
-      session,
-      middleware,
-      eventBus,
-      runtime,
-    )
-
-    if (result.kind === 'awaiting_interaction') {
-      eventBus?.emit({
-        kind: 'statement:end',
-        timestamp: Date.now(),
-        status: 'waiting',
-      })
-      return result
-    }
-
-    if (result.kind === 'error') {
-      eventBus?.emit({
-        kind: 'statement:end',
-        timestamp: Date.now(),
-        status: 'failed',
-        errors: result.errors,
-      })
-      return result
-    }
-
-    const lastEntry = session.history[session.history.length - 1]
-    const resolvedCount = lastEntry?.resolvedDevices.length ?? 0
-    const changeCount = lastEntry?.changes.length ?? 0
-    eventBus?.emit({
-      kind: 'statement:end',
-      timestamp: Date.now(),
-      status: 'success',
-      resolvedDeviceCount: resolvedCount,
-      changeCount,
-    })
-  }
-
-  session.history.push({
-    statement: stmt,
-    resolvedDevices: [],
-    changes: [
-      {
-        deviceId: '',
-        property: 'condition',
-        oldValue: null,
-        newValue: conditionMet,
-      },
-    ],
+    return { kind: 'success' } satisfies InterpretResult
   })
-
-  return { kind: 'success' }
 }
 
 type ConditionEvalResult =
   { kind: 'ok'; value: boolean } | { kind: 'error'; message: string }
 
-async function evaluateConditionExpr(
+function evaluateConditionExpr(
   expr: ConditionExpr,
-  devices: Device[],
-  session: Session,
-  runtime: DriverRuntimeContext,
-  eventBus?: VMEventBus,
-): Promise<ConditionEvalResult> {
-  if (expr.kind === 'condition') {
-    return evaluateSimpleCondition(expr, devices, session, runtime)
-  }
+  env: InterpreterEnv,
+): Effect.Effect<ConditionEvalResult, DriverError> {
+  return Effect.gen(function* () {
+    if (expr.kind === 'condition') {
+      return yield* evaluateSimpleCondition(expr, env)
+    }
 
-  if (expr.kind === 'compound_condition') {
-    const left = await evaluateConditionExpr(
-      expr.left,
-      devices,
-      session,
-      runtime,
-      eventBus,
-    )
-    if (left.kind === 'error') return left
+    if (expr.kind === 'compound_condition') {
+      const left = yield* evaluateConditionExpr(expr.left, env)
+      if (left.kind === 'error') return left
 
-    if (expr.operator === '&' && !left.value)
-      return { kind: 'ok', value: false }
-    if (expr.operator === '|' && left.value) return { kind: 'ok', value: true }
+      if (expr.operator === '&' && !left.value)
+        return { kind: 'ok', value: false } satisfies ConditionEvalResult
+      if (expr.operator === '|' && left.value)
+        return { kind: 'ok', value: true } satisfies ConditionEvalResult
 
-    const right = await evaluateConditionExpr(
-      expr.right,
-      devices,
-      session,
-      runtime,
-      eventBus,
-    )
-    if (right.kind === 'error') return right
+      const right = yield* evaluateConditionExpr(expr.right, env)
+      if (right.kind === 'error') return right
 
-    return { kind: 'ok', value: right.value }
-  }
+      return { kind: 'ok', value: right.value } satisfies ConditionEvalResult
+    }
 
-  return { kind: 'ok', value: false }
+    return { kind: 'ok', value: false } satisfies ConditionEvalResult
+  })
 }
 
-async function evaluateSimpleCondition(
+function evaluateSimpleCondition(
   condition: SimpleCondition,
-  devices: Device[],
-  session: Session,
-  runtime: DriverRuntimeContext,
-): Promise<ConditionEvalResult> {
-  const property = lastPropertyName(condition.path)
-  const intent: ResolutionIntent = { kind: 'property', name: property }
-  const resolutionResult = resolveDevices(
-    condition.path,
-    devices,
-    session,
-    intent,
-  )
+  env: InterpreterEnv,
+): Effect.Effect<ConditionEvalResult, DriverError> {
+  return Effect.gen(function* () {
+    const { session } = env
+    const property = lastPropertyName(condition.path)
+    const intent: ResolutionIntent = { kind: 'property', name: property }
+    const resolutionResult = resolveDevices(
+      condition.path,
+      env.devices,
+      session,
+      intent,
+    )
 
-  if (resolutionResult.ambiguous) {
-    return {
-      kind: 'error',
-      message:
+    if (resolutionResult.ambiguous) {
+      return conditionError(
         'Ambiguous device in @if condition — use @oneof to pre-resolve: $var = @oneof(device_type)',
+      )
     }
-  }
 
-  if (resolutionResult.devices.length === 0) {
-    return {
-      kind: 'error',
-      message:
+    if (resolutionResult.devices.length === 0) {
+      return conditionError(
         resolutionResult.noMatchDescription ??
-        'No devices found for @if condition',
+          'No devices found for @if condition',
+      )
     }
-  }
 
-  if (resolutionResult.devices.length > 1) {
-    return {
-      kind: 'error',
-      message:
+    if (resolutionResult.devices.length > 1) {
+      return conditionError(
         'Multiple devices matched in @if condition — use @oneof to pre-resolve: $var = @oneof(device_type)',
+      )
     }
-  }
 
-  const device = resolutionResult.devices[0]!
-  const currentValue = await device.driver.getProperty(
-    device.id,
-    property,
-    device.driverConfig,
-    runtime,
-  )
+    const device = resolutionResult.devices[0]!
+    const currentValue = yield* readProperty(device, property, env.runtime)
 
-  session.it = device
+    session.it = device
 
-  return { kind: 'ok', value: evaluateCondition(condition, currentValue) }
+    return {
+      kind: 'ok',
+      value: evaluateCondition(condition, currentValue),
+    } satisfies ConditionEvalResult
+  })
+}
+
+function conditionError(message: string): ConditionEvalResult {
+  return { kind: 'error', message }
 }

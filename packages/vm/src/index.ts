@@ -1,11 +1,4 @@
-import { registerHandler } from './interactions/registry.js'
-import { deviceSelectionHandler } from './interactions/device-selection.js'
-import { confirmationHandler } from './interactions/confirmation.js'
-import { actionParameterHandler } from './interactions/action-parameter.js'
-
-registerHandler(deviceSelectionHandler)
-registerHandler(confirmationHandler)
-registerHandler(actionParameterHandler)
+import './interactions/register-defaults.js'
 
 export { executeCommand } from './commands/dispatch.js'
 export type {

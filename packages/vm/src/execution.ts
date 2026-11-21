@@ -5,11 +5,11 @@ import type {
   PollVerificationStrategy,
   EventVerificationStrategy,
 } from '@opennest/lang-core'
-import { Cause, Effect, Exit, Option, Queue } from 'effect'
+import { Effect, Option, Queue } from 'effect'
 import type { Device } from './types.js'
 import { readProperty } from './effect/driver.js'
 import type { DriverError } from './effect/errors.js'
-import { toOriginalError } from './effect/errors.js'
+import { runPromiseRethrowingOriginal } from './effect/run.js'
 
 export const DEFAULT_POLL_TIMEOUT_MS = 2000
 export const DEFAULT_POLL_INTERVAL_MS = 200
@@ -69,7 +69,9 @@ export function observeState(
   properties: string[],
   runtime: DriverRuntimeContext,
 ): Promise<Record<string, unknown>> {
-  return runRethrowingOriginal(observeStateEffect(device, properties, runtime))
+  return runPromiseRethrowingOriginal(
+    observeStateEffect(device, properties, runtime),
+  )
 }
 
 /** Compares an observed state against the expected effect (all keys must match). */
@@ -123,19 +125,9 @@ export function verifyState(
   strategy: VerificationStrategy | null,
   runtime: DriverRuntimeContext,
 ): Promise<Verification> {
-  return runRethrowingOriginal(
+  return runPromiseRethrowingOriginal(
     verifyStateEffect(device, expected, strategy, runtime),
   )
-}
-
-async function runRethrowingOriginal<A>(
-  effect: Effect.Effect<A, DriverError>,
-): Promise<A> {
-  const exit = await Effect.runPromiseExit(effect)
-  if (Exit.isSuccess(exit)) return exit.value
-  const failure = Cause.findErrorOption(exit.cause)
-  if (Option.isSome(failure)) throw toOriginalError(failure.value)
-  throw Cause.squash(exit.cause)
 }
 
 function pollForEffects(

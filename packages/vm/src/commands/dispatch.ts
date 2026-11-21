@@ -1,16 +1,23 @@
+import { Effect } from 'effect'
 import type { Program } from '@opennest/lang-core'
 import { buildProgram } from '@opennest/lang-core'
-import { createSession } from '../state.js'
-import { resumeAndContinue } from '../state.js'
+import { createSession, resumeAndContinueEffect } from '../state.js'
 import { InteractionError } from '../interactions/errors.js'
 import type { VMContext, VMResult } from '../types.js'
 import type { VMCommand } from './types.js'
-import { interpretProgram } from '../interpreter.js'
+import type { VMInfraError } from '../effect/errors.js'
+import { runPromiseRethrowingOriginal } from '../effect/run.js'
+import { interpretProgramEffect } from '../interpreter.js'
 
-export async function executeCommand(
+/**
+ * Runs a VM command. Business outcomes, including failed resume
+ * preconditions, are an error `VMResult`; only infrastructure failures that
+ * abort the run are in the error channel.
+ */
+export function runCommand(
   command: VMCommand,
   context: VMContext,
-): Promise<VMResult> {
+): Effect.Effect<VMResult, VMInfraError> {
   switch (command.kind) {
     case 'run_program':
       return runProgram(command.program, context)
@@ -27,59 +34,75 @@ export async function executeCommand(
         command.deviceId,
       )
     case 'resume_interaction':
-      try {
-        return await resumeAndContinue(command.response, context)
-      } catch (error) {
-        if (error instanceof InteractionError) {
-          return {
-            status: 'error',
-            session: context.session ?? createSession(),
-            executed: [],
-            interaction: null,
-            errors: [{ code: error.code, message: error.message }],
-          }
-        }
-        throw error
-      }
+      return resumeAndContinueEffect(command.response, context).pipe(
+        Effect.catchIf(
+          (error): error is InteractionError =>
+            error instanceof InteractionError,
+          error => Effect.succeed(interactionErrorResult(error, context)),
+        ),
+      )
     case 'cancel_execution':
-      return {
+      return Effect.succeed({
         status: 'success',
         session: createSession(),
         executed: [],
         interaction: null,
         errors: [],
-      }
+      })
   }
 }
 
-async function runProgram(
+/** Promise façade of {@link runCommand}; rejects with the original error. */
+export function executeCommand(
+  command: VMCommand,
+  context: VMContext,
+): Promise<VMResult> {
+  return runPromiseRethrowingOriginal(runCommand(command, context))
+}
+
+function interactionErrorResult(
+  error: InteractionError,
+  context: VMContext,
+): VMResult {
+  return {
+    status: 'error',
+    session: context.session ?? createSession(),
+    executed: [],
+    interaction: null,
+    errors: [{ code: error.code, message: error.message }],
+  }
+}
+
+function runProgram(
   program: Program,
   context: VMContext,
   deviceId?: string,
-): Promise<VMResult> {
-  const pending = context.session?.pendingInteraction
-  if (pending !== null && pending !== undefined) {
-    return {
-      status: 'error',
-      session: context.session!,
-      executed: [],
-      interaction: null,
-      errors: [
-        {
-          code: 'interaction_pending',
-          message: `Interaction ${pending.id} (${pending.type}) is pending. Answer it with resume_interaction, or cancel the execution first.`,
-        },
-      ],
+): Effect.Effect<VMResult, VMInfraError> {
+  return Effect.suspend(() => {
+    const pending = context.session?.pendingInteraction
+    if (pending !== null && pending !== undefined) {
+      return Effect.succeed<VMResult>({
+        status: 'error',
+        session: context.session!,
+        executed: [],
+        interaction: null,
+        errors: [
+          {
+            code: 'interaction_pending',
+            message: `Interaction ${pending.id} (${pending.type}) is pending. Answer it with resume_interaction, or cancel the execution first.`,
+          },
+        ],
+      })
     }
-  }
 
-  return interpretProgram(
-    program,
-    deviceId !== undefined
-      ? context.devices.filter(d => d.id === deviceId)
-      : context.devices,
-    context.session,
-    context.middleware,
-    context.eventBus,
-  )
+    return interpretProgramEffect(
+      program,
+      deviceId !== undefined
+        ? context.devices.filter(d => d.id === deviceId)
+        : context.devices,
+      context.session,
+      context.middleware,
+      context.eventBus,
+    )
+  })
 }
