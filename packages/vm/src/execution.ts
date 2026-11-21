@@ -5,7 +5,11 @@ import type {
   PollVerificationStrategy,
   EventVerificationStrategy,
 } from '@opennest/lang-core'
+import { Cause, Effect, Exit, Option, Queue } from 'effect'
 import type { Device } from './types.js'
+import { readProperty } from './effect/driver.js'
+import type { DriverError } from './effect/errors.js'
+import { toOriginalError } from './effect/errors.js'
 
 export const DEFAULT_POLL_TIMEOUT_MS = 2000
 export const DEFAULT_POLL_INTERVAL_MS = 200
@@ -45,21 +49,27 @@ export function resolveVerificationStrategy(
 }
 
 /** Reads the current value of every property in `properties` from the driver. */
-export async function observeState(
+export function observeStateEffect(
+  device: Device,
+  properties: string[],
+  runtime: DriverRuntimeContext,
+): Effect.Effect<Record<string, unknown>, DriverError> {
+  return Effect.gen(function* () {
+    const observed: Record<string, unknown> = {}
+    for (const property of properties) {
+      observed[property] = yield* readProperty(device, property, runtime)
+    }
+    return observed
+  })
+}
+
+/** Promise façade of {@link observeStateEffect}; rejects with the driver's error. */
+export function observeState(
   device: Device,
   properties: string[],
   runtime: DriverRuntimeContext,
 ): Promise<Record<string, unknown>> {
-  const observed: Record<string, unknown> = {}
-  for (const property of properties) {
-    observed[property] = await device.driver.getProperty(
-      device.id,
-      property,
-      device.driverConfig,
-      runtime,
-    )
-  }
-  return observed
+  return runRethrowingOriginal(observeStateEffect(device, properties, runtime))
 }
 
 /** Compares an observed state against the expected effect (all keys must match). */
@@ -76,14 +86,15 @@ export function matchesEffects(
 /**
  * Runs the observation + verification of an expected effect.
  * A `poll` strategy keeps sampling until the state matches or the deadline is
- * reached; any other (or absent) strategy performs a single observation.
+ * reached; an `event` strategy waits for driver notifications; any other (or
+ * absent) strategy performs a single observation.
  */
-export async function verifyState(
+export function verifyStateEffect(
   device: Device,
   expected: Record<string, unknown>,
   strategy: VerificationStrategy | null,
   runtime: DriverRuntimeContext,
-): Promise<Verification> {
+): Effect.Effect<Verification, DriverError> {
   const properties = Object.keys(expected)
 
   if (strategy?.type === 'poll') {
@@ -94,35 +105,61 @@ export async function verifyState(
     return waitForStateEvent(device, properties, expected, strategy, runtime)
   }
 
-  const observed = await observeState(device, properties, runtime)
-  const matched = matchesEffects(expected, observed)
-  return buildVerification(
-    matched ? 'confirmed' : 'mismatch',
-    expected,
-    observed,
+  return Effect.gen(function* () {
+    const observed = yield* observeStateEffect(device, properties, runtime)
+    const matched = matchesEffects(expected, observed)
+    return buildVerification(
+      matched ? 'confirmed' : 'mismatch',
+      expected,
+      observed,
+    )
+  })
+}
+
+/** Promise façade of {@link verifyStateEffect}; rejects with the driver's error. */
+export function verifyState(
+  device: Device,
+  expected: Record<string, unknown>,
+  strategy: VerificationStrategy | null,
+  runtime: DriverRuntimeContext,
+): Promise<Verification> {
+  return runRethrowingOriginal(
+    verifyStateEffect(device, expected, strategy, runtime),
   )
 }
 
-async function pollForEffects(
+async function runRethrowingOriginal<A>(
+  effect: Effect.Effect<A, DriverError>,
+): Promise<A> {
+  const exit = await Effect.runPromiseExit(effect)
+  if (Exit.isSuccess(exit)) return exit.value
+  const failure = Cause.findErrorOption(exit.cause)
+  if (Option.isSome(failure)) throw toOriginalError(failure.value)
+  throw Cause.squash(exit.cause)
+}
+
+function pollForEffects(
   device: Device,
   properties: string[],
   expected: Record<string, unknown>,
   strategy: PollVerificationStrategy,
   runtime: DriverRuntimeContext,
-): Promise<Verification> {
-  const deadline = Date.now() + strategy.timeout
-  let observed = await observeState(device, properties, runtime)
+): Effect.Effect<Verification, DriverError> {
+  return Effect.gen(function* () {
+    const deadline = Date.now() + strategy.timeout
+    let observed = yield* observeStateEffect(device, properties, runtime)
 
-  for (;;) {
-    if (matchesEffects(expected, observed)) {
-      return buildVerification('confirmed', expected, observed)
+    for (;;) {
+      if (matchesEffects(expected, observed)) {
+        return buildVerification('confirmed', expected, observed)
+      }
+      if (Date.now() >= deadline) {
+        return buildVerification('timeout', expected, observed)
+      }
+      yield* Effect.sleep(strategy.interval)
+      observed = yield* observeStateEffect(device, properties, runtime)
     }
-    if (Date.now() >= deadline) {
-      return buildVerification('timeout', expected, observed)
-    }
-    await sleep(strategy.interval)
-    observed = await observeState(device, properties, runtime)
-  }
+  })
 }
 
 function buildVerification(
@@ -136,74 +173,76 @@ function buildVerification(
   return verification
 }
 
-async function waitForStateEvent(
+/**
+ * Observes immediately, then reacts to driver notifications until the state
+ * matches or the deadline passes. Subscriptions and the deadline timer belong
+ * to a `Scope`, so they are released on completion and on interruption.
+ */
+function waitForStateEvent(
   device: Device,
   properties: string[],
   expected: Record<string, unknown>,
   strategy: EventVerificationStrategy,
   runtime: DriverRuntimeContext,
-): Promise<Verification> {
-  // Immediate observation first: the write may already have been applied.
-  let observed = await observeState(device, properties, runtime)
-  if (matchesEffects(expected, observed)) {
-    return buildVerification('confirmed', expected, observed)
-  }
-
-  return new Promise<Verification>(resolve => {
-    const deadline = Date.now() + strategy.timeout
-    const unsubscribers: (() => void)[] = []
-    let settled = false
-    let timer: ReturnType<typeof setTimeout> | undefined = undefined
-
-    const finish = (verification: Verification): void => {
-      if (settled) return
-      settled = true
-      if (timer !== undefined) clearTimeout(timer)
-      for (const unsubscribe of unsubscribers) unsubscribe()
-      resolve(verification)
-    }
-
-    const check = async (): Promise<void> => {
-      if (settled) return
-      if (Date.now() >= deadline) {
-        finish(buildVerification('timeout', expected, observed))
-        return
-      }
-      try {
-        observed = await observeState(device, properties, runtime)
-      } catch {
-        finish(buildVerification('not_observable'))
-        return
-      }
+): Effect.Effect<Verification, DriverError> {
+  return Effect.scoped(
+    Effect.gen(function* () {
+      // Immediate observation first: the write may already have been applied.
+      let observed = yield* observeStateEffect(device, properties, runtime)
       if (matchesEffects(expected, observed)) {
-        finish(buildVerification('confirmed', expected, observed))
+        return buildVerification('confirmed', expected, observed)
       }
-    }
 
-    for (const property of properties) {
-      const unsubscribe = device.driver.subscribeProperty?.(
-        device.id,
-        property,
-        device.driverConfig,
-        () => void check(),
+      const deadline = Date.now() + strategy.timeout
+      // Each notification (and the deadline) enqueues one "check" wake-up.
+      const wakeups = yield* Queue.unbounded<void>()
+      const wake = () => void Queue.offerUnsafe(wakeups, undefined)
+
+      let subscribed = 0
+      for (const property of properties) {
+        const unsubscribe = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            device.driver.subscribeProperty?.(
+              device.id,
+              property,
+              device.driverConfig,
+              wake,
+            ),
+          ),
+          unsubscribe => Effect.sync(() => unsubscribe?.()),
+        )
+        if (unsubscribe) subscribed++
+      }
+
+      // Not subscribable (down channel or non-push property): fall back to the
+      // single observation already taken.
+      if (subscribed === 0) {
+        return buildVerification('mismatch', expected, observed)
+      }
+
+      yield* Effect.forkScoped(
+        Effect.sleep(strategy.timeout).pipe(Effect.andThen(Effect.sync(wake))),
       )
-      if (unsubscribe) unsubscribers.push(unsubscribe)
-    }
+      wake()
 
-    // Not subscribable (down channel or non-push property): fall back to the
-    // single observation already taken.
-    if (unsubscribers.length === 0) {
-      resolve(buildVerification('mismatch', expected, observed))
-      return
-    }
-
-    timer = setTimeout(() => void check(), strategy.timeout)
-    void check()
-  })
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
+      for (;;) {
+        yield* Queue.take(wakeups)
+        if (Date.now() >= deadline) {
+          return buildVerification('timeout', expected, observed)
+        }
+        const next = yield* observeStateEffect(
+          device,
+          properties,
+          runtime,
+        ).pipe(Effect.option)
+        if (Option.isNone(next)) return buildVerification('not_observable')
+        observed = next.value
+        if (matchesEffects(expected, observed)) {
+          return buildVerification('confirmed', expected, observed)
+        }
+      }
+    }),
+  )
 }
 
 function normalize(value: unknown): unknown {

@@ -5,7 +5,8 @@ import type { DeviceDriver } from '@opennest/devices'
 import { executeCommand } from './index.js'
 import type { Device } from './index.js'
 import { executeAction } from './executor.js'
-import { verifyState } from './execution.js'
+import { Effect, Fiber } from 'effect'
+import { verifyState, verifyStateEffect } from './execution.js'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -356,6 +357,46 @@ describe('ActionOutcome — event verification', () => {
     await vi.advanceTimersByTimeAsync(200)
     const verification = await promise
     expect(verification.status).toBe('timeout')
+  })
+})
+
+describe('verifyStateEffect', () => {
+  it('interrupting an event verification unsubscribes and clears timers', async () => {
+    vi.useFakeTimers()
+    const unsubscribe = vi.fn()
+    const driver: DeviceDriver = {
+      name: 'test',
+      async init() {},
+      async close() {},
+      async getProperty() {
+        return false
+      },
+      async setProperty() {},
+      async executeAction() {},
+      subscribeProperty: () => unsubscribe,
+    }
+    const dev: Device = {
+      id: 'light_salon',
+      type: 'light',
+      room: 'salon',
+      name: 'light_salon',
+      driver,
+      driverConfig: {},
+    }
+
+    const fiber = Effect.runFork(
+      verifyStateEffect(
+        dev,
+        { power: true },
+        { type: 'event', timeout: 10_000 },
+        { programId: 'p1' },
+      ),
+    )
+    await vi.advanceTimersByTimeAsync(100)
+    await Effect.runPromise(Fiber.interrupt(fiber))
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
   })
 })
 
