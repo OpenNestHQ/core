@@ -93,6 +93,14 @@ describe('effect driver adapters', () => {
     expect(Date.now() - start).toBeGreaterThanOrEqual(10)
     const exit = await Effect.runPromiseExit(Fiber.join(fiber))
     expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const late = Cause.findErrorOption(exit.cause)
+      expect(late._tag).toBe('Some')
+      const e = late._tag === 'Some' ? late.value : undefined
+      expect(e?._tag).toBe('DriverError')
+      expect(e?.operation).toBe('action')
+      expect(e?.cause).toBe(err)
+    }
   })
 
   it('runtime.signal already aborted aborts the driver signal', async () => {

@@ -28,15 +28,14 @@ function fromDriverPromise<A>(
   awaitOnInterrupt: boolean,
 ): Effect.Effect<A, DriverError> {
   return Effect.callback<A, DriverError>((resume, signal) => {
-    const fail = (cause: unknown) =>
-      resume(
-        Effect.fail(new DriverError({ deviceId: device.id, operation, cause })),
-      )
+    let lateError: DriverError | undefined
+    const toError = (cause: unknown) =>
+      new DriverError({ deviceId: device.id, operation, cause })
     let promise: Promise<A>
     try {
       promise = call(combine(signal, runtime))
     } catch (cause) {
-      fail(cause)
+      resume(Effect.fail(toError(cause)))
       return
     }
     const settled = promise.then(
@@ -44,11 +43,27 @@ function fromDriverPromise<A>(
         resume(Effect.succeed(value))
       },
       cause => {
-        fail(cause)
+        // After interruption `resume` is ignored: keep the error so the
+        // finalizer below can surface it.
+        lateError = toError(cause)
+        resume(Effect.fail(lateError))
       },
     )
-    if (awaitOnInterrupt) return Effect.promise(() => settled)
-    return undefined
+    if (!awaitOnInterrupt) return undefined
+    // Wait for the driver, then re-raise a late rejection. Effect merges a
+    // finalizer failure into the interrupt cause, so a caller finds it with
+    // `Cause.findErrorOption(exit.cause)` (a DriverError, `cause` = original).
+    // The `callback` typing only allows an infallible finalizer, but the
+    // runtime does merge its failure into the interrupt cause (verified by
+    // the "late rejection" test), hence the cast.
+    const finalizer = Effect.promise(() => settled).pipe(
+      Effect.andThen(
+        Effect.suspend(() =>
+          lateError ? Effect.fail(lateError) : Effect.void,
+        ),
+      ),
+    )
+    return finalizer as unknown as Effect.Effect<void>
   })
 }
 
