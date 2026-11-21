@@ -3431,10 +3431,26 @@ describe('session programId threading', () => {
     expect(result.status).toBe('success')
     expect(result.session.programId).toBeTypeOf('string')
     expect(spy).toHaveBeenCalledTimes(2)
-    expect(spy.mock.calls.map(call => call[4])).toEqual([
+    expect(spy.mock.calls.map(call => call[4])).toMatchObject([
       { programId: result.session.programId },
       { programId: result.session.programId },
     ])
+  })
+
+  it('passes an AbortSignal in the runtime of every driver call', async () => {
+    const driver = makeDriver()
+    const tv = await makeDevice('tv_salon', 'tv', 'salon', 'Salon TV', driver, {
+      power: false,
+    })
+    const spy = vi.spyOn(driver, 'setProperty')
+
+    const program = parse('tv[salon].power = on\ntv[salon].volume = 42')
+    await executeCommand({ kind: 'run_program', program }, { devices: [tv] })
+
+    expect(spy).toHaveBeenCalledTimes(2)
+    for (const call of spy.mock.calls) {
+      expect(call[4]?.signal).toBeInstanceOf(AbortSignal)
+    }
   })
 
   it('keeps the same programId across a resumed interaction', async () => {
@@ -3486,7 +3502,7 @@ describe('session programId threading', () => {
       'power',
       true,
       expect.anything(),
-      { programId: result1.session.programId },
+      expect.objectContaining({ programId: result1.session.programId }),
     )
   })
 })
