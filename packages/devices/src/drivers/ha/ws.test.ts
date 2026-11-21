@@ -860,5 +860,59 @@ describe('HAWebSocketClient', () => {
         vi.useRealTimers()
       }
     })
+
+    it('reconnect delays follow base*2^n capped at max', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const client = new HAWebSocketClient({
+          url: URL,
+          token: TOKEN,
+          reconnectBaseMs: 100,
+          reconnectMaxMs: 300,
+        })
+        client.start()
+
+        for (const [index, delay] of [100, 200, 300, 300].entries()) {
+          MockWebSocket.last().serverError()
+          await vi.advanceTimersByTimeAsync(delay - 1)
+          expect(MockWebSocket.instances).toHaveLength(index + 1)
+          await vi.advanceTimersByTimeAsync(1)
+          expect(MockWebSocket.instances).toHaveLength(index + 2)
+        }
+        await client.close()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
+
+  describe('lifecycle', () => {
+    it('close() leaves no pending timer', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient()
+
+        const subscribed = client.subscribe(
+          { type: 'subscribe_entities' },
+          () => {},
+        )
+        ws.serverMessage({ id: 1, type: 'result', success: true, result: null })
+        await subscribed
+        const unacked = client.subscribe({ type: 'subscribe_events' }, () => {})
+        const inFlight = client.callService('switch', 'turn_on', {})
+        const expectations = [
+          expect(unacked).rejects.toThrow(/closed/),
+          expect(inFlight).rejects.toThrow(/closed/),
+        ]
+
+        await client.close()
+        await Promise.all(expectations)
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 })
