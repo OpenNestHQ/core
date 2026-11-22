@@ -10,13 +10,24 @@
   },
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./effect": {
+      "types": "./dist/effect/index.d.ts",
+      "default": "./dist/effect/index.js"
+    }
+  },
   "scripts": {
     "test": "vitest run",
     "build": "tsc"
   },
   "dependencies": {
     "@opennest/lang-core": "workspace:*",
-    "@opennest/devices": "workspace:*"
+    "@opennest/devices": "workspace:*",
+    "effect": "~4.1.5"
   },
   "devDependencies": {
     "typescript": "^6.0.3",

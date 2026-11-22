@@ -5,7 +5,8 @@ import type { DeviceDriver } from '@opennest/devices'
 import { executeCommand } from './index.js'
 import type { Device } from './index.js'
 import { executeAction } from './executor.js'
-import { verifyState } from './execution.js'
+import { Effect, Fiber } from 'effect'
+import { verifyState, verifyStateEffect } from './execution.js'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -359,6 +360,126 @@ describe('ActionOutcome — event verification', () => {
   })
 })
 
+describe('verifyStateEffect', () => {
+  it('interrupting an event verification unsubscribes and clears timers', async () => {
+    vi.useFakeTimers()
+    const unsubscribe = vi.fn()
+    const driver: DeviceDriver = {
+      name: 'test',
+      async init() {},
+      async close() {},
+      async getProperty() {
+        return false
+      },
+      async setProperty() {},
+      async executeAction() {},
+      subscribeProperty: () => unsubscribe,
+    }
+    const dev: Device = {
+      id: 'light_salon',
+      type: 'light',
+      room: 'salon',
+      name: 'light_salon',
+      driver,
+      driverConfig: {},
+    }
+
+    const fiber = Effect.runFork(
+      verifyStateEffect(
+        dev,
+        { power: true },
+        { type: 'event', timeout: 10_000 },
+        { programId: 'p1' },
+      ),
+    )
+    await vi.advanceTimersByTimeAsync(100)
+    await Effect.runPromise(Fiber.interrupt(fiber))
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('verifyStateEffect event deadline', () => {
+  function makeNotifyingDevice(
+    getProperty: DeviceDriver['getProperty'],
+    listeners: Set<() => void>,
+  ): Device {
+    const driver: DeviceDriver = {
+      name: 'test',
+      async init() {},
+      async close() {},
+      getProperty,
+      async setProperty() {},
+      async executeAction() {},
+      subscribeProperty: (_id, _property, _config, onChange) => {
+        listeners.add(onChange)
+        return () => listeners.delete(onChange)
+      },
+    }
+    return {
+      id: 'light_salon',
+      type: 'light',
+      room: 'salon',
+      name: 'light_salon',
+      driver,
+      driverConfig: {},
+    }
+  }
+
+  it('event verification times out at the deadline even if a read hangs', async () => {
+    vi.useFakeTimers()
+    const listeners = new Set<() => void>()
+    let reads = 0
+    let hungSignal: AbortSignal | undefined
+    const dev = makeNotifyingDevice((_id, _property, _config, runtime) => {
+      if (reads++ === 0) return Promise.resolve(false)
+      hungSignal = runtime?.signal
+      return new Promise<unknown>(() => {})
+    }, listeners)
+
+    const promise = verifyState(
+      dev,
+      { power: true },
+      { type: 'event', timeout: 1000 },
+      { programId: 'p1' },
+    )
+    await vi.advanceTimersByTimeAsync(10)
+    for (const listener of listeners) listener()
+    await vi.advanceTimersByTimeAsync(1000)
+
+    const verification = await promise
+    expect(verification.status).toBe('timeout')
+    expect(hungSignal?.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('a burst of notifications does not delay the timeout', async () => {
+    vi.useFakeTimers()
+    const listeners = new Set<() => void>()
+    const dev = makeNotifyingDevice(async () => {
+      await new Promise(resolve => setTimeout(resolve, 10))
+      return false
+    }, listeners)
+
+    const promise = verifyState(
+      dev,
+      { power: true },
+      { type: 'event', timeout: 100 },
+      { programId: 'p1' },
+    )
+    await vi.advanceTimersByTimeAsync(10)
+    for (let i = 0; i < 50; i++) {
+      for (const listener of listeners) listener()
+    }
+    await vi.advanceTimersByTimeAsync(100)
+
+    const verification = await promise
+    expect(verification.status).toBe('timeout')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
 describe('backward compatibility', () => {
   it('keeps the low-level executeAction result unchanged', async () => {
     const driver = new TestDriver()
@@ -392,5 +513,32 @@ describe('backward compatibility', () => {
     expect(result.executed).toHaveLength(2)
     expect(await driver.getProperty('light_salon', 'power')).toBe(true)
     expect(await driver.getProperty('light_salon', 'volume')).toBe(20)
+  })
+})
+
+describe('ActionOutcome — verification defects', () => {
+  it('not_observable when the driver subscription throws synchronously', async () => {
+    class ThrowingSubscribeDriver extends TestDriver {
+      override strategy: VerificationStrategy = {
+        type: 'event',
+        timeout: 1000,
+      }
+      subscribeProperty(): never {
+        throw new Error('subscribe boom')
+      }
+    }
+    const driver = new ThrowingSubscribeDriver()
+    // The effect is not applied, so verification has to subscribe and wait.
+    const dev = await makeDevice(driver, TURN_ON)
+
+    const result = await executeCommand(
+      { kind: 'run_program', program: parse('light[salon].turnOn()') },
+      { devices: [dev] },
+    )
+
+    expect(result.status).toBe('success')
+    const outcome = result.executed[0]!.outcomes![0]!
+    expect(outcome.execution.status).toBe('accepted')
+    expect(outcome.verification.status).toBe('not_observable')
   })
 })

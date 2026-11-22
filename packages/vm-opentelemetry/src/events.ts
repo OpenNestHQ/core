@@ -13,6 +13,8 @@ export interface NodeCompletedEvent {
   nodeId: string
   timestamp: number
   status: 'success' | 'failed' | 'cancelled'
+  /** Span status message, for a `failed` status. */
+  message?: string
   attributes?: Record<string, unknown>
 }
 

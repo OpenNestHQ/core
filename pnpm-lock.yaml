@@ -139,6 +139,9 @@ importers:
 
   packages/devices:
     dependencies:
+      effect:
+        specifier: ~4.1.5
+        version: 4.1.5
       js-yaml:
         specifier: ^4.1.0
         version: 4.3.0
@@ -223,6 +226,9 @@ importers:
       '@opennest/lang-core':
         specifier: workspace:*
         version: link:../lang-core
+      effect:
+        specifier: ~4.1.5
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: ^6.0.3
@@ -1450,6 +1456,9 @@ packages:
 
   detect-node-es@1.1.0:
     resolution: {integrity: sha512-ypdmJU/TbBby2Dxibuv7ZLW3Bs1QEmM7nHjEANfohJLvE0XVujisn1qPJcZxg+qDucsr+bP6fLD1rPS3AhJ7EQ==}
+
+  effect@4.1.5:
+    resolution: {integrity: sha512-xyR20KhQI0vg2gD8ILUSQRTTESEYJ0JKdP+QD8J37xbwPTqXRxFM/l0+vUVD9fuSvoYruoTqyt33C4FZv1s4TQ==}
 
   enhanced-resolve@5.24.3:
     resolution: {integrity: sha512-PwKooW9JUzh5chmYfHM3IQl5OkK2u2Nm011MgeZrss3JmFraUx/fqrf78kk8GUMYoibx/14MdwTl/1WKkG7TpQ==}
@@ -3184,6 +3193,8 @@ snapshots:
   detect-libc@2.1.2: {}
 
   detect-node-es@1.1.0: {}
+
+  effect@4.1.5: {}
 
   enhanced-resolve@5.24.3:
     dependencies:

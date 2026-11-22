@@ -4,6 +4,7 @@ export enum NodeStatus {
   Failed = 'Failed',
   Waiting = 'Waiting',
   Skipped = 'Skipped',
+  Interrupted = 'Interrupted',
 }
 
 export enum NodeKind {
