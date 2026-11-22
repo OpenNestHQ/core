@@ -13,9 +13,9 @@ No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm w
 | Package | npm name | Role | Depends on |
 |---|---|---|---|
 | `packages/lang-core` | `@opennest/lang-core` | Parser (HomeDSL → AST), prompt generator, AST builders | *none* |
-| `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers (HA websocket client is Effect-based internally) | *none* (only `js-yaml` + `effect`) |
-| `packages/vm` | `@opennest/vm` | interpreter: `executeCommand()`, resolution, middleware, interactions, validation, tracing, state verification. Effect core; extra entry point `@opennest/vm/effect` | `lang-core`, `devices` (+ `effect`) |
-| `packages/vm-opentelemetry` | `@opennest/vm-opentelemetry` | OpenTelemetry trace sink for the VM `ExecutionTrace` | `@opentelemetry/api` (peer: `vm`) |
+| `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers | *none* (only `js-yaml` + `effect`) |
+| `packages/vm` | `@opennest/vm` | interpreter: `executeCommand()`, resolution, middleware, interactions, validation, tracing, verification; also `@opennest/vm/effect` | `lang-core`, `devices` (+ `effect`) |
+| `packages/vm-opentelemetry` | `@opennest/vm-opentelemetry` | OpenTelemetry trace sink for the VM `ExecutionTrace` | `@opentelemetry/api` (dev: `vm`, types only) |
 | `packages/sdk` | `@opennest/sdk` | Deterministic execution facade (`OpenNestClient`) over parser + devices + VM | `lang-core`, `devices`, `vm` |
 | `packages/mcp` | `@opennest/mcp` | Stdio MCP server exposing the runtime (HomeDSL execution, interactions, session) to AI agents | `sdk`, `vm`, `devices` |
 | `examples/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `sdk` |
