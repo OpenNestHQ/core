@@ -317,7 +317,8 @@ export function makeHAWsCore(config: HAWsCoreConfig): HAWsCore {
       }
       return Deferred.await(ack).pipe(
         withTimeout(message),
-        Effect.tapError(() => Effect.sync(() => subscriptions.delete(id))),
+        // onExit-style cleanup: also runs when the subscribe is interrupted.
+        Effect.onError(() => Effect.sync(() => subscriptions.delete(id))),
       )
     })
 
