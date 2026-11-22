@@ -482,6 +482,19 @@ describe('VM with middleware', () => {
 // ──── Returned outcome helpers ────
 
 describe('returned outcome helpers', () => {
+  it('accepts a non-async middleware returning a plain outcome', async () => {
+    const guard: Middleware = () => block('x')
+    Object.defineProperty(guard, 'name', { value: 'guard' })
+
+    const result = await executeCommand(
+      { kind: 'run_program', program: parse('tv[salon].power = on') },
+      await ctx(undefined, [guard]),
+    )
+
+    expect(result.status).toBe('error')
+    expect(result.errors[0]!.message).toBe('Blocked by middleware "guard": x')
+  })
+
   it('returned block() produces the same VMResult error as a thrown BlockSignal', async () => {
     const guard: Middleware = async () => block('nope')
     Object.defineProperty(guard, 'name', { value: 'guard' })

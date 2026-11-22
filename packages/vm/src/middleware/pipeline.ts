@@ -80,7 +80,9 @@ function evaluateAt(
       }
 
     const attempt = Effect.tryPromise({
-      try: signal => middleware(ctx, next(signal)),
+      // `async` so a middleware returning a plain outcome (or throwing
+      // synchronously) behaves as it did under `await middleware(...)`.
+      try: async signal => middleware(ctx, next(signal)),
       catch: thrown => thrown,
     })
 
