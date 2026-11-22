@@ -52,7 +52,8 @@ export const neverStop: StopToken = {
 }
 
 /**
- * A token requested when `stop` completes. `stop` runs in the surrounding
+ * A token requested when `stop` completes. `stop` starts immediately, so an
+ * already complete stop is seen by the first check; it runs in the surrounding
  * scope, so once the run ends a later stop has no effect.
  */
 export function makeStopToken(
@@ -62,6 +63,7 @@ export function makeStopToken(
     const requested = yield* Deferred.make<void>()
     yield* Effect.forkScoped(
       Effect.andThen(stop, Deferred.succeed(requested, undefined)),
+      { startImmediately: true },
     )
 
     const isRequested = () => Deferred.isDoneUnsafe(requested)

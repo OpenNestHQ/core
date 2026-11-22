@@ -317,7 +317,8 @@ function interruptProgram(
 
 /**
  * Runs one statement between its `statement:begin` and `statement:end` events.
- * A `StopRequested` from anywhere inside ends it as `interrupted`.
+ * A `StopRequested` from anywhere inside ends it as `interrupted`, and so does
+ * a stop requested before it suspends: a stopped run never asks the user.
  */
 function runTracedStatement(
   statement: Statement,
@@ -333,11 +334,15 @@ function runTracedStatement(
       statementKind: statement.kind,
     })
 
-    const result = yield* interpretStatement(statement, env).pipe(
+    const interpreted = yield* interpretStatement(statement, env).pipe(
       Effect.catchTag('StopRequested', () =>
         Effect.succeed<InterpretResult>({ kind: 'interrupted' }),
       ),
     )
+    const result: InterpretResult =
+      interpreted.kind === 'awaiting_interaction' && env.stop.isRequested()
+        ? { kind: 'interrupted' }
+        : interpreted
 
     switch (result.kind) {
       case 'interrupted':

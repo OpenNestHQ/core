@@ -6,7 +6,8 @@ import { MockDriver } from '@opennest/devices'
 import { runCommand } from './index.js'
 import type { EffectVMResult, RunOptions } from './index.js'
 import { validateProgram } from '../index.js'
-import type { Device, VMCommand, VMContext } from '../index.js'
+import { pause } from '../index.js'
+import type { Device, Middleware, VMCommand, VMContext } from '../index.js'
 import { DefaultVMEventBus } from '../trace/event-bus.js'
 import { DefaultExecutionTracer } from '../trace/tracer.js'
 import { NodeStatus } from '../trace/types.js'
@@ -286,5 +287,95 @@ describe('runCommand with a stop', () => {
       NodeStatus.Interrupted,
     ])
     expect(driver.setProperty).not.toHaveBeenCalled()
+  })
+
+  it('a stop already complete at start sends nothing', async () => {
+    const getProperty = vi.fn(async () => false)
+    const driver = makeDriver({ getProperty })
+
+    const result = await start(
+      runProgram('light[salon].power = on'),
+      { devices: [light('salon', driver)] },
+      { stop: Effect.void },
+    )
+
+    expect(result.status).toBe('interrupted')
+    expect(result.completedStatements).toBe(0)
+    expect(result.executed).toEqual([])
+    expect(getProperty).not.toHaveBeenCalled()
+    expect(driver.setProperty).not.toHaveBeenCalled()
+  })
+
+  it('a stop requested before the run suspends ends it as interrupted', async () => {
+    const driver = makeDriver({})
+    let release = () => {}
+    const released = new Promise<void>(resolve => {
+      release = resolve
+    })
+    let entered = false
+    // Async middleware: waits, then asks for a confirmation.
+    const confirmLater: Middleware = async () => {
+      entered = true
+      await released
+      return pause({ id: 'confirm-1', type: 'confirmation', message: 'ok?' })
+    }
+    const { stop, trigger } = makeStop()
+
+    const promise = start(
+      runProgram('light[salon].power = on'),
+      { devices: [light('salon', driver)], middleware: [confirmLater] },
+      { stop },
+    )
+    await vi.waitFor(() => expect(entered).toBe(true))
+    trigger()
+    // Let the stop fiber complete before the middleware resumes.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    release()
+    const result = await promise
+
+    expect(result.status).toBe('interrupted')
+    expect(result.interaction).toBeNull()
+    expect(result.session.pendingInteraction).toBeNull()
+    expect(result.session._pendingProgram).toBeUndefined()
+    expect(result.session.cursor).toBe(0)
+    expect(driver.setProperty).not.toHaveBeenCalled()
+  })
+
+  it('a stop during a batch records only the sent elements', async () => {
+    const hungRead = new Promise<unknown>(() => {})
+    const driver = makeDriver({
+      // The cuisine light never answers its pre-write read.
+      getProperty: async (id: string) =>
+        id === 'light_cuisine' ? hungRead : false,
+    })
+    const { stop, trigger } = makeStop()
+
+    const promise = start(
+      runProgram('$lights = @all(light[*])\n$lights.power = on'),
+      {
+        devices: [
+          light('salon', driver),
+          light('chambre', driver),
+          light('cuisine', driver),
+        ],
+      },
+      { stop },
+    )
+    await vi.waitFor(() => expect(driver.setProperty).toHaveBeenCalledTimes(2))
+    trigger()
+    const result = await promise
+
+    expect(result.status).toBe('interrupted')
+    expect(result.completedStatements).toBe(1)
+    const batch = result.executed[1]!
+    expect(batch.changes.map(c => c.deviceId).sort()).toEqual([
+      'light_chambre',
+      'light_salon',
+    ])
+    expect(batch.resolvedDevices.map(d => d.id).sort()).toEqual([
+      'light_chambre',
+      'light_salon',
+    ])
+    expect(['light_chambre', 'light_salon']).toContain(result.session.it?.id)
   })
 })
