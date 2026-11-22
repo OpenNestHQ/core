@@ -1,5 +1,5 @@
 import type { VMEvent } from '@opennest/vm'
-import type { ExecutionEvent } from './events.js'
+import type { ExecutionEvent, NodeCompletedEvent } from './events.js'
 
 export class ExecutionEventNormalizer {
   private stack: string[] = []
@@ -23,7 +23,7 @@ export class ExecutionEventNormalizer {
             type: 'node.completed',
             nodeId,
             timestamp: event.timestamp,
-            status: mapStatus(event.status),
+            ...completedStatus(event.status),
             attributes: attrs,
           },
         ]
@@ -64,7 +64,7 @@ export class ExecutionEventNormalizer {
             type: 'node.completed',
             nodeId,
             timestamp: event.timestamp,
-            status: mapStatus(event.status),
+            ...completedStatus(event.status),
             attributes: attrs,
           },
         ]
@@ -85,7 +85,7 @@ export class ExecutionEventNormalizer {
             type: 'node.completed',
             nodeId,
             timestamp: event.timestamp,
-            status: mapStatus(event.status),
+            ...completedStatus(event.status),
           },
         ]
       }
@@ -128,7 +128,7 @@ export class ExecutionEventNormalizer {
             type: 'node.completed',
             nodeId,
             timestamp: event.timestamp,
-            status: mapStatus(event.status),
+            ...completedStatus(event.status),
             attributes: attrs,
           },
         ]
@@ -201,7 +201,7 @@ export class ExecutionEventNormalizer {
             type: 'node.completed',
             nodeId,
             timestamp: event.timestamp,
-            status: mapStatus(event.status),
+            ...completedStatus(event.status),
             attributes: attrs,
           },
         ]
@@ -231,17 +231,22 @@ export class ExecutionEventNormalizer {
   }
 }
 
-function mapStatus(
-  status: 'success' | 'failed' | 'waiting' | 'skipped',
-): 'success' | 'failed' | 'cancelled' {
+type EndStatus = 'success' | 'failed' | 'waiting' | 'skipped' | 'interrupted'
+
+/** The `node.completed` status (and span status message) of a VM end status. */
+function completedStatus(
+  status: EndStatus,
+): Pick<NodeCompletedEvent, 'status' | 'message'> {
   switch (status) {
     case 'success':
-      return 'success'
+      return { status: 'success' }
     case 'failed':
-      return 'failed'
+      return { status: 'failed' }
     case 'waiting':
-      return 'success'
+      return { status: 'success' }
     case 'skipped':
-      return 'cancelled'
+      return { status: 'cancelled' }
+    case 'interrupted':
+      return { status: 'failed', message: 'interrupted' }
   }
 }

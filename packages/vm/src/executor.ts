@@ -13,16 +13,26 @@ import type { VerificationTarget } from './execution.js'
 import type { DriverError } from './effect/errors.js'
 import { readProperty, writeProperty, invokeAction } from './effect/driver.js'
 import { runPromiseRethrowingOriginal } from './effect/run.js'
+import { neverStop } from './effect/stop.js'
+import type { StopRequested, StopToken } from './effect/stop.js'
 
 export interface ExecutedAction {
   change: StateChange | null
   outcome: ActionOutcome | null
+  /** Set when a stop prevented the action from being sent: nothing was done. */
+  notSent?: true
 }
 
+/**
+ * Executes one planned action. With a stop token, the action is not sent once
+ * a stop is requested; a sent action still completes, and its verification is
+ * abandoned (`not_observable`).
+ */
 export function executePlannedActionEffect(
   action: PlannedAction,
   runtime: DriverRuntimeContext,
   eventBus?: VMEventBus,
+  stop: StopToken = neverStop,
 ): Effect.Effect<ExecutedAction> {
   return Effect.gen(function* () {
     eventBus?.emit({
@@ -38,8 +48,18 @@ export function executePlannedActionEffect(
       ...('args' in action && action.args ? { args: action.args } : {}),
     })
 
-    const dispatched = yield* Effect.result(dispatchCommand(action, runtime))
+    const dispatched = yield* Effect.result(
+      dispatchCommand(action, runtime, stop),
+    )
     if (Result.isFailure(dispatched)) {
+      if (dispatched.failure._tag === 'StopRequested') {
+        eventBus?.emit({
+          kind: 'action:end',
+          timestamp: Date.now(),
+          status: 'interrupted',
+        })
+        return { change: null, outcome: null, notSent: true }
+      }
       const error = errorMessage(dispatched.failure.cause)
       eventBus?.emit({
         kind: 'action:end',
@@ -64,8 +84,25 @@ export function executePlannedActionEffect(
       status: 'success',
     })
 
-    return { change, outcome: yield* buildOutcome(action, change, runtime) }
+    const outcome = yield* stop
+      .abandonOnStop(buildOutcome(action, change, runtime))
+      .pipe(
+        Effect.catchTag('StopRequested', () =>
+          Effect.succeed(abandonedOutcome(action)),
+        ),
+      )
+    return { change, outcome }
   })
+}
+
+/** The outcome of a sent action whose verification a stop abandoned. */
+function abandonedOutcome(action: PlannedAction): ActionOutcome | null {
+  if (action.kind === 'read_property') return null
+  return {
+    deviceId: action.device.id,
+    execution: { status: 'accepted' },
+    verification: { status: 'not_observable' },
+  }
 }
 
 /** Promise façade of {@link executePlannedActionEffect}; never rejects on driver failures. */
@@ -86,7 +123,8 @@ function errorMessage(err: unknown): string {
 function dispatchCommand(
   action: PlannedAction,
   runtime: DriverRuntimeContext,
-): Effect.Effect<StateChange, DriverError> {
+  stop: StopToken,
+): Effect.Effect<StateChange, DriverError | StopRequested> {
   switch (action.kind) {
     case 'set_property':
       return executeAssignmentEffect(
@@ -94,6 +132,7 @@ function dispatchCommand(
         action.property,
         action.value,
         runtime,
+        stop,
       )
     case 'increment_property':
       return executeIncrementEffect(
@@ -101,15 +140,17 @@ function dispatchCommand(
         action.property,
         action.value,
         runtime,
+        stop,
       )
     case 'read_property':
-      return executeQueryEffect(action.device, action.property, runtime)
+      return executeQueryEffect(action.device, action.property, runtime, stop)
     case 'invoke_action':
       return executeActionEffect(
         action.device,
         action.method,
         action.args,
         runtime,
+        stop,
       )
   }
 }
@@ -175,16 +216,25 @@ function verifyOutcome(
   )
 }
 
+/*
+ * The `...Effect` commands below take an optional stop token: reads are
+ * abandoned on stop, a write is not sent once a stop is requested. Without a
+ * token they never fail with `StopRequested`.
+ */
+
 export function executeAssignmentEffect(
   device: Device,
   property: string,
   value: Value,
   runtime: DriverRuntimeContext,
-): Effect.Effect<StateChange, DriverError> {
+  stop: StopToken = neverStop,
+): Effect.Effect<StateChange, DriverError | StopRequested> {
   return Effect.gen(function* () {
-    const oldValue = yield* readProperty(device, property, runtime)
+    const oldValue = yield* stop.abandonOnStop(
+      readProperty(device, property, runtime),
+    )
     const newValue = extractValue(value)
-    yield* writeProperty(device, property, newValue, runtime)
+    yield* stop.abortOnStop(writeProperty(device, property, newValue, runtime))
     return { deviceId: device.id, property, oldValue, newValue }
   })
 }
@@ -194,13 +244,16 @@ export function executeIncrementEffect(
   property: string,
   value: Value,
   runtime: DriverRuntimeContext,
-): Effect.Effect<StateChange, DriverError> {
+  stop: StopToken = neverStop,
+): Effect.Effect<StateChange, DriverError | StopRequested> {
   return Effect.gen(function* () {
-    const currentValue = yield* readProperty(device, property, runtime)
+    const currentValue = yield* stop.abandonOnStop(
+      readProperty(device, property, runtime),
+    )
     const increment = extractNumericValue(value)
     const newValue =
       typeof currentValue === 'number' ? currentValue + increment : increment
-    yield* writeProperty(device, property, newValue, runtime)
+    yield* stop.abortOnStop(writeProperty(device, property, newValue, runtime))
     return { deviceId: device.id, property, oldValue: currentValue, newValue }
   })
 }
@@ -209,13 +262,17 @@ export function executeQueryEffect(
   device: Device,
   property: string,
   runtime: DriverRuntimeContext,
-): Effect.Effect<StateChange, DriverError> {
-  return Effect.map(readProperty(device, property, runtime), currentValue => ({
-    deviceId: device.id,
-    property,
-    oldValue: currentValue,
-    newValue: currentValue,
-  }))
+  stop: StopToken = neverStop,
+): Effect.Effect<StateChange, DriverError | StopRequested> {
+  return Effect.map(
+    stop.abandonOnStop(readProperty(device, property, runtime)),
+    currentValue => ({
+      deviceId: device.id,
+      property,
+      oldValue: currentValue,
+      newValue: currentValue,
+    }),
+  )
 }
 
 export function executeActionEffect(
@@ -223,7 +280,8 @@ export function executeActionEffect(
   method: string,
   args: Record<string, Value> | undefined,
   runtime: DriverRuntimeContext,
-): Effect.Effect<StateChange, DriverError> {
+  stop: StopToken = neverStop,
+): Effect.Effect<StateChange, DriverError | StopRequested> {
   const extractedArgs: Record<string, unknown> = {}
   if (args) {
     for (const [name, value] of Object.entries(args)) {
@@ -231,7 +289,7 @@ export function executeActionEffect(
     }
   }
   return Effect.map(
-    invokeAction(device, method, extractedArgs, runtime),
+    stop.abortOnStop(invokeAction(device, method, extractedArgs, runtime)),
     () => ({
       deviceId: device.id,
       property: `action:${method}`,

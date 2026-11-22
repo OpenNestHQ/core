@@ -647,4 +647,18 @@ describe('ExecutionEventNormalizer', () => {
     expect(action2Started.parentNodeId).toBeDefined()
     expect(action2Started.parentNodeId).not.toBe(middlewareId)
   })
+
+  it('maps interrupted program:end to an error span status', () => {
+    const norm = new ExecutionEventNormalizer()
+    norm.consume({ kind: 'program:begin', timestamp: 1000 })
+    const end = norm.consume({
+      kind: 'program:end',
+      timestamp: 1100,
+      status: 'interrupted',
+    })
+
+    const ended = end[0]! as NodeCompletedEvent
+    expect(ended.status).toBe('failed')
+    expect(ended.message).toBe('interrupted')
+  })
 })

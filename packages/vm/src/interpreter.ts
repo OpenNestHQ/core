@@ -18,6 +18,7 @@ import type {
 } from '@opennest/lang-core'
 import type {
   Device,
+  ExecutedStatement,
   Session,
   VMResult,
   VMError,
@@ -45,6 +46,8 @@ import type { ExecutedAction } from './executor.js'
 import { runMiddlewarePipelineEffect } from './middleware/pipeline.js'
 import { readProperty } from './effect/driver.js'
 import { runPromiseRethrowingOriginal } from './effect/run.js'
+import { neverStop, toVMResult } from './effect/stop.js'
+import type { EffectVMResult, StopRequested, StopToken } from './effect/stop.js'
 
 /** Everything a statement needs to run; built once per program run. */
 interface InterpreterEnv {
@@ -53,6 +56,7 @@ interface InterpreterEnv {
   readonly middleware: Middleware[] | undefined
   readonly eventBus: VMEventBus | undefined
   readonly runtime: DriverRuntimeContext
+  readonly stop: StopToken
 }
 
 type InterpretResult =
@@ -63,6 +67,11 @@ type InterpretResult =
       pendingContext: unknown
     }
   | { kind: 'error'; errors: VMError[] }
+  /** A stop ended the statement before it finished. */
+  | { kind: 'interrupted' }
+
+/** Failures inside a statement; `runTracedStatement` turns a stop into a result. */
+type StatementError = VMInfraError | StopRequested
 
 type AwaitingInteraction = Extract<
   InterpretResult,
@@ -73,7 +82,8 @@ type AwaitingInteraction = Extract<
  * Runs a program. Business outcomes (validation errors, ambiguity, blocked
  * actions, driver write failures…) are part of the `VMResult`; only
  * infrastructure failures that abort the run (an `@if` condition read, a
- * middleware throwing a non-signal) are in the error channel.
+ * middleware throwing a non-signal) are in the error channel. Only a run with
+ * a `stop` token can end `interrupted`.
  */
 export function interpretProgramEffect(
   program: Program,
@@ -81,7 +91,8 @@ export function interpretProgramEffect(
   existingSession?: Session,
   middleware?: Middleware[],
   eventBus?: VMEventBus,
-): Effect.Effect<VMResult, VMInfraError> {
+  stop: StopToken = neverStop,
+): Effect.Effect<EffectVMResult, VMInfraError> {
   return Effect.gen(function* () {
     const session = existingSession ?? createSession()
     const isFresh = !existingSession || existingSession.cursor === 0
@@ -99,6 +110,7 @@ export function interpretProgramEffect(
       middleware,
       eventBus,
       runtime: { programId: session.programId },
+      stop,
     }
 
     eventBus?.emit({ kind: 'program:begin', timestamp: Date.now() })
@@ -122,7 +134,7 @@ export function interpretProgram(
       existingSession,
       middleware,
       eventBus,
-    ),
+    ).pipe(Effect.map(toVMResult)),
   )
 }
 
@@ -147,31 +159,40 @@ function rejectInvalidProgram(
   }
 }
 
-interface StatementsRun {
-  errors: VMError[]
-  /** Set when a statement suspended the run for a user interaction. */
-  interaction: UserInteraction | null
-}
+type StatementsRun =
+  | { kind: 'finished'; errors: VMError[] }
+  /** A statement suspended the run for a user interaction. */
+  | { kind: 'suspended'; errors: VMError[]; interaction: UserInteraction }
+  /** A stop ended the run after `completedStatements` top-level statements. */
+  | { kind: 'interrupted'; errors: VMError[]; completedStatements: number }
 
 /**
  * The top-level statement loop, from `session.cursor` on. A failing statement
  * does not stop the loop; an interaction suspends it and records where to
- * resume.
+ * resume; a stop (checked before each statement) ends it as interrupted.
  */
 function runStatements(
   program: Program,
   env: InterpreterEnv,
 ): Effect.Effect<StatementsRun, VMInfraError> {
   return Effect.gen(function* () {
-    const { session } = env
+    const { session, stop } = env
     const errors: VMError[] = []
 
     for (let i = session.cursor; i < program.statements.length; i++) {
+      if (stop.isRequested()) {
+        return { kind: 'interrupted', errors, completedStatements: i }
+      }
+
       const result = yield* runTracedStatement(program.statements[i]!, i, env)
 
       if (result.kind === 'awaiting_interaction') {
         suspendProgram(session, program, i, result)
-        return { errors, interaction: result.interaction }
+        return { kind: 'suspended', errors, interaction: result.interaction }
+      }
+
+      if (result.kind === 'interrupted') {
+        return { kind: 'interrupted', errors, completedStatements: i }
       }
 
       if (result.kind === 'error') errors.push(...result.errors)
@@ -180,7 +201,16 @@ function runStatements(
       session.cursor = i + 1
     }
 
-    return { errors, interaction: null }
+    // A stop during the last statement abandoned part of it (a verification,
+    // an aborted write): the run is interrupted even though no statement is left.
+    if (stop.isRequested()) {
+      return {
+        kind: 'interrupted',
+        errors,
+        completedStatements: program.statements.length,
+      }
+    }
+    return { kind: 'finished', errors }
   })
 }
 
@@ -199,10 +229,15 @@ function suspendProgram(
   session.cursor = index
 }
 
-function finishProgram(run: StatementsRun, env: InterpreterEnv): VMResult {
+function finishProgram(
+  run: StatementsRun,
+  env: InterpreterEnv,
+): EffectVMResult {
   const { session, eventBus } = env
 
-  if (run.interaction !== null) {
+  if (run.kind === 'interrupted') return interruptProgram(run, env)
+
+  if (run.kind === 'suspended') {
     eventBus?.emit({
       kind: 'program:end',
       timestamp: Date.now(),
@@ -250,7 +285,40 @@ function finishProgram(run: StatementsRun, env: InterpreterEnv): VMResult {
   }
 }
 
-/** Runs one statement between its `statement:begin` and `statement:end` events. */
+/**
+ * Ends a stopped run. The session keeps what was executed (`history`, `it`,
+ * variables) but no pending program, so it can run a new program from scratch.
+ */
+function interruptProgram(
+  run: Extract<StatementsRun, { kind: 'interrupted' }>,
+  env: InterpreterEnv,
+): EffectVMResult {
+  const { session, eventBus } = env
+  session.cursor = 0
+  session.resolvedIds = {}
+  session.pendingInteraction = null
+  delete session._pendingProgram
+
+  eventBus?.emit({
+    kind: 'program:end',
+    timestamp: Date.now(),
+    status: 'interrupted',
+    ...(run.errors.length > 0 ? { errorCount: run.errors.length } : {}),
+  })
+  return {
+    status: 'interrupted',
+    session,
+    executed: session.history,
+    interaction: null,
+    errors: run.errors,
+    completedStatements: run.completedStatements,
+  }
+}
+
+/**
+ * Runs one statement between its `statement:begin` and `statement:end` events.
+ * A `StopRequested` from anywhere inside ends it as `interrupted`.
+ */
 function runTracedStatement(
   statement: Statement,
   index: number,
@@ -265,9 +333,20 @@ function runTracedStatement(
       statementKind: statement.kind,
     })
 
-    const result = yield* interpretStatement(statement, env)
+    const result = yield* interpretStatement(statement, env).pipe(
+      Effect.catchTag('StopRequested', () =>
+        Effect.succeed<InterpretResult>({ kind: 'interrupted' }),
+      ),
+    )
 
     switch (result.kind) {
+      case 'interrupted':
+        eventBus?.emit({
+          kind: 'statement:end',
+          timestamp: Date.now(),
+          status: 'interrupted',
+        })
+        break
       case 'awaiting_interaction':
         eventBus?.emit({
           kind: 'statement:end',
@@ -303,7 +382,7 @@ function runTracedStatement(
 function interpretStatement(
   statement: Statement,
   env: InterpreterEnv,
-): Effect.Effect<InterpretResult, VMInfraError> {
+): Effect.Effect<InterpretResult, StatementError> {
   return Effect.suspend(() => {
     switch (statement.kind) {
       case 'assignment':
@@ -428,7 +507,7 @@ function interpretPropertyStatement(
   stmt: Assignment | Query | Increment,
   spec: PropertyStatementSpec,
   env: InterpreterEnv,
-): Effect.Effect<InterpretResult, VMInfraError> {
+): Effect.Effect<InterpretResult, StatementError> {
   return Effect.suspend(() => {
     const name = lastPropertyName(stmt.path)
     const resolution = resolveStatementDevices(
@@ -447,7 +526,7 @@ function interpretPropertyStatement(
 function interpretAssignment(
   stmt: Assignment,
   env: InterpreterEnv,
-): Effect.Effect<InterpretResult, VMInfraError> {
+): Effect.Effect<InterpretResult, StatementError> {
   return interpretPropertyStatement(
     stmt,
     {
@@ -467,7 +546,7 @@ function interpretAssignment(
 function interpretQuery(
   stmt: Query,
   env: InterpreterEnv,
-): Effect.Effect<InterpretResult, VMInfraError> {
+): Effect.Effect<InterpretResult, StatementError> {
   return interpretPropertyStatement(
     stmt,
     {
@@ -486,7 +565,7 @@ function interpretQuery(
 function interpretIncrement(
   stmt: Increment,
   env: InterpreterEnv,
-): Effect.Effect<InterpretResult, VMInfraError> {
+): Effect.Effect<InterpretResult, StatementError> {
   return interpretPropertyStatement(
     stmt,
     {
@@ -506,7 +585,7 @@ function interpretIncrement(
 function interpretAction(
   stmt: Action,
   env: InterpreterEnv,
-): Effect.Effect<InterpretResult, VMInfraError> {
+): Effect.Effect<InterpretResult, StatementError> {
   return Effect.suspend(() => {
     const method = lastPropertyName(stmt.path)
     const resolution = resolveStatementDevices(
@@ -596,6 +675,7 @@ function getActionParameters(
 /**
  * Executes a batch of planned actions concurrently (all `@all` targets at
  * once, like `Promise.all`). Never fails: driver errors become outcomes.
+ * Once a stop is requested, actions not yet started are not sent.
  */
 function executeBatch(
   actions: PlannedAction[],
@@ -603,9 +683,56 @@ function executeBatch(
 ): Effect.Effect<ExecutedAction[]> {
   return Effect.forEach(
     actions,
-    action => executePlannedActionEffect(action, env.runtime, env.eventBus),
+    action =>
+      Effect.suspend(() =>
+        env.stop.isRequested()
+          ? Effect.succeed<ExecutedAction>(notSent)
+          : executePlannedActionEffect(
+              action,
+              env.runtime,
+              env.eventBus,
+              env.stop,
+            ),
+      ),
     { concurrency: 'unbounded' },
   )
+}
+
+const notSent: ExecutedAction = { change: null, outcome: null, notSent: true }
+
+/**
+ * Records a batch in the history and `it`. When a stop kept some actions from
+ * being sent, only the sent ones are recorded and the statement is
+ * interrupted.
+ */
+function recordBatch(
+  statement: Statement,
+  devices: Device[],
+  actions: PlannedAction[],
+  results: ExecutedAction[],
+  filter: Pick<ExecutedStatement, 'filter'>,
+  session: Session,
+): InterpretResult {
+  const interrupted = results.some(r => r.notSent)
+  const sentIds = new Set(
+    actions.filter((_, i) => !results[i]!.notSent).map(a => a.device.id),
+  )
+  const sentDevices = interrupted
+    ? devices.filter(d => sentIds.has(d.id))
+    : devices
+  if (sentDevices.length === 0 && interrupted) return { kind: 'interrupted' }
+
+  const { changes, outcomes } = splitExecuted(results)
+  session.history.push({
+    statement,
+    resolvedDevices: sentDevices,
+    changes,
+    ...(outcomes.length > 0 ? { outcomes } : {}),
+    ...filter,
+  })
+  if (sentDevices[0]) session.it = sentDevices[0]
+
+  return interrupted ? { kind: 'interrupted' } : { kind: 'success' }
 }
 
 type Approval =
@@ -621,7 +748,7 @@ function approveActions(
   middleware: Middleware[],
   statement: Statement,
   env: InterpreterEnv,
-): Effect.Effect<Approval, VMInfraError> {
+): Effect.Effect<Approval, StatementError> {
   return Effect.gen(function* () {
     const { eventBus } = env
     const pipelineEnv = { session: env.session, devices: env.devices }
@@ -688,7 +815,7 @@ function applyMiddlewareAndFinish(
   statement: Statement,
   resolutionResult: ResolutionResult,
   env: InterpreterEnv,
-): Effect.Effect<InterpretResult, VMInfraError> {
+): Effect.Effect<InterpretResult, StatementError> {
   return Effect.gen(function* () {
     const { session, middleware } = env
     const filter = resolutionResult.filter
@@ -696,23 +823,15 @@ function applyMiddlewareAndFinish(
       : {}
 
     if (!middleware || middleware.length === 0) {
-      const { changes, outcomes } = splitExecuted(
-        yield* executeBatch(actions, env),
-      )
-
-      session.history.push({
+      const results = yield* executeBatch(actions, env)
+      return recordBatch(
         statement,
-        resolvedDevices: resolutionResult.devices,
-        changes,
-        ...(outcomes.length > 0 ? { outcomes } : {}),
-        ...filter,
-      })
-
-      if (resolutionResult.devices[0]) {
-        session.it = resolutionResult.devices[0]
-      }
-
-      return { kind: 'success' } satisfies InterpretResult
+        resolutionResult.devices,
+        actions,
+        results,
+        filter,
+        session,
+      )
     }
 
     const approval = yield* approveActions(actions, middleware, statement, env)
@@ -730,28 +849,19 @@ function applyMiddlewareAndFinish(
       return { kind: 'success' } satisfies InterpretResult
     }
 
-    const { changes, outcomes } = splitExecuted(
-      yield* executeBatch(approved, env),
+    const results = yield* executeBatch(approved, env)
+    const approvedIds = new Set(approved.map(a => a.device.id))
+    const approvedDevices = resolutionResult.devices.filter(d =>
+      approvedIds.has(d.id),
     )
-
-    const resolvedIds = new Set(approved.map(a => a.device.id))
-    const executedDevices = resolutionResult.devices.filter(d =>
-      resolvedIds.has(d.id),
-    )
-
-    session.history.push({
+    return recordBatch(
       statement,
-      resolvedDevices: executedDevices,
-      changes,
-      ...(outcomes.length > 0 ? { outcomes } : {}),
-      ...filter,
-    })
-
-    if (executedDevices[0]) {
-      session.it = executedDevices[0]
-    }
-
-    return { kind: 'success' } satisfies InterpretResult
+      approvedDevices,
+      approved,
+      results,
+      filter,
+      session,
+    )
   })
 }
 
@@ -902,7 +1012,7 @@ function interpretArgBundleAssignment(
 function interpretIfStatement(
   stmt: IfStatement,
   env: InterpreterEnv,
-): Effect.Effect<InterpretResult, VMInfraError> {
+): Effect.Effect<InterpretResult, StatementError> {
   return Effect.gen(function* () {
     const { session } = env
     const evalResult = yield* evaluateConditionExpr(stmt.condition, env)
@@ -920,6 +1030,9 @@ function interpretIfStatement(
     const stmtIndex = session.cursor
 
     for (const bodyStmt of statementsToExecute) {
+      if (env.stop.isRequested()) {
+        return { kind: 'interrupted' } satisfies InterpretResult
+      }
       const result = yield* runTracedStatement(bodyStmt, stmtIndex, env)
       if (result.kind !== 'success') return result
     }
@@ -947,7 +1060,7 @@ type ConditionEvalResult =
 function evaluateConditionExpr(
   expr: ConditionExpr,
   env: InterpreterEnv,
-): Effect.Effect<ConditionEvalResult, DriverError> {
+): Effect.Effect<ConditionEvalResult, DriverError | StopRequested> {
   return Effect.gen(function* () {
     if (expr.kind === 'condition') {
       return yield* evaluateSimpleCondition(expr, env)
@@ -975,7 +1088,7 @@ function evaluateConditionExpr(
 function evaluateSimpleCondition(
   condition: SimpleCondition,
   env: InterpreterEnv,
-): Effect.Effect<ConditionEvalResult, DriverError> {
+): Effect.Effect<ConditionEvalResult, DriverError | StopRequested> {
   return Effect.gen(function* () {
     const { session } = env
     const property = lastPropertyName(condition.path)
@@ -1007,7 +1120,9 @@ function evaluateSimpleCondition(
     }
 
     const device = resolutionResult.devices[0]!
-    const currentValue = yield* readProperty(device, property, env.runtime)
+    const currentValue = yield* env.stop.abandonOnStop(
+      readProperty(device, property, env.runtime),
+    )
 
     session.it = device
 

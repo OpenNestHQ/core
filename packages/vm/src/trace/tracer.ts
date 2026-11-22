@@ -151,7 +151,7 @@ export class DefaultExecutionTracer implements ExecutionTracer {
 }
 
 function mapEndStatus(
-  status: 'success' | 'failed' | 'waiting' | 'skipped',
+  status: 'success' | 'failed' | 'waiting' | 'skipped' | 'interrupted',
 ): NodeStatus {
   switch (status) {
     case 'success':
@@ -162,5 +162,7 @@ function mapEndStatus(
       return NodeStatus.Waiting
     case 'skipped':
       return NodeStatus.Skipped
+    case 'interrupted':
+      return NodeStatus.Interrupted
   }
 }

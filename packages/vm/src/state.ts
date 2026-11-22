@@ -6,6 +6,8 @@ import type { UserResponse } from './interactions/types.js'
 import { InteractionError } from './interactions/errors.js'
 import { processInteractionResponse } from './interactions/registry.js'
 import { interpretProgramEffect } from './interpreter.js'
+import { neverStop, toVMResult } from './effect/stop.js'
+import type { EffectVMResult, StopToken } from './effect/stop.js'
 
 export function createSession(): Session {
   return {
@@ -61,7 +63,8 @@ export function resumeWithResponse(
 export function resumeAndContinueEffect(
   response: UserResponse,
   context: VMContext,
-): Effect.Effect<VMResult, VMInfraError | InteractionError> {
+  stop: StopToken = neverStop,
+): Effect.Effect<EffectVMResult, VMInfraError | InteractionError> {
   return Effect.gen(function* () {
     const session = context.session
     if (!session) {
@@ -93,6 +96,7 @@ export function resumeAndContinueEffect(
       session,
       context.middleware,
       context.eventBus,
+      stop,
     )
   })
 }
@@ -103,7 +107,7 @@ export function resumeAndContinue(
   context: VMContext,
 ): Promise<VMResult> {
   return runPromiseRethrowingOriginal(
-    resumeAndContinueEffect(response, context),
+    resumeAndContinueEffect(response, context).pipe(Effect.map(toVMResult)),
   )
 }
 
