@@ -140,7 +140,7 @@ importers:
   packages/devices:
     dependencies:
       effect:
-        specifier: ^4.1.5
+        specifier: ~4.1.5
         version: 4.1.5
       js-yaml:
         specifier: ^4.1.0
@@ -227,7 +227,7 @@ importers:
         specifier: workspace:*
         version: link:../lang-core
       effect:
-        specifier: ^4.1.5
+        specifier: ~4.1.5
         version: 4.1.5
     devDependencies:
       typescript:
@@ -3070,7 +3070,7 @@ snapshots:
       obug: 2.1.3
       std-env: 4.2.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.10(@opentelemetry/api@1.9.0)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.10)(vite@8.1.4(@types/node@26.1.1)(jiti@2.7.0))
+      vitest: 4.1.10(@opentelemetry/api@1.9.0)(@types/node@26.6.6)(@vitest/coverage-v8@4.1.10)(vite@8.1.4(@types/node@26.6.6)(jiti@2.7.0))
 
   '@vitest/expect@4.1.10':
     dependencies:
