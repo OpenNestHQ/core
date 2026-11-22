@@ -13,8 +13,9 @@ No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm w
 | Package | npm name | Role | Depends on |
 |---|---|---|---|
 | `packages/lang-core` | `@opennest/lang-core` | Parser (HomeDSL → AST), prompt generator, AST builders | *none* |
-| `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers | *none* (only `js-yaml`) |
-| `packages/vm` | `@opennest/vm` | interpreter: `executeCommand()`, resolution, middleware, interactions, validation, tracing | `lang-core`, `devices` |
+| `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers (HA websocket client is Effect-based internally) | *none* (only `js-yaml` + `effect`) |
+| `packages/vm` | `@opennest/vm` | interpreter: `executeCommand()`, resolution, middleware, interactions, validation, tracing, state verification. Effect core; extra entry point `@opennest/vm/effect` | `lang-core`, `devices` (+ `effect`) |
+| `packages/vm-opentelemetry` | `@opennest/vm-opentelemetry` | OpenTelemetry trace sink for the VM `ExecutionTrace` | `@opentelemetry/api` (peer: `vm`) |
 | `packages/sdk` | `@opennest/sdk` | Deterministic execution facade (`OpenNestClient`) over parser + devices + VM | `lang-core`, `devices`, `vm` |
 | `packages/mcp` | `@opennest/mcp` | Stdio MCP server exposing the runtime (HomeDSL execution, interactions, session) to AI agents | `sdk`, `vm`, `devices` |
 | `examples/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `sdk` |
@@ -77,6 +78,8 @@ All packages are **ESM-only** (`"type": "module"`) using **nodenext** module res
 
 Use `import type { ... }` for type-only imports — required by `verbatimModuleSyntax: true`.
 
+`@opennest/vm` has two entry points (`exports` in its package.json): `@opennest/vm` (Promise API) and `@opennest/vm/effect` (Effect API, see "Effect core"). The `effect` dependency (`^4.1.5`) exists in `packages/devices` and `packages/vm` **only** — `lang-core`, `sdk`, `mcp` and `examples/*` must not depend on it.
+
 ## TypeScript config
 
 All packages share the same strict tsconfig:
@@ -117,6 +120,7 @@ Key flags:
 - Run a single file: `pnpm exec vitest run path/to/file.test.ts` (from the package directory).
 - **playground has no tests.**
 - `sdk` is covered by `client.test.ts` (end-to-end via `MockDriver`).
+- `vm-opentelemetry` has its own tests (`normalizer.test.ts`, `OpenTelemetryTraceSink.test.ts`).
 - `vm` tests create devices inline with `MockDriver` + `seed()`. No external fixture files are required at runtime. An `__fixtures__/inventory.yaml` exists for reference (7 sample devices).
 - `devices` tests use temporary YAML files in `/tmp/` for registry tests. `homeassistant.test.ts` uses `vi.stubGlobal("fetch", ...)` to mock HTTP calls.
 
@@ -124,7 +128,8 @@ Key flags:
 
 ### Entry points
 
-- **VM**: `executeCommand(command: VMCommand, context: VMContext) → Promise<VMResult>` in `packages/vm/src/commands/dispatch.ts`. Single entry point, delegates to `interpretProgram()` for `run_program`, handles `resume_interaction` and `cancel_execution` directly.
+- **VM**: `executeCommand(command: VMCommand, context: VMContext) → Promise<VMResult>` in `packages/vm/src/commands/dispatch.ts`. Single Promise entry point, a façade over `runCommand` (see "Effect core"). Delegates to the interpreter for `run_program`, handles `resume_interaction` and `cancel_execution` directly.
+- **VM (Effect)**: `runCommand(command, context, options?: RunOptions) → Effect<EffectVMResult, VMInfraError>`, exported from `@opennest/vm/effect`.
 - **Parser**: `parseHomeDSL(source: string) → ParseResult` in `packages/lang-core/src/parser/parser.ts`.
 - **Prompt**: `generateHomeAgentPrompt(config?: PromptConfig) → string` in `packages/lang-core/src/prompt/generator.ts`.
 - **Registry**: `DeviceRegistry.fromYaml(yaml: string)` in `packages/devices/src/registry.ts`.
@@ -149,7 +154,7 @@ Commands `execute_action` and `execute_statement` build a `Program` internally v
 
 - `VMContext = { devices: Device[], session?: Session, middleware?: Middleware[], eventBus?: VMEventBus }`. Devices embed a `DeviceDriver` instance, not a driver name.
 - `Device` = `{ id, type, room, name, driver: DeviceDriver, driverConfig }`.
-- `DeviceDriver` (in `packages/devices/src/drivers/interface.ts`) exposes: `name`, `init()`, `getProperty()`, `setProperty()`, `executeAction()`. The `getProperty()`, `setProperty()`, and `executeAction()` methods each accept an optional trailing `runtime?: DriverRuntimeContext` argument (`{ programId: string }`) identifying the current program run.
+- `DeviceDriver` (in `packages/devices/src/drivers/interface.ts`) exposes: `name`, `init()`, `getProperty()`, `setProperty()`, `executeAction()`. The `getProperty()`, `setProperty()`, and `executeAction()` methods each accept an optional trailing `runtime?: DriverRuntimeContext` argument (`{ programId: string, signal?: AbortSignal }`) identifying the current program run. `signal` aborts reads at any time; a write already sent is never aborted (the signal is only checked before sending). Optional methods: `whenReady()`, `validateDeviceConfig()`, `getVerificationStrategy()`, `subscribeProperty()` (see "State verification").
 - `Session` carries: `programId` (stable per program run), `variables`, `argVariables` (named action-argument bundles), `it`, `history`, `cursor`, `resolvedIds`, `variableResolvedIds`, `variableModifiers`, `pendingInteraction`, `_pendingProgram`.
 
 ### VMResult
@@ -161,6 +166,29 @@ Commands `execute_action` and `execute_statement` build a `Program` internally v
   interaction: UserInteraction | null,
   errors: VMError[] }
 ```
+
+### Effect core
+
+Effect v4 (`effect@^4.1.5`) is an **internal** implementation detail of `devices` and `vm`. The public API stays Promise-based: `executeCommand`, `DeviceDriver`, `Middleware`, `VMEventBus` are unchanged, and drivers/middleware written with plain Promises keep working.
+
+- **Façades**: Promise functions (`executeCommand`, `verifyState`, `observeState`, `executePlannedAction`, `runMiddlewarePipeline`...) wrap `...Effect` twins. They run through `runPromiseRethrowingOriginal` (`packages/vm/src/effect/run.ts`): a rejection carries the **original error instance** thrown by the driver/middleware (not the wrapper), so `instanceof` and messages are preserved.
+- **Typed infrastructure errors** (`packages/vm/src/effect/errors.ts`, `Data.TaggedError`): `DriverError { deviceId, operation: 'get'|'set'|'action', cause }` and `MiddlewareError { middlewareName, cause }` (a middleware threw something that is not a flow-control signal); union `VMInfraError`. They only live in the Effect error channel; **business outcomes** (blocked, skipped, ambiguity, validation errors, failed resume preconditions...) stay in `VMResult`.
+- **Driver bridge** (`effect/driver.ts`): `readProperty` / `writeProperty` / `invokeAction` turn a driver Promise into an `Effect<_, DriverError>` and hand the driver an `AbortSignal` (combined with any `runtime.signal`) in `DriverRuntimeContext.signal`. Writes/actions additionally *await* the driver promise on interruption (a sent write runs to completion).
+- **`@opennest/vm/effect`** (`effect/index.ts`): `runCommand`, `RunOptions`, `EffectVMResult`, `EffectVMStatus`, `DriverError`, `MiddlewareError`, `VMInfraError`. It also registers the default interaction handlers.
+- **Cooperative stop**: `runCommand(command, ctx, { stop })` where `stop: Effect<void>` requests the stop when it completes (`effect/stop.ts`: `StopToken`, `makeStopToken`, `neverStop`; `StopRequested` never leaves the interpreter). Semantics: the VM checks before each statement and before each write; a write already sent runs to completion (its driver promise is awaited); reads and verifications are abandoned (a sent action then reports `verification: not_observable`); the result is `EffectVMResult` with `status: 'interrupted'` and `completedStatements` (top-level statements finished), `executed` = history so far. The session is reset (`cursor = 0`, no pending program/interaction) but keeps `history`, `it` and variables. A stop has no effect once the run ended, including on `awaiting_interaction`. `executeCommand` never stops: `'interrupted'` is not part of `VMResult['status']`.
+- **HA websocket client** (`packages/devices/src/drivers/ha/ws-core.ts`): Effect implementation (connection-loop fiber, `Deferred`-based commands, heartbeat, backoff reconnect); `ws.ts` is the Promise façade (`HAWebSocketClient`). Typed errors in `ws-errors.ts` (`HAWsAuthError` — fatal, plain `Error` subclass —, `HAWsConnectionError`, `HAWsTimeoutError`, `HAWsCommandError`, `HAWsClosedError`, `HAWsAbortedError`). **Sync-send invariant**: a command is sent before `callService` returns and `isReady()` stays synchronous. This relies on Effect 4.1.5 internals (`runFork`/`runPromise` evaluate synchronously up to the first suspension; completing a `Deferred` resumes waiters synchronously). Re-run `ws.test.ts` when upgrading `effect`.
+
+### State verification
+
+After a write, the VM can check that the device reached the expected state (`packages/vm/src/execution.ts`). Expected effects come from `driverConfig.actions.<name>.expectedEffects` (`readExpectedEffects`). The driver chooses how to observe via optional `getVerificationStrategy()` (`resolveVerificationStrategy`):
+
+- `poll` (`{ timeout, interval }`): samples until the state matches or the deadline passes (`timeout`).
+- `event`: reads once, then subscribes through the optional `subscribeProperty()` (returns an unsubscribe fn, or `null` if not subscribable) and re-reads on notifications until match or deadline. Subscriptions are scoped and released on completion/interruption. No subscription → single observation.
+- `null` / absent: single immediate observation.
+
+Verification statuses: `confirmed`, `mismatch`, `timeout`, `not_observable` (any verification failure; never fails the action).
+
+Each sent action yields an `ActionOutcome` (`lang-core`, in `ExecutedStatement.outcomes`) that separates `execution` (`{ status: 'accepted' | 'failed' }`, did the driver accept the write) from `verification` (did the state converge). `verifyState` / `observeState` are Promise façades of `verifyStateEffect` / `observeStateEffect`.
 
 ### User interaction system (extensible)
 
@@ -218,6 +246,8 @@ Built-in middleware:
 - `noopMiddleware` — always calls `next()`, serves as template
 - `createConfirmationMiddleware(opts)` — pauses for confirmation on matching actions (configurable predicate + message)
 
+Return-based alternatives to throwing (`packages/vm/src/middleware/outcomes.ts`): `block(reason)`, `skip(reason?)`, `pause(interaction, context?)` return a `PipelineOutcome` directly. `expand` stays signal-only (`ExpandSignal`). A middleware that throws anything else is a `MiddlewareError` internally (rethrown as the original error by Promise façades).
+
 `VMContext.middleware?: Middleware[]` wires middleware into execution.
 
 ### Pre-execution validation
@@ -238,11 +268,11 @@ Automatically called at the start of `interpretProgram()` on fresh executions (`
 
 Deterministic execution tracing via an event bus pattern. The VM emits typed `VMEvent` objects (10 event types) during execution; a `Tracer` consumes them and builds an `ExecutionNode` tree.
 
-**Opt-in via `VMContext.eventBus?: VMEventBus`.**
+**Opt-in via `VMContext.eventBus?: VMEventBus`.** `program:end` status may be `'interrupted'` (only for runs stopped via `@opennest/vm/effect`), mapped to `NodeStatus.Interrupted`.
 
 Node kinds captured: `Program`, `Statement`, `Handler`, `Middleware`, `Execute`.
 
-Each `ExecutionNode` records: `id`, `parentId`, `kind`, `name`, `status` (Running/Success/Failed/Waiting/Skipped), `startedAt`, `endedAt`, `duration`, `children`, `attributes`.
+Each `ExecutionNode` records: `id`, `parentId`, `kind`, `name`, `status` (Running/Success/Failed/Waiting/Skipped/Interrupted), `startedAt`, `endedAt`, `duration`, `children`, `attributes`.
 
 ```typescript
 // Usage
@@ -293,9 +323,14 @@ packages/
       types.ts           # Device, DeviceEntry, InventoryYaml types
       registry.ts        # DeviceRegistry class (fromYaml, getDevices, etc.)
       drivers/
-        interface.ts     # DeviceDriver interface
+        interface.ts     # DeviceDriver interface, DriverRuntimeContext ({ programId, signal? })
         mock.ts          # MockDriver (in-memory property store)
-        homeassistant.ts # HADriver (REST API via fetch)
+        homeassistant.ts # HADriver (REST API via fetch + websocket)
+        ha/
+          ws-core.ts     # Effect HA websocket client (connection loop, commands, subscriptions)
+          ws-errors.ts   # HAWs*Error types (HAWsAuthError, tagged errors, HAWsError union)
+          ws.ts          # HAWebSocketClient — Promise façade over ws-core
+          binding.ts, validate.ts, values.ts, args.ts  # HA device config binding/validation/mapping
   lang-core/
     src/
       index.ts           # Re-exports everything
@@ -318,7 +353,14 @@ packages/
       types.ts           # VMContext, VMResult, Session, Device, ResolutionFilter, etc.
       commands/
         types.ts         # VMCommand discriminated union (5 variants)
-        dispatch.ts      # executeCommand() — single entry point dispatcher
+        dispatch.ts      # runCommand() (Effect, RunOptions.stop) + executeCommand() Promise façade
+      effect/
+        errors.ts        # DriverError, MiddlewareError, VMInfraError, toOriginalError
+        driver.ts        # readProperty/writeProperty/invokeAction — driver Promise → Effect, AbortSignal
+        run.ts           # runPromiseRethrowingOriginal() — façade runner
+        stop.ts          # StopToken, makeStopToken, neverStop, EffectVMResult ('interrupted')
+        index.ts         # Public entry point @opennest/vm/effect
+      execution.ts       # State verification: strategies (poll/event), verifyState(Effect), observeState(Effect)
       interactions/
         types.ts         # UserInteraction, UserResponse, InteractionHandler, PendingInteraction
         registry.ts      # Handler registry + createInteraction()/processInteractionResponse()
@@ -329,6 +371,7 @@ packages/
         types.ts         # Middleware, PlannedAction, PipelineOutcome, signals
         pipeline.ts       # runMiddlewarePipeline() — sequential chain evaluator
         noop.ts           # noopMiddleware
+        outcomes.ts       # block()/skip()/pause() return-based outcome helpers
         confirmation.ts   # createConfirmationMiddleware() — pause-and-resume
       trace/
         types.ts         # ExecutionNode, ExecutionTrace, NodeKind, NodeStatus
@@ -336,7 +379,7 @@ packages/
         event-bus.ts     # VMEventBus interface + DefaultVMEventBus
         tracer.ts        # ExecutionTracer interface + DefaultExecutionTracer
         index.ts         # Re-exports everything
-      interpreter.ts     # interpretProgram() — main execution loop
+      interpreter.ts     # interpretProgram()/interpretProgramEffect() — main execution loop (stop-aware)
       executor.ts        # executeAssignment, executeIncrement, executeQuery, executePlannedAction
       resolver.ts        # resolveDevices(), resolveDeviceById(), resolveByDeviceId()
       state.ts           # createSession(), resumeAndContinue()
@@ -344,6 +387,10 @@ packages/
       validate.ts        # validateProgram() — pre-execution static validation
     __fixtures__/
       inventory.yaml     # Sample YAML inventory (7 devices)
+  vm-opentelemetry/
+    src/
+      OpenTelemetryTraceSink.ts # Exports an ExecutionTrace as OpenTelemetry spans
+      normalizer.ts, events.ts, index.ts
   sdk/
     src/
       index.ts           # Re-exports (OpenNestClient + types)
