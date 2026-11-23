@@ -36,7 +36,8 @@ export function checkInputAnswer(
 
   switch (spec.type) {
     case 'text_input': {
-      const text = (response as TextInputResponse).text.trim()
+      const raw: unknown = (response as TextInputResponse).text
+      const text = typeof raw === 'string' ? raw.trim() : ''
       if (text === '') {
         return { ok: false, message: 'Expected a non-empty text' }
       }
@@ -59,7 +60,10 @@ export function checkInputAnswer(
     }
     case 'choice': {
       const value = (response as ChoiceResponse).value
-      if (!spec.options.some(option => option.value === value)) {
+      if (
+        typeof value !== 'string' ||
+        !spec.options.some(option => option.value === value)
+      ) {
         const accepted = spec.options.map(o => `"${o.value}"`).join(', ')
         return {
           ok: false,

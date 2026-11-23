@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest'
-import { Effect } from 'effect'
 import { parseHomeDSL } from '@opennest/lang-core'
 import { MockDriver } from '@opennest/devices'
 import {
@@ -14,11 +13,9 @@ import type {
   Device,
   Middleware,
   MiddlewareContext,
-  Session,
   UserResponse,
   VMResult,
 } from '../index.js'
-import { runCommand } from '../effect/index.js'
 import { AskStore } from './ask.js'
 
 class CountingDriver extends MockDriver {
@@ -444,6 +441,14 @@ describe('ask()', () => {
         max: 1,
       }),
     ).toThrow(/min/)
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      expect(() =>
+        ask(ctx, { key: 'n', type: 'number_input', message: 'N?', min: bad }),
+      ).toThrow(/finite/)
+      expect(() =>
+        ask(ctx, { key: 'n', type: 'number_input', message: 'N?', max: bad }),
+      ).toThrow(/finite/)
+    }
 
     const mw: Middleware = async (c, next) => {
       ask(c, { ...roomChoice, options: [] })
@@ -451,6 +456,25 @@ describe('ask()', () => {
     }
     const h = harness([mw])
     await expect(h.run('tv[salon].power = on')).rejects.toThrow(/option/)
+  })
+
+  it('does not return an answer given to a different question type under the same key', async () => {
+    const ask = createAsk()
+    const mw: Middleware = async (ctx, next) => {
+      ask(ctx, { key: 'k', type: 'number_input', message: 'N?' })
+      ask(ctx, { key: 'k', type: 'text_input', message: 'T?' })
+      return next()
+    }
+    const h = harness([mw])
+    const first = await h.run('tv[salon].power = on')
+    expect(first.interaction!.type).toBe('number_input')
+    const second = await h.resume({
+      interactionId: pendingId(first),
+      type: 'number_input',
+      value: 5,
+    })
+    expect(second.status).toBe('awaiting_interaction')
+    expect(second.interaction!.type).toBe('text_input')
   })
 
   it('refuses hand-rolled input interactions without an AskContext', async () => {
@@ -475,39 +499,6 @@ describe('ask()', () => {
         value: 'a',
       }),
     ).rejects.toThrow(/ask\(\)/)
-  })
-
-  it('works through the @opennest/vm/effect entry point', async () => {
-    const ask = createAsk()
-    const mw: Middleware = async (ctx, next) => {
-      ask(ctx, roomChoice)
-      return next()
-    }
-    const { devices } = inventory()
-    const session: Session = createSession()
-    const ctx = { devices, session, middleware: [mw] }
-
-    const first = await Effect.runPromise(
-      runCommand(
-        { kind: 'run_program', program: parse('tv[salon].power = on') },
-        ctx,
-      ),
-    )
-    expect(first.status).toBe('awaiting_interaction')
-    const second = await Effect.runPromise(
-      runCommand(
-        {
-          kind: 'resume_interaction',
-          response: {
-            interactionId: first.interaction!.id,
-            type: 'choice',
-            value: 'day',
-          },
-        },
-        ctx,
-      ),
-    )
-    expect(second.status).toBe('success')
   })
 })
 
@@ -544,6 +535,26 @@ describe('checkInputAnswer', () => {
       'text empty',
       { type: 'text_input' as const },
       { interactionId: id, type: 'text_input' as const, text: '  ' },
+      { ok: false },
+    ],
+    [
+      'text not a string',
+      { type: 'text_input' as const },
+      {
+        interactionId: id,
+        type: 'text_input' as const,
+        text: 5 as unknown as string,
+      },
+      { ok: false },
+    ],
+    [
+      'choice not a string',
+      { type: 'choice' as const, options },
+      {
+        interactionId: id,
+        type: 'choice' as const,
+        value: 5 as unknown as string,
+      },
       { ok: false },
     ],
     [

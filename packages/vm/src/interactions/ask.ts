@@ -51,6 +51,11 @@ const MAX_PARTITIONS = 64
  * them and one `ask` can be shared by several sessions. Keeps the
  * {@link MAX_PARTITIONS} most recently used partitions; `get` and `set` touch
  * the partition, so a paused run (replayed on each resume) stays recent.
+ *
+ * The bound is approximate: a paused run is not touched while it waits for a
+ * user, so with one ask shared by more than {@link MAX_PARTITIONS} concurrently
+ * active runs, its earlier answers can be evicted. That causes a re-ask, never
+ * a wrong value.
  */
 export class AskStore {
   private readonly partitions = new Map<string, Map<string, string | number>>()
@@ -124,7 +129,7 @@ function generateId(): string {
  * replayed on resume and `ask` then returns the answer.
  *
  * Answers are keyed by statement index (`session.cursor`), device id (unless
- * `scope: 'statement'`) and `question.key`. Known limitation: statements
+ * `scope: 'statement'`), question type and `question.key`. Known limitation: statements
  * nested in one `@if` share a statement index, so two nested actions on the
  * same device asking the same key share one answer.
  *
@@ -143,7 +148,7 @@ export function createAsk(): AskFn {
     const programId = ctx.session.programId
     const deviceId =
       (question.scope ?? 'device') === 'device' ? ctx.action.device.id : '*'
-    const answerKey = `${ctx.session.cursor}::${deviceId}::${question.key}`
+    const answerKey = `${ctx.session.cursor}::${deviceId}::${question.type}::${question.key}`
 
     const answer = store.get(programId, answerKey)
     if (answer !== undefined) return answer as AskAnswer<Q>
@@ -178,6 +183,16 @@ function validateQuestion(question: AskQuestion): void {
       return
     }
     case 'number_input':
+      for (const [name, bound] of [
+        ['min', question.min],
+        ['max', question.max],
+      ] as const) {
+        if (bound !== undefined && !Number.isFinite(bound)) {
+          throw new Error(
+            `ask(): number question "${question.key}" has a non-finite ${name} (${bound}); bounds must be finite numbers`,
+          )
+        }
+      }
       if (
         question.min !== undefined &&
         question.max !== undefined &&
