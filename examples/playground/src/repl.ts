@@ -159,6 +159,35 @@ async function handleInteraction(
       type: 'action_parameter',
       values,
     }
+  } else if (interaction.type === 'text_input') {
+    response = {
+      type: 'text_input',
+      text: trimmed,
+    }
+  } else if (interaction.type === 'number_input') {
+    const value = Number(trimmed)
+    if (trimmed === '' || !Number.isFinite(value)) {
+      process.stdout.write('  Invalid number.\n\n')
+      return null
+    }
+    response = {
+      type: 'number_input',
+      value,
+    }
+  } else if (interaction.type === 'choice') {
+    const byValue = interaction.options.find(o => o.value === trimmed)
+    const byIndex = /^\d+$/.test(trimmed)
+      ? interaction.options[parseInt(trimmed, 10) - 1]
+      : undefined
+    const chosen = byValue ?? byIndex
+    if (!chosen) {
+      process.stdout.write('  Invalid choice.\n\n')
+      return null
+    }
+    response = {
+      type: 'choice',
+      value: chosen.value,
+    }
   } else {
     process.stdout.write('  Unsupported interaction type.\n\n')
     return null

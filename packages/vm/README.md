@@ -74,9 +74,11 @@ The VM suspends with `status: "awaiting_interaction"` and a typed `interaction` 
 |---|---|---|
 | `device_selection` | Multiple devices match | `{ deviceId }` |
 | `confirmation` | Middleware requires approval | `{ confirmed }` |
-| `text_input` | Text input needed | `{ text }` |
-| `number_input` | Numeric input needed | `{ value }` |
-| `choice` | Choose from options | `{ value }` |
+| `text_input` | Raised by middleware through `ask()` | `{ text }` |
+| `number_input` | Raised by middleware through `ask()` | `{ value }` |
+| `choice` | Raised by middleware through `ask()` | `{ value }` |
+
+Answers to `ask()` questions are validated: a `number_input` outside `min`/`max` (inclusive) or not finite, an empty `text_input` (after trimming), or a `choice` value that is not one of the options is rejected with the error code `invalid_response`. The error is retryable and the question stays pending.
 
 ## Middleware
 
@@ -98,6 +100,38 @@ const result = await executeCommand(
 Built-in middleware: `noopMiddleware` (always passthrough), `createConfirmationMiddleware(opts)` (pause and confirm).
 
 Flow control via signals: `BlockSignal`, `SkipSignal`, `PauseSignal`, `ExpandSignal`. Replace via `ctx.action` mutation + `await next()`.
+
+### Asking questions with `ask()`
+
+`createAsk()` returns a synchronous `ask(ctx, question)` that either returns the answer or pauses the run with a `text_input`, `number_input` or `choice` interaction. After the user answers, the pipeline is replayed and `ask` returns the answer; the device command is never sent before it.
+
+```ts
+import { createAsk, type Middleware } from "@opennest/vm";
+
+const ask = createAsk();
+
+const askTemperature: Middleware = (ctx, next) => {
+  if (
+    ctx.action.kind === "set_property" &&
+    ctx.action.device.type === "thermostat" &&
+    ctx.action.property === "temperature"
+  ) {
+    const value = ask(ctx, {
+      key: "temperature",
+      type: "number_input",
+      message: "Quelle température ?",
+      min: 10,
+      max: 30,
+    });
+    ctx.action.value = { kind: "number", value };
+  }
+  return next();
+};
+```
+
+- `scope`: `"device"` (default) asks once per device, so `@all(...)` asks one question per device; `"statement"` asks once per statement.
+- Answers live for the current program run only and never leak into a later run. Each `createAsk()` has its own store, and one `ask` can be shared by several sessions.
+- Known limitation: statements nested in one `@if` share a statement index, so two nested actions on the same device asking the same `key` share one answer.
 
 ## Execution tracing
 
