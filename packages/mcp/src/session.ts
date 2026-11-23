@@ -1,5 +1,6 @@
 import type { Device, DeviceSummary, Session, StateChange } from '@opennest/sdk'
-import type { MissingParameter } from '@opennest/vm'
+import { isAskContext } from '@opennest/vm'
+import type { AskContext, MissingParameter } from '@opennest/vm'
 import { toMissingParameterSummary } from './result.js'
 import type {
   InteractionChoice,
@@ -86,7 +87,8 @@ type PendingInteraction = NonNullable<Session['pendingInteraction']>
  * generic English summaries — the verbatim prompt was already delivered by
  * the `waiting_for_user` result of the run that suspended. Data payloads
  * (choices, missing parameters) are extracted from the context where the
- * core handlers provide them. Custom interaction types outside the six core
+ * core handlers provide them. Questions raised by `ask()` carry their full
+ * question in the context, so those project verbatim. Custom interaction types outside the six core
  * variants cannot be represented and project to `null`.
  */
 function toPendingInteractionPrompt(
@@ -106,18 +108,27 @@ function toPendingInteractionPrompt(
         prompt: 'A confirmation is pending. Answer it with the respond tool.',
       }
     case 'text_input':
+      if (isAskContext(pending.context)) {
+        return projectAskQuestion(pending.context.question)
+      }
       return {
         type: 'text_input',
         prompt: 'A text input is pending. Answer it with the respond tool.',
       }
     case 'number_input':
+      if (isAskContext(pending.context)) {
+        return projectAskQuestion(pending.context.question)
+      }
       return {
         type: 'number_input',
         prompt: 'A number input is pending. Answer it with the respond tool.',
       }
     case 'choice':
-      // No core handler exists for `choice`; its context shape is
-      // host-defined, so no choices can be extracted.
+      // Only `ask()` questions expose their options; any other `choice`
+      // context is host-defined, so no choices can be extracted.
+      if (isAskContext(pending.context)) {
+        return projectAskQuestion(pending.context.question)
+      }
       return {
         type: 'choice',
         prompt: 'A choice is pending. Answer it with the respond tool.',
@@ -132,6 +143,38 @@ function toPendingInteractionPrompt(
       }
     default:
       return null
+  }
+}
+
+/** Project an `ask()` question; internal store/key fields are never read. */
+function projectAskQuestion(
+  question: AskContext['question'],
+): InteractionPrompt {
+  switch (question.type) {
+    case 'text_input':
+      return {
+        type: 'text_input',
+        prompt: question.message,
+        ...(question.placeholder !== undefined
+          ? { placeholder: question.placeholder }
+          : {}),
+      }
+    case 'number_input':
+      return {
+        type: 'number_input',
+        prompt: question.message,
+        ...(question.min !== undefined ? { min: question.min } : {}),
+        ...(question.max !== undefined ? { max: question.max } : {}),
+      }
+    case 'choice':
+      return {
+        type: 'choice',
+        prompt: question.message,
+        choices: question.options.map(option => ({
+          id: option.value,
+          label: option.label,
+        })),
+      }
   }
 }
 

@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { MockDriver } from '@opennest/devices'
-import type { Device, ExecutedStatement, Session } from '@opennest/sdk'
+import { OpenNestClient, createAsk } from '@opennest/sdk'
+import type {
+  Device,
+  ExecutedStatement,
+  Middleware,
+  Session,
+} from '@opennest/sdk'
 import { toSessionSummary } from './session.js'
 
 type Statement = ExecutedStatement['statement']
@@ -328,5 +334,107 @@ describe('toSessionSummary', () => {
 
     expect(summary.pendingInteraction).not.toBeNull()
     expect(summary.pendingInteraction).not.toHaveProperty('id')
+  })
+})
+
+describe('toSessionSummary with ask questions', () => {
+  type AskQuestionInput = Parameters<ReturnType<typeof createAsk>>[1]
+
+  // `AskContext` embeds an internal store, so get a real pending one from a run.
+  async function pendingAsk(
+    question: AskQuestionInput,
+  ): Promise<PendingInteraction> {
+    const askDriver = new MockDriver()
+    await askDriver.init({})
+    askDriver.seed('tv_salon', { volume: 15 })
+    const ask = createAsk()
+    const middleware: Middleware = async (ctx, next) => {
+      ask(ctx, question)
+      return next()
+    }
+    const client = new OpenNestClient({
+      devices: [{ ...salonTv, driver: askDriver }],
+      middleware: [middleware],
+    })
+    await client.runDsl('tv[salon].volume = 1')
+    const pending = client.getSession().pendingInteraction
+    if (pending === null) throw new Error('expected a pending interaction')
+    return pending
+  }
+
+  it('projects a pending ask choice with its options', async () => {
+    const pending = await pendingAsk({
+      key: 'source',
+      type: 'choice',
+      message: 'Which source?',
+      options: [
+        { value: 'hdmi1', label: 'HDMI 1' },
+        { value: 'hdmi2', label: 'HDMI 2' },
+      ],
+    })
+    const summary = toSessionSummary(
+      makeSession({ pendingInteraction: pending }),
+    )
+    expect(summary.pendingInteraction).toStrictEqual({
+      type: 'choice',
+      prompt: 'Which source?',
+      choices: [
+        { id: 'hdmi1', label: 'HDMI 1' },
+        { id: 'hdmi2', label: 'HDMI 2' },
+      ],
+    })
+  })
+
+  it('projects a pending ask number_input with min and max', async () => {
+    const pending = await pendingAsk({
+      key: 'volume',
+      type: 'number_input',
+      message: 'Volume?',
+      min: 0,
+      max: 100,
+    })
+    const summary = toSessionSummary(
+      makeSession({ pendingInteraction: pending }),
+    )
+    expect(summary.pendingInteraction).toStrictEqual({
+      type: 'number_input',
+      prompt: 'Volume?',
+      min: 0,
+      max: 100,
+    })
+  })
+
+  it('projects a pending ask text_input with its placeholder', async () => {
+    const pending = await pendingAsk({
+      key: 'name',
+      type: 'text_input',
+      message: 'Name?',
+      placeholder: 'Salon',
+    })
+    const summary = toSessionSummary(
+      makeSession({ pendingInteraction: pending }),
+    )
+    expect(summary.pendingInteraction).toStrictEqual({
+      type: 'text_input',
+      prompt: 'Name?',
+      placeholder: 'Salon',
+    })
+    expect(JSON.stringify(summary.pendingInteraction)).not.toContain('store')
+  })
+
+  it('keeps the generic choice projection without an AskContext', () => {
+    const pending: PendingInteraction = {
+      id: 'choice_1',
+      type: 'choice',
+      context: {},
+    }
+    const summary = toSessionSummary(
+      makeSession({ pendingInteraction: pending }),
+    )
+    expect(summary.pendingInteraction).toStrictEqual({
+      type: 'choice',
+      prompt: 'A choice is pending. Answer it with the respond tool.',
+      choices: [],
+    })
   })
 })

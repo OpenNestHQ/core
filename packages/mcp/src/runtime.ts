@@ -34,6 +34,7 @@ const RETRYABLE_CODES = [
   'unknown_device_id',
   'no_pending_interaction',
   'no_pending_program',
+  'invalid_response',
 ]
 
 const RUN_DSL_BLOCKED_MESSAGE =

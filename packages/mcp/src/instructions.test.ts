@@ -40,4 +40,9 @@ describe('buildInstructions', () => {
       expect(text).toContain(code)
     }
   })
+
+  it('documents invalid_response as retryable', () => {
+    expect(text).toContain('invalid_response')
+    expect(text).toMatch(/invalid_response[^\n]*retr/i)
+  })
 })

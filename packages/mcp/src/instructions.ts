@@ -25,6 +25,7 @@ OpenNest executes HomeDSL programs against a smart-home runtime. You write HomeD
 - \`execution_failed\`: the VM or runtime reported errors while executing. (A device driver rejecting a command is not this: see \`deviceFailures\` above.)
 - \`interaction_pending\`: \`run_dsl\` was called while a question is open. Use \`respond\` or \`cancel\`.
 - \`no_pending_interaction\`: \`respond\` was called with nothing to answer.
+- \`invalid_response\`: your answer to a text, number or choice question was rejected (empty text, number out of range, unknown option). The question stays open: fix the answer and call \`respond\` again (retryable).
 - \`interaction_aborted\`: too many invalid answers; the interaction was cancelled. Start over.
 - \`core_error\`: unexpected internal failure.
 
