@@ -127,6 +127,11 @@ function runProgram(
       })
     }
 
+    // Each new program is its own run: later features key data by programId.
+    if (context.session !== undefined) {
+      context.session.programId = crypto.randomUUID()
+    }
+
     return interpretProgramEffect(
       program,
       deviceId !== undefined
