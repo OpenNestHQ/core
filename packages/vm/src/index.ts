@@ -63,6 +63,16 @@ export type {
 } from './interactions/types.js'
 
 export { InteractionError } from './interactions/errors.js'
+export { createAsk, isAskContext } from './interactions/ask.js'
+export type {
+  AskQuestion,
+  AskScope,
+  AskAnswer,
+  AskFn,
+  AskContext,
+  AskStore,
+} from './interactions/ask.js'
+export { checkInputAnswer } from './interactions/input-answer.js'
 export type { InteractionErrorCode } from './interactions/errors.js'
 
 export { noopMiddleware } from './middleware/noop.js'

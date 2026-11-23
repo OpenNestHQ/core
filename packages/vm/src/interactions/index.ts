@@ -10,6 +10,21 @@ export { confirmationHandler } from './confirmation.js'
 export type { ConfirmationResumeContext } from './confirmation.js'
 export { actionParameterHandler } from './action-parameter.js'
 export type { ActionParameterContext } from './action-parameter.js'
+export {
+  textInputHandler,
+  numberInputHandler,
+  choiceHandler,
+} from './input-handlers.js'
+export { createAsk, isAskContext } from './ask.js'
+export type {
+  AskQuestion,
+  AskScope,
+  AskAnswer,
+  AskFn,
+  AskContext,
+  AskStore,
+} from './ask.js'
+export { checkInputAnswer } from './input-answer.js'
 
 export type {
   UserInteraction,
