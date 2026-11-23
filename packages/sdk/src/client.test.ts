@@ -829,7 +829,6 @@ describe('OpenNestClient ask answers', () => {
   })
 
   it('isolates answers of two clients sharing one ask middleware', async () => {
-    let asked = 0
     const sharedAsk = createAsk()
     const shared: Middleware[] = [
       async (ctx, next) => {
@@ -837,24 +836,30 @@ describe('OpenNestClient ask answers', () => {
           ctx.action.kind === 'set_property' &&
           ctx.action.property === 'volume'
         ) {
-          let volume: number
-          try {
-            volume = sharedAsk(ctx, {
-              key: 'volume',
-              type: 'number_input',
-              message: 'Volume?',
-            })
-          } catch (error) {
-            asked++
-            throw error
-          }
+          const volume = sharedAsk(ctx, {
+            key: 'volume',
+            type: 'number_input',
+            message: 'Volume?',
+          })
           ctx.action.value = { kind: 'number', value: volume }
         }
         return next()
       },
     ]
-    const a = await makeClient({ middleware: shared })
-    const b = await makeClient({ middleware: shared })
+    let askedA = 0
+    let askedB = 0
+    const a = await makeClient({
+      middleware: shared,
+      onInteraction: () => {
+        askedA++
+      },
+    })
+    const b = await makeClient({
+      middleware: shared,
+      onInteraction: () => {
+        askedB++
+      },
+    })
     const answer = (value: number) => ({ type: 'number_input', value }) as const
 
     const a1 = await a.client.runDsl('$t = @all(tv)\n$t.volume = 1')
@@ -875,7 +880,8 @@ describe('OpenNestClient ask answers', () => {
     expect(await a.driver.getProperty('tv_chambre', 'volume')).toBe(12)
     expect(await b.driver.getProperty('tv_salon', 'volume')).toBe(71)
     expect(await b.driver.getProperty('tv_chambre', 'volume')).toBe(72)
-    expect(asked).toBeGreaterThan(0)
+    expect(askedA).toBe(2)
+    expect(askedB).toBe(2)
   })
 
   it('re-exports createAsk', () => {
