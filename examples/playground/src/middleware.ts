@@ -1,5 +1,5 @@
-import { createAsk } from '@opennest/sdk'
-import type { Middleware } from '@opennest/sdk'
+import { createAsk, defineSuggestion } from '@opennest/sdk'
+import type { Middleware, PlannedAction } from '@opennest/sdk'
 
 const ask = createAsk()
 
@@ -74,6 +74,59 @@ export const doorPin: Middleware = async (ctx, next) => {
 
   if (pin !== (process.env.PLAYGROUND_DOOR_PIN ?? '1234')) {
     return { kind: 'blocked', middlewareName: 'doorPin', reason: 'wrong PIN' }
+  }
+  return next()
+}
+
+/**
+ * Lighting ambiance: once lights are switched on, offers `cinema` (dim, warm
+ * white) or `lecture` (bright, reading mode). Answer it with `:a <n> <value>`.
+ *
+ *   light[living_room].power = on
+ */
+type Value = Extract<PlannedAction, { kind: 'set_property' }>['value']
+
+const ambiance = defineSuggestion('playground.ambiance', {
+  apply(answer, devices) {
+    const writes: [string, Value][] =
+      answer === 'cinema'
+        ? [
+            ['brightness', { kind: 'number', value: 20 }],
+            ['color', { kind: 'string', value: 'warm_white' }],
+          ]
+        : [
+            ['brightness', { kind: 'number', value: 80 }],
+            ['mode', { kind: 'string', value: 'reading' }],
+          ]
+    return devices.flatMap(device =>
+      writes.map(([property, value]): PlannedAction => ({
+        kind: 'set_property',
+        device,
+        property,
+        value,
+      })),
+    )
+  },
+})
+
+export const suggestAmbiance: Middleware = async (ctx, next) => {
+  const { action } = ctx
+  if (
+    action.kind === 'set_property' &&
+    action.device.type === 'light' &&
+    action.property === 'power' &&
+    action.value.kind === 'power' &&
+    action.value.value === 'on'
+  ) {
+    ambiance.suggest(ctx, {
+      key: 'ambiance',
+      type: 'choice',
+      message: 'Quelle ambiance pour ces lumières ?',
+      options: [
+        { value: 'cinema', label: 'Cinéma (faible, blanc chaud)' },
+        { value: 'lecture', label: 'Lecture (forte, mode lecture)' },
+      ],
+    })
   }
   return next()
 }

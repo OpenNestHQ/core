@@ -133,6 +133,49 @@ const askTemperature: Middleware = (ctx, next) => {
 - Answers live for the current program run only and never leak into a later run. Each `createAsk()` has its own store, and one `ask` can be shared by several sessions.
 - Known limitation: statements nested in one `@if` share a statement index, so two nested actions on the same device asking the same `key` share one answer.
 
+### Suggestions
+
+A suggestion is a follow-up question offered **after** a successful run (for example "which ambiance?" once lights are on). Unlike `ask()`, it never blocks the run: the original command executes first, and the user may answer later.
+
+Declare the suggestion once with `defineSuggestion(name, { apply })`, then call `.suggest(ctx, question)` from a middleware. `apply(answer, devices, data)` receives the answer, the targeted devices and the optional JSON `data`, and returns the `PlannedAction[]` to run.
+
+```ts
+import { defineSuggestion, type Middleware } from "@opennest/vm";
+
+const ambiance = defineSuggestion("home.ambiance", {
+  apply: (answer, devices) =>
+    devices.map(device => ({
+      kind: "set_property",
+      device,
+      property: "brightness",
+      value: { kind: "number", value: answer === "cinema" ? 20 : 80 },
+    })),
+});
+
+const suggestAmbiance: Middleware = (ctx, next) => {
+  if (ctx.action.kind === "set_property" && ctx.action.property === "power") {
+    ambiance.suggest(ctx, {
+      key: "ambiance",
+      type: "choice",
+      message: "Which ambiance?",
+      options: [
+        { value: "cinema", label: "Cinema" },
+        { value: "reading", label: "Reading" },
+      ],
+      data: { source: "power" }, // optional, JSON only
+    });
+  }
+  return next();
+};
+```
+
+- **Questions**: `text_input`, `number_input` and `choice`, validated like `ask()` answers.
+- **Targets**: only devices whose action was accepted by the driver are targeted; if none were, no suggestion opens. One suggestion per statement and `key`.
+- **Lifetime**: suggestions open only when the run ends in `success` (`result.suggestions` lists all open ones, `session.suggestions` stores them as plain JSON with device ids). They are cleared when a new `run_program` / `execute_action` / `execute_statement` starts and by `cancel_execution`. Answering one removes only that one and appends the suggestions of its follow-up.
+- **Answering**: `executeCommand({ kind: "answer_suggestion", suggestionId, response }, ctx)` with `response` = `{ type: "text_input", text }`, `{ type: "number_input", value }` or `{ type: "choice", value }`. The follow-up runs through the middleware pipeline (it may pause and resume) and its executed entries carry `origin: { suggestionId }`.
+- **Error codes**: `suggestion_not_found` (unknown, answered or dropped id), `suggestion_unavailable` (its definition is not defined in this runtime), plus `interaction_pending`, `interaction_type_mismatch` and `invalid_response` (retryable; the suggestion stays open).
+- **Registry**: definitions are registered by name, process-wide. Redefining a name with the same `apply` returns the same definition; with a different `apply` it throws. The session stores only the name, so a suggestion survives serialization as long as the name is defined when answered.
+
 ## Execution tracing
 
 Opt-in deterministic trace via `eventBus`:
