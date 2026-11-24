@@ -327,8 +327,12 @@ describe('suggestions', () => {
     const { def } = suggester()
     const ctx = fakeCtx()
 
-    expect(() => def.suggest(ctx, { ...choiceQ, key: ' ' })).toThrow(Error)
-    expect(() => def.suggest(ctx, { ...choiceQ, options: [] })).toThrow(Error)
+    expect(() => def.suggest(ctx, { ...choiceQ, key: ' ' })).toThrow(
+      /^suggest\(\): /,
+    )
+    expect(() => def.suggest(ctx, { ...choiceQ, options: [] })).toThrow(
+      /^suggest\(\): /,
+    )
     expect(() =>
       def.suggest(ctx, { ...choiceQ, data: (() => 1) as never }),
     ).toThrow()

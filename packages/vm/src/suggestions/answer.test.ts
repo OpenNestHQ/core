@@ -405,7 +405,45 @@ describe('answer_suggestion', () => {
     expect(result.errors).toEqual([])
     expect(h.session.history).toHaveLength(before)
     expect(h.driver.writes).toHaveLength(writes)
-    expect(h.session.suggestions ?? []).toEqual([])
+    expect(h.session.suggestions).toBeUndefined()
+  })
+
+  it('removes session.suggestions once the last one is answered', async () => {
+    const { mw } = offering()
+    const h = harness([mw])
+    const first = await h.run(ALL_ON)
+    expect(h.session.suggestions).toHaveLength(1)
+
+    await h.answer(first.suggestions![0]!.id, cinema)
+
+    expect(h.session.suggestions).toBeUndefined()
+    expect('suggestions' in h.session).toBe(false)
+  })
+
+  it('keeps the same operation on one device as separate steps', async () => {
+    const { mw } = offering((_answer, devices) => [
+      {
+        kind: 'increment_property' as const,
+        device: devices[0]!,
+        property: 'brightness',
+        value: num(5),
+      },
+      {
+        kind: 'increment_property' as const,
+        device: devices[0]!,
+        property: 'brightness',
+        value: num(5),
+      },
+    ])
+    const h = harness([mw])
+    const first = await h.run(ALL_ON)
+    const before = h.session.history.length
+
+    const result = await h.answer(first.suggestions![0]!.id, cinema)
+
+    expect(result.status).toBe('success')
+    expect(h.session.history.slice(before)).toHaveLength(2)
+    expect(await h.driver.getProperty('light_1', 'brightness')).toBe(110)
   })
 
   it('rejects the façade with the original error when apply throws', async () => {

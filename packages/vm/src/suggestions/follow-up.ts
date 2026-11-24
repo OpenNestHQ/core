@@ -22,8 +22,9 @@ import type { FollowUpStep, PendingFollowUp } from './types.js'
 
 /**
  * Checks the actions returned by `apply` and groups them into steps: actions
- * with the same kind, property/method and value/args make one step over all
- * their devices, in first-seen order. Throws on a `read_property` action or a
+ * with the same kind, property/method and value/args on *different* devices
+ * make one step over all those devices, in first-seen order. The same
+ * operation repeated on one device stays a separate step (both execute). Throws on a `read_property` action or a
  * device that is not in `devices`.
  */
 export function buildFollowUpSteps(
@@ -44,11 +45,11 @@ export function buildFollowUpSteps(
     }
     const step = toStep(action)
     const key = stableKey({ ...step, deviceIds: [] })
-    const existing = steps.find(s => s.key === key)
+    const existing = steps.find(
+      s => s.key === key && !s.step.deviceIds.includes(action.device.id),
+    )
     if (existing) {
-      if (!existing.step.deviceIds.includes(action.device.id)) {
-        existing.step.deviceIds.push(action.device.id)
-      }
+      existing.step.deviceIds.push(action.device.id)
     } else {
       steps.push({ key, step })
     }

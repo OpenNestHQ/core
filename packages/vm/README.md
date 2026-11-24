@@ -153,7 +153,12 @@ const ambiance = defineSuggestion("home.ambiance", {
 });
 
 const suggestAmbiance: Middleware = (ctx, next) => {
-  if (ctx.action.kind === "set_property" && ctx.action.property === "power") {
+  if (
+    ctx.action.kind === "set_property" &&
+    ctx.action.property === "power" &&
+    ctx.action.value.kind === "power" &&
+    ctx.action.value.value === "on"
+  ) {
     ambiance.suggest(ctx, {
       key: "ambiance",
       type: "choice",
@@ -169,9 +174,11 @@ const suggestAmbiance: Middleware = (ctx, next) => {
 };
 ```
 
+- **`apply`**: may be async. Returning `[]` is a valid no-op (the answer succeeds with nothing executed). Equal operations on different devices run as one step; the same operation twice on one device stays two steps and both execute.
+- **Follow-up checks**: a follow-up skips static validation and intent filtering, so `apply` must return actions the devices support; failures show up as device failures. A follow-up that ends in `error` opens no suggestions.
 - **Questions**: `text_input`, `number_input` and `choice`, validated like `ask()` answers.
 - **Targets**: only devices whose action was accepted by the driver are targeted; if none were, no suggestion opens. One suggestion per statement and `key`.
-- **Lifetime**: suggestions open only when the run ends in `success` (`result.suggestions` lists all open ones, `session.suggestions` stores them as plain JSON with device ids). They are cleared when a new `run_program` / `execute_action` / `execute_statement` starts and by `cancel_execution`. Answering one removes only that one and appends the suggestions of its follow-up.
+- **Lifetime**: suggestions open only when the run ends in `success` (`result.suggestions` lists all open ones, `session.suggestions` stores them as plain JSON with device ids). Once the open set is empty, `session.suggestions` is removed. They are cleared when a new `run_program` / `execute_action` / `execute_statement` starts and by `cancel_execution`. Answering one removes only that one and appends the suggestions of its follow-up.
 - **Answering**: `executeCommand({ kind: "answer_suggestion", suggestionId, response }, ctx)` with `response` = `{ type: "text_input", text }`, `{ type: "number_input", value }` or `{ type: "choice", value }`. The follow-up runs through the middleware pipeline (it may pause and resume) and its executed entries carry `origin: { suggestionId }`.
 - **Error codes**: `suggestion_not_found` (unknown, answered or dropped id), `suggestion_unavailable` (its definition is not defined in this runtime), plus `interaction_pending`, `interaction_type_mismatch` and `invalid_response` (retryable; the suggestion stays open).
 - **Registry**: definitions are registered by name, process-wide. Redefining a name with the same `apply` returns the same definition; with a different `apply` it throws. The session stores only the name, so a suggestion survives serialization as long as the name is defined when answered.

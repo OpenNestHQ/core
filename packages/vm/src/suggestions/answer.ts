@@ -71,9 +71,9 @@ export function answerSuggestionEffect(
 
     // A new execution: its own programId, and the suggestion is used up.
     session.programId = crypto.randomUUID()
-    session.suggestions = session.suggestions!.filter(
-      s => s.id !== suggestion.id,
-    )
+    const remaining = session.suggestions!.filter(s => s.id !== suggestion.id)
+    if (remaining.length > 0) session.suggestions = remaining
+    else delete session.suggestions
     clearSuggestionRun(session)
 
     const devices = suggestion.targets

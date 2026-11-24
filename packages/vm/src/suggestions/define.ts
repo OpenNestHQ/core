@@ -42,7 +42,7 @@ function suggest(
 ): void {
   const { data, ...rest } = input
   const question = rest as SuggestionQuestion
-  validateQuestion(question)
+  validateQuestion(question, 'suggest')
 
   const clonedQuestion = structuredClone(question)
   const clonedData = data === undefined ? undefined : structuredClone(data)
