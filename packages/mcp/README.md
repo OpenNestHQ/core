@@ -35,7 +35,7 @@ Typical MCP client entry:
 | Variable                      | Default         | Description                                                                                    |
 | ----------------------------- | --------------- | ---------------------------------------------------------------------------------------------- |
 | `OPENNEST_YAML`               | `opennest.yaml` | Path to the device inventory (relative to the working directory).                              |
-| `OPENNEST_MAX_FAILED_RESUMES` | `2`             | Invalid `respond` answers tolerated before the pending interaction is cancelled. Integer >= 1. |
+| `OPENNEST_MAX_FAILED_RESUMES` | `2`             | Invalid answers tolerated before giving up: per pending interaction (`respond`, then it is cancelled) and per suggestion (`answer_suggestion`, then only that suggestion is dismissed). Integer >= 1. |
 
 The inventory is loaded once at startup. If it is missing, unreadable or invalid, the server prints a message to stderr and exits with code 1 without serving. stdout is reserved for the MCP protocol; all diagnostics go to stderr.
 
@@ -153,16 +153,16 @@ type InteractionPrompt =
 | `parse_error`                  | `failed`  | The HomeDSL program has a syntax error.                                                                   |
 | `validation_error`             | `failed`  | The program parsed but failed static validation (unknown device, unsupported property, ...).              |
 | `execution_failed`             | `failed`  | The program was valid but the VM/runtime reported errors (device driver failures are `deviceFailures`).   |
-| `interaction_pending`          | `blocked` | `run_dsl` was called while an interaction is pending. `respond` or `cancel` first.                        |
+| `interaction_pending`          | `blocked` | `run_dsl` or `answer_suggestion` was called while an interaction is pending. `respond` or `cancel` first. |
 | `no_pending_interaction`       | `blocked` | `respond` was called with nothing pending. (Also a retryable `failed` code, see below.)                   |
 | `interaction_id_mismatch`      | `failed`  | The answer targeted a stale interaction. Retryable.                                                       |
-| `interaction_type_mismatch`    | `failed`  | The answer `type` does not match the pending interaction. Retryable.                                      |
+| `interaction_type_mismatch`    | `failed`  | The answer `type` does not match the pending interaction or suggestion. Retryable; for a suggestion it spends no budget. |
 | `unknown_device_id`            | `failed`  | A `device_selection` answer named a device that is not among the choices. Retryable.                      |
 | `no_pending_program`           | `failed`  | The session lost its suspended program. Retryable.                                                        |
 | `no_session`                   | `failed`  | The core could not resume because there is no active session.                                             |
 | `invalid_response`             | `failed`  | An answer to a text/number/choice question was rejected (empty, out of range, unknown option). Retryable. |
 | `suggestion_not_found`         | `failed`  | `answer_suggestion` named a suggestion that was answered or dropped by a newer command. Not retryable.    |
-| `suggestion_unavailable`       | `failed`  | The suggestion can no longer be applied. Not retryable.                                                   |
+| `suggestion_unavailable`       | `failed`  | The suggestion's name is not registered in this runtime (e.g. after a restart). Not retryable.            |
 | `suggestion_aborted`           | `failed`  | Too many invalid answers to one suggestion; only it was dismissed (session and siblings kept).            |
 | `interaction_aborted`          | `failed`  | Too many invalid answers (`OPENNEST_MAX_FAILED_RESUMES`); the interaction was cancelled. Start over.      |
 | `unsupported_interaction_type` | `failed`  | The runtime suspended on an interaction type this server cannot present.                                  |
@@ -170,7 +170,7 @@ type InteractionPrompt =
 
 Malformed tool input (schema violations, e.g. `respond` without `deviceId`) is rejected by the MCP layer as an `isError` transport error with plain text; it is not a `ToolResult` and does not consume the retry budget.
 
-Retryable state errors can be repeated up to `OPENNEST_MAX_FAILED_RESUMES` times; beyond that the server cancels the interaction and returns `interaction_aborted`.
+Retryable state errors can be repeated up to `OPENNEST_MAX_FAILED_RESUMES` times; beyond that the server cancels the interaction and returns `interaction_aborted`. `answer_suggestion` keeps a separate counter per suggestion that only `invalid_response` increments (a wrong answer `type` neither counts nor resets it); beyond the limit only that suggestion is dismissed (`suggestion_aborted`).
 
 ## Interaction protocol
 
@@ -179,7 +179,7 @@ Retryable state errors can be repeated up to `OPENNEST_MAX_FAILED_RESUMES` times
 3. If the result is `waiting_for_user` (for example an ambiguous device, a confirmation or a missing parameter), **relay `interaction.prompt` to the user** and wait for their answer. Do not guess it.
 4. Call `respond` with the answer whose `type` matches `interaction.type` (e.g. `{ "response": { "type": "device_selection", "deviceId": "light_salon_2" } }`).
 5. The result of `respond` may be `completed`, `failed`, or another `waiting_for_user` — repeat from step 3.
-6. While an interaction is pending, `run_dsl` returns `blocked` / `interaction_pending`. Answer with `respond`, or call `cancel` to abandon the program.
+6. While an interaction is pending, `run_dsl` and `answer_suggestion` return `blocked` / `interaction_pending`. Answer with `respond`, or call `cancel` to abandon the program.
 7. `get_session` shows the current state at any time without side effects.
 
 ## Sessions are ephemeral

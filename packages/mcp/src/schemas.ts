@@ -79,14 +79,14 @@ export type RespondAnswer =
   | { type: 'choice'; value: string }
   | { type: 'action_parameter'; values: Record<string, string> }
 
-export type SuggestionAnswer =
+export type SuggestionAnswerInput =
   | { type: 'text_input'; text: string }
   | { type: 'number_input'; value: number }
   | { type: 'choice'; value: string }
 
 export type AnswerSuggestionInput = {
   suggestionId: string
-  answer: SuggestionAnswer
+  answer: SuggestionAnswerInput
 }
 
 export type RespondInput = { response: RespondAnswer }

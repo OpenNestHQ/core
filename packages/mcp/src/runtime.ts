@@ -44,7 +44,8 @@ const RETRYABLE_CODES = [
 ]
 
 // Codes `answerSuggestion` reports as-is: toToolResult would flatten them
-// to `execution_failed`. Only `invalid_response` spends the retry budget.
+// to `execution_failed`. Only `invalid_response` spends the retry budget;
+// `interaction_type_mismatch` neither spends nor resets it.
 const SUGGESTION_ERROR_CODES = [
   'suggestion_not_found',
   'suggestion_unavailable',
@@ -270,7 +271,8 @@ export function createGuardedRuntime(
     ) {
       const message = result.errors.map(error => error.message).join('; ')
       if (code !== 'invalid_response') {
-        failedSuggestions.delete(id)
+        // A wrong answer type spends no budget and leaves the counter as is.
+        if (code !== 'interaction_type_mismatch') failedSuggestions.delete(id)
         return failedResult(code, message)
       }
       const count = (failedSuggestions.get(id) ?? 0) + 1
