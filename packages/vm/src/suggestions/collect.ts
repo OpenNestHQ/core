@@ -59,3 +59,15 @@ export function openConfirmedSuggestions(session: Session): OpenSuggestion[] {
 export function clearSuggestionRun(session: Session): void {
   delete session._suggestionCandidates
 }
+
+/**
+ * Pending targets belong to the statement whose middleware approval is
+ * running: called before each approval, it drops targets left by an earlier
+ * statement that never executed (blocked, skipped, interrupted). A replay
+ * after a pause re-adds them through `suggest`; `confirmed` is kept.
+ */
+export function resetPendingTargets(session: Session): void {
+  for (const candidate of session._suggestionCandidates ?? []) {
+    if (candidate.programId === session.programId) candidate.pending = []
+  }
+}

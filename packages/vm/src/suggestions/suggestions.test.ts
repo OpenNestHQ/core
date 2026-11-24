@@ -297,6 +297,32 @@ describe('suggestions', () => {
     expect(h.session.suggestions).toEqual(opened)
   })
 
+  it('drops pending targets left by a statement that never executed', async () => {
+    const { def } = suggester()
+    // Both @if body statements share one cursor. The first suggests for the
+    // tv and is skipped; the second is accepted on the same tv without suggesting.
+    const mw: Middleware = async (ctx, next) => {
+      if (
+        ctx.action.kind === 'set_property' &&
+        ctx.action.property === 'power'
+      ) {
+        def.suggest(ctx, choiceQ)
+        return { kind: 'skipped' }
+      }
+      return next()
+    }
+    const h = harness([mw])
+
+    const result = await h.run(
+      '@if tv[salon].power? == off\ntv[salon].power = on\ntv[salon].volume = 5\n@endif',
+    )
+
+    expect(result.status).toBe('success')
+    expect(h.driver.failFor.size).toBe(0)
+    expect(result.suggestions).toBeUndefined()
+    expect(h.session.suggestions ?? []).toEqual([])
+  })
+
   it('throws on invalid questions and non-cloneable data', () => {
     const { def } = suggester()
     const ctx = fakeCtx()

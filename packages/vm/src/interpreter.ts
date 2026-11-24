@@ -51,6 +51,7 @@ import {
   clearSuggestionRun,
   confirmCandidates,
   openConfirmedSuggestions,
+  resetPendingTargets,
 } from './suggestions/collect.js'
 import type { EffectVMResult, StopRequested, StopToken } from './effect/stop.js'
 
@@ -769,6 +770,7 @@ function approveActions(
 ): Effect.Effect<Approval, StatementError> {
   return Effect.gen(function* () {
     const { eventBus } = env
+    resetPendingTargets(env.session)
     const pipelineEnv = { session: env.session, devices: env.devices }
     const approved: PlannedAction[] = []
 
