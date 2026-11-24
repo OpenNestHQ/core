@@ -11,6 +11,7 @@ import { makeStopToken, neverStop, toVMResult } from '../effect/stop.js'
 import type { EffectVMResult, StopToken } from '../effect/stop.js'
 import { interpretProgramEffect } from '../interpreter.js'
 import { clearSuggestionRun } from '../suggestions/collect.js'
+import { answerSuggestionEffect } from '../suggestions/answer.js'
 
 export interface RunOptions {
   /**
@@ -71,6 +72,8 @@ function dispatch(
           error => Effect.succeed(interactionErrorResult(error, context)),
         ),
       )
+    case 'answer_suggestion':
+      return answerSuggestionEffect(command, context, stop)
     case 'cancel_execution':
       return Effect.succeed({
         status: 'success',

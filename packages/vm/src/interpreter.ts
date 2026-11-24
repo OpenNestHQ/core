@@ -56,7 +56,7 @@ import {
 import type { EffectVMResult, StopRequested, StopToken } from './effect/stop.js'
 
 /** Everything a statement needs to run; built once per program run. */
-interface InterpreterEnv {
+export interface InterpreterEnv {
   readonly devices: Device[]
   readonly session: Session
   readonly middleware: Middleware[] | undefined
@@ -65,7 +65,7 @@ interface InterpreterEnv {
   readonly stop: StopToken
 }
 
-type InterpretResult =
+export type InterpretResult =
   | { kind: 'success' }
   | {
       kind: 'awaiting_interaction'
@@ -77,9 +77,9 @@ type InterpretResult =
   | { kind: 'interrupted' }
 
 /** Failures inside a statement; `runTracedStatement` turns a stop into a result. */
-type StatementError = VMInfraError | StopRequested
+export type StatementError = VMInfraError | StopRequested
 
-type AwaitingInteraction = Extract<
+export type AwaitingInteraction = Extract<
   InterpretResult,
   { kind: 'awaiting_interaction' }
 >
@@ -165,7 +165,7 @@ function rejectInvalidProgram(
   }
 }
 
-type StatementsRun =
+export type StatementsRun =
   | { kind: 'finished'; errors: VMError[] }
   /** A statement suspended the run for a user interaction. */
   | { kind: 'suspended'; errors: VMError[]; interaction: UserInteraction }
@@ -181,19 +181,38 @@ function runStatements(
   program: Program,
   env: InterpreterEnv,
 ): Effect.Effect<StatementsRun, VMInfraError> {
+  return runStatementLoop(
+    program.statements.length,
+    env,
+    i => runTracedStatement(program.statements[i]!, i, env),
+    (i, awaiting) => suspendProgram(env.session, program, i, awaiting),
+  )
+}
+
+/**
+ * The loop of {@link runStatements} over `count` steps, from `session.cursor`
+ * on; `runAt(i)` runs step `i`, `suspend` records a suspension at step `i`.
+ * Shared with follow-up runs.
+ */
+export function runStatementLoop(
+  count: number,
+  env: InterpreterEnv,
+  runAt: (index: number) => Effect.Effect<InterpretResult, VMInfraError>,
+  suspend: (index: number, awaiting: AwaitingInteraction) => void,
+): Effect.Effect<StatementsRun, VMInfraError> {
   return Effect.gen(function* () {
     const { session, stop } = env
     const errors: VMError[] = []
 
-    for (let i = session.cursor; i < program.statements.length; i++) {
+    for (let i = session.cursor; i < count; i++) {
       if (stop.isRequested()) {
         return { kind: 'interrupted', errors, completedStatements: i }
       }
 
-      const result = yield* runTracedStatement(program.statements[i]!, i, env)
+      const result = yield* runAt(i)
 
       if (result.kind === 'awaiting_interaction') {
-        suspendProgram(session, program, i, result)
+        suspend(i, result)
         return { kind: 'suspended', errors, interaction: result.interaction }
       }
 
@@ -213,7 +232,7 @@ function runStatements(
       return {
         kind: 'interrupted',
         errors,
-        completedStatements: program.statements.length,
+        completedStatements: count,
       }
     }
     return { kind: 'finished', errors }
@@ -226,16 +245,26 @@ function suspendProgram(
   index: number,
   awaiting: AwaitingInteraction,
 ): void {
+  suspendAt(session, index, awaiting)
+  session._pendingProgram = program
+}
+
+/** Records the pending interaction and the step to resume from. */
+export function suspendAt(
+  session: Session,
+  index: number,
+  awaiting: AwaitingInteraction,
+): void {
   session.pendingInteraction = {
     id: awaiting.interaction.id,
     type: awaiting.interaction.type,
     context: awaiting.pendingContext,
   }
-  session._pendingProgram = program
   session.cursor = index
 }
 
-function finishProgram(
+/** Ends a run (program or follow-up) and builds its result. */
+export function finishProgram(
   run: StatementsRun,
   env: InterpreterEnv,
 ): EffectVMResult {
@@ -260,6 +289,7 @@ function finishProgram(
 
   session.cursor = 0
   delete session._pendingProgram
+  delete session._pendingFollowUp
 
   if (run.errors.length === 0) openConfirmedSuggestions(session)
   clearSuggestionRun(session)
@@ -310,6 +340,7 @@ function interruptProgram(
   session.resolvedIds = {}
   session.pendingInteraction = null
   delete session._pendingProgram
+  delete session._pendingFollowUp
   clearSuggestionRun(session)
 
   eventBus?.emit({
@@ -338,6 +369,24 @@ function runTracedStatement(
   index: number,
   env: InterpreterEnv,
 ): Effect.Effect<InterpretResult, VMInfraError> {
+  return traceStatement(
+    statement,
+    index,
+    env,
+    interpretStatement(statement, env),
+  )
+}
+
+/**
+ * Runs `body` as statement `statement` between its trace events (see
+ * {@link runTracedStatement}). Shared with follow-up steps.
+ */
+export function traceStatement(
+  statement: Statement,
+  index: number,
+  env: InterpreterEnv,
+  body: Effect.Effect<InterpretResult, StatementError>,
+): Effect.Effect<InterpretResult, VMInfraError> {
   return Effect.gen(function* () {
     const { eventBus, session } = env
     eventBus?.emit({
@@ -347,7 +396,7 @@ function runTracedStatement(
       statementKind: statement.kind,
     })
 
-    const interpreted = yield* interpretStatement(statement, env).pipe(
+    const interpreted = yield* body.pipe(
       Effect.catchTag('StopRequested', () =>
         Effect.succeed<InterpretResult>({ kind: 'interrupted' }),
       ),
@@ -830,7 +879,8 @@ function approveActions(
   })
 }
 
-function applyMiddlewareAndFinish(
+/** Approval → batch → record of a statement's planned actions. Shared with follow-up steps. */
+export function applyMiddlewareAndFinish(
   actions: PlannedAction[],
   statement: Statement,
   resolutionResult: ResolutionResult,

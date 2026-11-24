@@ -6,6 +6,7 @@ import type { UserResponse } from './interactions/types.js'
 import { InteractionError } from './interactions/errors.js'
 import { processInteractionResponse } from './interactions/registry.js'
 import { interpretProgramEffect } from './interpreter.js'
+import { runFollowUpEffect } from './suggestions/follow-up.js'
 import { neverStop, toVMResult } from './effect/stop.js'
 import type { EffectVMResult, StopToken } from './effect/stop.js'
 
@@ -74,6 +75,14 @@ export function resumeAndContinueEffect(
           'Cannot resume: no session in context',
         ),
       )
+    }
+
+    const followUp = session._pendingFollowUp
+    if (followUp) {
+      yield* catchInteractionError(() =>
+        resumeWithResponse(session, response, context.eventBus),
+      )
+      return yield* runFollowUpEffect(context, session, followUp, stop)
     }
 
     const program = session._pendingProgram

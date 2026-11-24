@@ -8,6 +8,7 @@ export type {
   ExecuteStatementCommand,
   ResumeInteractionCommand,
   CancelExecutionCommand,
+  AnswerSuggestionCommand,
 } from './commands/types.js'
 
 export { validateProgram } from './validate.js'
@@ -81,6 +82,10 @@ export type {
   SuggestionCandidate,
   OpenSuggestion,
   JsonValue,
+  SuggestionResponse,
+  SuggestionErrorCode,
+  FollowUpStep,
+  PendingFollowUp,
 } from './suggestions/types.js'
 export { checkInputAnswer } from './interactions/input-answer.js'
 export type { InteractionErrorCode } from './interactions/errors.js'

@@ -14,6 +14,7 @@ import type {
 import type { Middleware } from './middleware/types.js'
 import type {
   OpenSuggestion,
+  PendingFollowUp,
   SuggestionCandidate,
 } from './suggestions/types.js'
 import type { VMEventBus } from './trace/event-bus.js'
@@ -42,6 +43,8 @@ export interface ExecutedStatement {
   changes: StateChange[]
   outcomes?: ActionOutcome[]
   filter?: ResolutionFilter
+  /** Set on entries of a follow-up run started by answering a suggestion. */
+  origin?: { suggestionId: string }
 }
 
 export interface Session {
@@ -60,6 +63,8 @@ export interface Session {
   suggestions?: OpenSuggestion[]
   /** Internal: suggestions being collected during the current run. */
   _suggestionCandidates?: SuggestionCandidate[]
+  /** Internal: the follow-up run of an answered suggestion, while it is suspended. */
+  _pendingFollowUp?: PendingFollowUp
 }
 
 export interface VMError {

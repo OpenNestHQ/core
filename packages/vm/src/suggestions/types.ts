@@ -1,3 +1,4 @@
+import type { Value } from '@opennest/lang-core'
 import type { Device } from '../types.js'
 import type { MiddlewareContext, PlannedAction } from '../middleware/types.js'
 
@@ -64,4 +65,30 @@ export interface SuggestionCandidate {
   pending: string[]
   /** Targets whose action was accepted. */
   confirmed: string[]
+}
+
+/** An answer to an open suggestion (same shapes as the 4a responses, without `interactionId`). */
+export type SuggestionResponse =
+  | { type: 'text_input'; text: string }
+  | { type: 'number_input'; value: number }
+  | { type: 'choice'; value: string }
+
+/** Error codes of `answer_suggestion` besides the reused interaction ones. */
+export type SuggestionErrorCode =
+  'suggestion_not_found' | 'suggestion_unavailable'
+
+/** One operation of a follow-up run (plain data): the same write on `deviceIds`. */
+export interface FollowUpStep {
+  kind: 'set_property' | 'increment_property' | 'invoke_action'
+  deviceIds: string[]
+  property?: string
+  method?: string
+  value?: Value
+  args?: Record<string, Value>
+}
+
+/** Internal: a follow-up run in progress (`cursor` is the current step). */
+export interface PendingFollowUp {
+  suggestionId: string
+  steps: FollowUpStep[]
 }
