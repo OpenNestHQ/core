@@ -501,6 +501,81 @@ describe('answer_suggestion', () => {
     expect(await h.driver.getProperty('light_2', 'color')).toBe('cold')
   })
 
+  it('never resumes a follow-up left over by a throwing middleware', async () => {
+    const { mw } = offering()
+    const boom = new Error('middleware crashed')
+    const crash: Middleware = async (ctx, next) => {
+      if (
+        ctx.action.kind === 'set_property' &&
+        ctx.action.property === 'brightness'
+      ) {
+        throw boom
+      }
+      return next()
+    }
+    let armed = false
+    const confirm = createConfirmationMiddleware({
+      requireConfirmation: () => armed,
+    })
+    const h = harness([mw, crash, confirm])
+    const first = await h.run(ALL_ON)
+
+    await expect(h.answer(first.suggestions![0]!.id, cinema)).rejects.toBe(boom)
+    expect(h.session._pendingFollowUp).toBeUndefined()
+    expect(h.session.cursor).toBe(0)
+
+    armed = true
+    const paused = await h.run('$l = @first(light[salon])\n$l.power = off')
+    expect(paused.status).toBe('awaiting_interaction')
+    const before = h.session.history.length
+
+    const result = await h.resume({
+      interactionId: paused.interaction!.id,
+      type: 'confirmation',
+      confirmed: true,
+    })
+
+    expect(result.status).toBe('success')
+    expect(await h.driver.getProperty('light_1', 'power')).toBe(false)
+    const added = h.session.history.slice(before)
+    expect(added).toHaveLength(1)
+    expect(added[0]!.origin).toBeUndefined()
+    expect(added[0]!.statement.kind).toBe('assignment')
+  })
+
+  it('drops a stale pending follow-up when a new program starts', async () => {
+    const confirm = createConfirmationMiddleware({
+      requireConfirmation: () => true,
+    })
+    const h = harness([confirm])
+    h.session._pendingFollowUp = {
+      suggestionId: 'suggestion_stale',
+      steps: [
+        {
+          kind: 'set_property',
+          deviceIds: ['light_2'],
+          property: 'brightness',
+          value: num(1),
+        },
+      ],
+    }
+
+    const paused = await h.run('$l = @first(light[salon])\n$l.power = on')
+    expect(paused.status).toBe('awaiting_interaction')
+    expect(h.session._pendingFollowUp).toBeUndefined()
+
+    const result = await h.resume({
+      interactionId: paused.interaction!.id,
+      type: 'confirmation',
+      confirmed: true,
+    })
+
+    expect(result.status).toBe('success')
+    expect(h.driver.writes.map(w => [w.deviceId, w.property])).toEqual([
+      ['light_1', 'power'],
+    ])
+  })
+
   it('works through runCommand', async () => {
     const { mw } = offering()
     const h = harness([mw])

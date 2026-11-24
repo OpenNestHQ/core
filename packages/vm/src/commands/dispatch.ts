@@ -137,6 +137,8 @@ function runProgram(
       // A real new command ends the previous suggestions' window.
       delete context.session.suggestions
       clearSuggestionRun(context.session)
+      // A follow-up left by a failed run must never be resumed in its place.
+      delete context.session._pendingFollowUp
     }
 
     return interpretProgramEffect(

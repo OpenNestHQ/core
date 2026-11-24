@@ -17,6 +17,7 @@ import {
   traceStatement,
 } from '../interpreter.js'
 import type { InterpretResult, InterpreterEnv } from '../interpreter.js'
+import { clearSuggestionRun } from './collect.js'
 import type { FollowUpStep, PendingFollowUp } from './types.js'
 
 /**
@@ -122,7 +123,17 @@ export function runFollowUpEffect(
       (i, awaiting) => suspendAt(session, i, awaiting),
     )
     return finishProgram(run, env)
-  })
+  }).pipe(
+    // An infra failure skips `finishProgram`: leave no follow-up to resume.
+    Effect.onError(() =>
+      Effect.sync(() => {
+        delete session._pendingFollowUp
+        session.cursor = 0
+        session.resolvedIds = {}
+        clearSuggestionRun(session)
+      }),
+    ),
+  )
 }
 
 function runStep(
