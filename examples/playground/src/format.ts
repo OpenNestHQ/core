@@ -59,6 +59,9 @@ export function formatSuccess(result: RunResult, since: number = 0): string {
   )
 
   for (const exec of entries) {
+    if (exec.origin) {
+      lines.push(`  ${C}\u21b3 suggestion${N}`)
+    }
     if (exec.changes.length > 0) {
       for (const change of exec.changes) {
         lines.push(changeLine(change, exec.resolvedDevices))
