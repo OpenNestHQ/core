@@ -10,6 +10,7 @@ import { runPromiseRethrowingOriginal } from '../effect/run.js'
 import { makeStopToken, neverStop, toVMResult } from '../effect/stop.js'
 import type { EffectVMResult, StopToken } from '../effect/stop.js'
 import { interpretProgramEffect } from '../interpreter.js'
+import { clearSuggestionRun } from '../suggestions/collect.js'
 
 export interface RunOptions {
   /**
@@ -130,6 +131,9 @@ function runProgram(
     // Each new program is its own run: later features key data by programId.
     if (context.session !== undefined) {
       context.session.programId = crypto.randomUUID()
+      // A real new command ends the previous suggestions' window.
+      delete context.session.suggestions
+      clearSuggestionRun(context.session)
     }
 
     return interpretProgramEffect(

@@ -72,6 +72,16 @@ export type {
   AskContext,
   AskStore,
 } from './interactions/ask.js'
+export { defineSuggestion } from './suggestions/define.js'
+export type {
+  SuggestionQuestion,
+  SuggestionAnswer,
+  SuggestionApply,
+  SuggestionDefinition,
+  SuggestionCandidate,
+  OpenSuggestion,
+  JsonValue,
+} from './suggestions/types.js'
 export { checkInputAnswer } from './interactions/input-answer.js'
 export type { InteractionErrorCode } from './interactions/errors.js'
 

@@ -47,6 +47,11 @@ import { runMiddlewarePipelineEffect } from './middleware/pipeline.js'
 import { readProperty } from './effect/driver.js'
 import { runPromiseRethrowingOriginal } from './effect/run.js'
 import { neverStop, toVMResult } from './effect/stop.js'
+import {
+  clearSuggestionRun,
+  confirmCandidates,
+  openConfirmedSuggestions,
+} from './suggestions/collect.js'
 import type { EffectVMResult, StopRequested, StopToken } from './effect/stop.js'
 
 /** Everything a statement needs to run; built once per program run. */
@@ -255,6 +260,9 @@ function finishProgram(
   session.cursor = 0
   delete session._pendingProgram
 
+  if (run.errors.length === 0) openConfirmedSuggestions(session)
+  clearSuggestionRun(session)
+
   if (run.errors.length > 0) {
     eventBus?.emit({
       kind: 'program:end',
@@ -282,6 +290,9 @@ function finishProgram(
     executed: session.history,
     interaction: null,
     errors: [],
+    ...(session.suggestions && session.suggestions.length > 0
+      ? { suggestions: session.suggestions }
+      : {}),
   }
 }
 
@@ -298,6 +309,7 @@ function interruptProgram(
   session.resolvedIds = {}
   session.pendingInteraction = null
   delete session._pendingProgram
+  clearSuggestionRun(session)
 
   eventBus?.emit({
     kind: 'program:end',
@@ -736,6 +748,7 @@ function recordBatch(
     ...filter,
   })
   if (sentDevices[0]) session.it = sentDevices[0]
+  confirmCandidates(session, session.cursor, outcomes)
 
   return interrupted ? { kind: 'interrupted' } : { kind: 'success' }
 }

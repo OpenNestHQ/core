@@ -12,6 +12,10 @@ import type {
   PendingInteraction,
 } from './interactions/types.js'
 import type { Middleware } from './middleware/types.js'
+import type {
+  OpenSuggestion,
+  SuggestionCandidate,
+} from './suggestions/types.js'
 import type { VMEventBus } from './trace/event-bus.js'
 
 export interface Device {
@@ -52,6 +56,10 @@ export interface Session {
   variableModifiers: Record<string, CollectionModifier>
   pendingInteraction: PendingInteraction | null
   _pendingProgram?: Program
+  /** Suggestions offered by earlier successful runs and still answerable. */
+  suggestions?: OpenSuggestion[]
+  /** Internal: suggestions being collected during the current run. */
+  _suggestionCandidates?: SuggestionCandidate[]
 }
 
 export interface VMError {
@@ -68,6 +76,8 @@ export interface VMResult {
   executed: ExecutedStatement[]
   interaction: UserInteraction | null
   errors: VMError[]
+  /** The whole open set after the command; only on `success`, when non-empty. */
+  suggestions?: OpenSuggestion[]
 }
 
 export interface VMContext {

@@ -163,7 +163,7 @@ export function createAsk(): AskFn {
   }
 }
 
-function validateQuestion(question: AskQuestion): void {
+export function validateQuestion(question: AskQuestion): void {
   if (question.key.trim() === '') {
     throw new Error('ask(): question key must be a non-empty string')
   }
