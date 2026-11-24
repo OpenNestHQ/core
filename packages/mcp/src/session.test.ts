@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { MockDriver } from '@opennest/devices'
-import { OpenNestClient, createAsk } from '@opennest/sdk'
+import { OpenNestClient, createAsk, defineSuggestion } from '@opennest/sdk'
 import type {
   Device,
   ExecutedStatement,
@@ -436,5 +436,52 @@ describe('toSessionSummary with ask questions', () => {
       prompt: 'A choice is pending. Answer it with the respond tool.',
       choices: [],
     })
+  })
+})
+
+describe('toSessionSummary with suggestions', () => {
+  it('get_session lists open suggestions without data', async () => {
+    const suggestionDriver = new MockDriver()
+    await suggestionDriver.init({})
+    suggestionDriver.seed('tv_salon', { power: false, volume: 15 })
+    const def = defineSuggestion('session_suggestion_1', {
+      apply: () => [],
+    })
+    const client = new OpenNestClient({
+      devices: [{ ...salonTv, driver: suggestionDriver }],
+      middleware: [
+        async (ctx, next) => {
+          if (ctx.action.kind === 'set_property') {
+            def.suggest(ctx, {
+              key: 'level',
+              type: 'number_input',
+              message: 'Volume?',
+              min: 0,
+              data: { secret: 'internal' },
+            })
+          }
+          return next()
+        },
+      ],
+    })
+    await client.runDsl('tv[salon].power = on')
+    const summary = toSessionSummary(
+      client.getSession(),
+      client.getSuggestions(),
+    )
+    expect(summary.suggestions).toEqual([
+      {
+        id: client.getSuggestions()[0]!.id,
+        type: 'number_input',
+        prompt: 'Volume?',
+        min: 0,
+        devices: ['Salon TV'],
+      },
+    ])
+    expect(JSON.stringify(summary)).not.toContain('secret')
+  })
+
+  it('omits suggestions when none are open', () => {
+    expect(toSessionSummary(makeSession())).not.toHaveProperty('suggestions')
   })
 })

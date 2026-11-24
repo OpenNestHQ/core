@@ -45,4 +45,18 @@ describe('buildInstructions', () => {
     expect(text).toContain('invalid_response')
     expect(text).toMatch(/invalid_response[^\n]*retr/i)
   })
+
+  it('documents suggestions and answer_suggestion', () => {
+    expect(text).toContain('answer_suggestion')
+    expect(text).toMatch(/never required/i)
+    expect(text).toMatch(/never answer one on the user's behalf/i)
+    expect(text).toMatch(/next `run_dsl` drops all open suggestions/)
+    for (const code of [
+      'suggestion_not_found',
+      'suggestion_unavailable',
+      'suggestion_aborted',
+    ]) {
+      expect(text).toContain(code)
+    }
+  })
 })

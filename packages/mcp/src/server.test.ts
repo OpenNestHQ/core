@@ -27,6 +27,9 @@ function stubClient(
     resumePending: async () => OK,
     getPendingInteraction: () => null,
     cancel: async () => OK,
+    getSuggestions: () => [],
+    answerSuggestion: async () => OK,
+    dismissSuggestion: () => false,
     getSession: () =>
       ({
         programId: 'p',
@@ -90,12 +93,13 @@ async function connect(options: OpenNestServerOptions) {
 const tick = () => new Promise(resolve => setTimeout(resolve, 20))
 
 describe('createOpenNestServer', () => {
-  it('lists exactly the four tools with input schemas and annotations', async () => {
+  it('lists exactly the five tools with input schemas and annotations', async () => {
     const c = await connect({ client: stubClient(), devices: DEVICES })
     const { result } = await c.request('tools/list')
     expect(result.tools.map((t: Rpc) => t.name)).toEqual([
       'run_dsl',
       'respond',
+      'answer_suggestion',
       'cancel',
       'get_session',
     ])

@@ -41,12 +41,13 @@ The inventory is loaded once at startup. If it is missing, unreadable or invalid
 
 ## Tools
 
-| Tool          | Input                               | Description                                                                                                     |
-| ------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `run_dsl`     | `{ dsl: string, dryRun?: boolean }` | Parse, validate and execute a HomeDSL program. With `dryRun: true` the program is only checked, never executed. |
-| `respond`     | `{ response: { type, ... } }`       | Answer the pending user interaction. The `type` must match the interaction; no id is needed.                    |
-| `cancel`      | `{}`                                | Cancel the pending program and reset the session. Safe to call when nothing is pending.                         |
-| `get_session` | `{}`                                | Read-only summary of the session: variables, `$it`, recent history, pending interaction.                        |
+| Tool                | Input                                             | Description                                                                                                     |
+| ------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `run_dsl`           | `{ dsl: string, dryRun?: boolean }`               | Parse, validate and execute a HomeDSL program. With `dryRun: true` the program is only checked, never executed. |
+| `respond`           | `{ response: { type, ... } }`                     | Answer the pending user interaction. The `type` must match the interaction; no id is needed.                    |
+| `answer_suggestion` | `{ suggestionId: string, answer: { type, ... } }` | Answer an optional follow-up from a `completed` result's `suggestions[]` (see below).                           |
+| `cancel`            | `{}`                                              | Cancel the pending program and reset the session. Safe to call when nothing is pending.                         |
+| `get_session`       | `{}`                                              | Read-only summary of the session: variables, `$it`, recent history, pending interaction.                        |
 
 `respond.response` is one of:
 
@@ -58,6 +59,20 @@ The inventory is loaded once at startup. If it is missing, unreadable or invalid
 | { type: 'choice'; value: string }
 | { type: 'action_parameter'; values: Record<string, string> }
 ```
+
+### Suggestions
+
+A `completed` result may carry `suggestions: SuggestionPrompt[]`, optional follow-up questions about what just ran:
+
+```ts
+{ id: string; devices: string[] /* device names */ } & (
+  | { type: 'text_input'; prompt: string; placeholder?: string }
+  | { type: 'number_input'; prompt: string; min?: number; max?: number }
+  | { type: 'choice'; prompt: string; choices: { id: string; label: string }[] }
+)
+```
+
+`answer_suggestion.answer` is `{ type: 'text_input'; text }`, `{ type: 'number_input'; value }` or `{ type: 'choice'; value }` (a `choices[].id`). The result is `completed` (with the follow-up's own entries in `result.executed`, and the remaining open suggestions), `waiting_for_user` (the follow-up paused: resolve with `respond`) or `failed`. Never answer a suggestion on the user's behalf. A new `run_dsl` drops all open suggestions; answering one keeps the others; `get_session` lists the open ones (without internal data). An invalid answer is retryable up to `OPENNEST_MAX_FAILED_RESUMES` times per suggestion, then only that suggestion is dismissed (`suggestion_aborted`).
 
 ### Resources
 
@@ -146,6 +161,9 @@ type InteractionPrompt =
 | `no_pending_program`           | `failed`  | The session lost its suspended program. Retryable.                                                        |
 | `no_session`                   | `failed`  | The core could not resume because there is no active session.                                             |
 | `invalid_response`             | `failed`  | An answer to a text/number/choice question was rejected (empty, out of range, unknown option). Retryable. |
+| `suggestion_not_found`         | `failed`  | `answer_suggestion` named a suggestion that was answered or dropped by a newer command. Not retryable.    |
+| `suggestion_unavailable`       | `failed`  | The suggestion can no longer be applied. Not retryable.                                                   |
+| `suggestion_aborted`           | `failed`  | Too many invalid answers to one suggestion; only it was dismissed (session and siblings kept).            |
 | `interaction_aborted`          | `failed`  | Too many invalid answers (`OPENNEST_MAX_FAILED_RESUMES`); the interaction was cancelled. Start over.      |
 | `unsupported_interaction_type` | `failed`  | The runtime suspended on an interaction type this server cannot present.                                  |
 | `core_error`                   | `failed`  | Unexpected error from the OpenNest core.                                                                  |

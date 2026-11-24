@@ -14,6 +14,7 @@ OpenNest executes HomeDSL programs against a smart-home runtime. You write HomeD
 - A \`completed\` result may carry \`deviceFailures: [{ deviceId, message }]\` when a device rejected a command (action or property write). The program ran, so the status stays \`completed\` — always report these failures to the user instead of saying the action succeeded.
 - Every tool returns an envelope with a \`status\`: \`completed\`, \`waiting_for_user\`, \`blocked\` or \`failed\`. Execution failures are statuses, not transport errors. Only malformed tool input (schema violations, e.g. \`respond\` without \`deviceId\`) is rejected by the MCP layer as a plain-text \`isError\` transport error; it does not consume the retry budget, so just fix the input and call again.
 - \`waiting_for_user\` carries an \`interaction\` (device choice, confirmation, text, number, choice or action parameters). Ask the user, then call \`respond { response }\` with the matching \`type\`. Send a \`choices[].id\` back as \`deviceId\` for \`device_selection\` and as \`value\` for \`choice\`. You never need an interaction id: \`respond\` targets the single pending interaction.
+- A \`completed\` result may carry \`suggestions: [{ id, prompt, type, devices, ... }]\`: optional follow-up questions about what you just did (\`devices\` are the names it would act on). They are never required. Only relay one to the user if it is useful, and never answer one on the user's behalf: ask them, then call \`answer_suggestion { suggestionId, answer }\` with a matching \`answer.type\` (a \`choices[].id\` goes as \`value\` for \`choice\`). It may complete, or pause on a \`waiting_for_user\` question that \`respond\` resolves. The next \`run_dsl\` drops all open suggestions; answering one leaves the others open. \`get_session\` lists the open ones.
 - While an interaction is pending, \`run_dsl\` is \`blocked\` (\`interaction_pending\`). Resolve it with \`respond\` or abandon it with \`cancel\`.
 - \`cancel\` aborts the pending program and resets the session. \`get_session\` reads the current session summary without side effects.
 - Calls are executed one at a time, in order.
@@ -27,6 +28,9 @@ OpenNest executes HomeDSL programs against a smart-home runtime. You write HomeD
 - \`no_pending_interaction\`: \`respond\` was called with nothing to answer.
 - \`invalid_response\`: your answer to a text, number or choice question was rejected (empty text, number out of range, unknown option). The question stays open: fix the answer and call \`respond\` again (retryable).
 - \`interaction_aborted\`: too many invalid answers; the interaction was cancelled. Start over.
+- \`suggestion_not_found\`: the suggestion was already answered or dropped by a newer \`run_dsl\`. Not retryable.
+- \`suggestion_unavailable\`: the suggestion can no longer be applied (e.g. its devices are gone). Not retryable.
+- \`suggestion_aborted\`: too many invalid answers to one suggestion; only that suggestion was dismissed, the session is kept.
 - \`core_error\`: unexpected internal failure.
 
 Other codes you may see on a failed \`respond\`: \`interaction_id_mismatch\`, \`interaction_type_mismatch\`, \`unknown_device_id\`, \`no_pending_program\`, \`no_session\`, \`unsupported_interaction_type\`.

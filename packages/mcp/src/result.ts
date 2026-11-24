@@ -1,4 +1,8 @@
-import type { RunResult, UserInteraction } from '@opennest/sdk'
+import type {
+  RunResult,
+  SuggestionSummary,
+  UserInteraction,
+} from '@opennest/sdk'
 import type { MissingParameter } from '@opennest/vm'
 import type { SessionSummary } from './session.js'
 
@@ -39,6 +43,20 @@ export type InteractionPrompt =
       missing: MissingParameterSummary[]
     }
 
+/**
+ * Agent-facing projection of an open suggestion: an optional follow-up
+ * question. `devices` are the names of the devices it would act on.
+ * Answer it with `answer_suggestion`; the VM-side `data` never leaks.
+ */
+export type SuggestionPrompt = {
+  id: string
+  devices: string[]
+} & (
+  | { type: 'text_input'; prompt: string; placeholder?: string }
+  | { type: 'number_input'; prompt: string; min?: number; max?: number }
+  | { type: 'choice'; prompt: string; choices: InteractionChoice[] }
+)
+
 export type BlockedCode = 'interaction_pending' | 'no_pending_interaction'
 
 export interface ToolError {
@@ -66,6 +84,7 @@ export type ToolResult =
       result?: RunResultSummary
       session?: SessionSummary
       deviceFailures?: DeviceFailure[]
+      suggestions?: SuggestionPrompt[]
     }
   | { status: 'waiting_for_user'; interaction: InteractionPrompt }
   | {
@@ -139,6 +158,45 @@ export function toInteractionPrompt(
   }
 }
 
+export function toSuggestionPrompt(
+  suggestion: SuggestionSummary,
+): SuggestionPrompt {
+  const { id, question } = suggestion
+  const devices = suggestion.targets.map(target => target.name)
+  switch (question.type) {
+    case 'text_input':
+      return {
+        id,
+        devices,
+        type: 'text_input',
+        prompt: question.message,
+        ...(question.placeholder !== undefined
+          ? { placeholder: question.placeholder }
+          : {}),
+      }
+    case 'number_input':
+      return {
+        id,
+        devices,
+        type: 'number_input',
+        prompt: question.message,
+        ...(question.min !== undefined ? { min: question.min } : {}),
+        ...(question.max !== undefined ? { max: question.max } : {}),
+      }
+    case 'choice':
+      return {
+        id,
+        devices,
+        type: 'choice',
+        prompt: question.message,
+        choices: question.options.map(option => ({
+          id: option.value,
+          label: option.label,
+        })),
+      }
+  }
+}
+
 function failed(code: string, message: string): ToolResult {
   return { status: 'failed', error: { code, message } }
 }
@@ -179,6 +237,9 @@ export function toToolResult(
     status: 'completed',
     result: { status: result.status, executed, errors: result.errors },
     ...(deviceFailures.length > 0 ? { deviceFailures } : {}),
+    ...(result.suggestions !== undefined && result.suggestions.length > 0
+      ? { suggestions: result.suggestions.map(toSuggestionPrompt) }
+      : {}),
   }
 }
 

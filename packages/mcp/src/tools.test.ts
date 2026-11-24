@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { MockDriver } from '@opennest/devices'
-import { OpenNestClient, createAsk } from '@opennest/sdk'
+import { OpenNestClient, createAsk, defineSuggestion } from '@opennest/sdk'
 import { createConfirmationMiddleware } from '@opennest/vm'
 import type { Device, Middleware } from '@opennest/vm'
 import { createGuardedRuntime } from './runtime.js'
-import { cancelTool, getSessionTool, respondTool, runDslTool } from './tools.js'
+import {
+  answerSuggestionTool,
+  cancelTool,
+  getSessionTool,
+  respondTool,
+  runDslTool,
+} from './tools.js'
 import type { ToolDeps } from './tools.js'
 import { toInteractionPrompt } from './result.js'
 import { toSessionSummary } from './session.js'
@@ -410,5 +416,218 @@ describe('ask questions end to end', () => {
     if (after.status !== 'completed') throw new Error('expected completed')
     expect(after.session?.pendingInteraction).toBeNull()
     expect(await deps.driver.getProperty('tv_salon', 'volume')).toBe(15)
+  })
+})
+
+describe('suggestions', () => {
+  let n = 0
+  const volumeFollowUp = (name: string) =>
+    defineSuggestion(name, {
+      apply: (answer, devices) =>
+        devices.map(device => ({
+          kind: 'set_property' as const,
+          device,
+          property: 'volume',
+          value: {
+            kind: 'number' as const,
+            value:
+              typeof answer === 'number' ? answer : answer === 'low' ? 5 : 80,
+          },
+        })),
+    })
+
+  async function makeSuggestionDeps(
+    questions: Parameters<ReturnType<typeof volumeFollowUp>['suggest']>[1][],
+    options: { confirmVolume?: boolean; maxFailedResumes?: number } = {},
+  ) {
+    const defs = questions.map(() => volumeFollowUp(`mcp_suggestion_${++n}`))
+    const suggest: Middleware = async (ctx, next) => {
+      if (
+        ctx.action.kind === 'set_property' &&
+        ctx.action.property === 'power'
+      ) {
+        questions.forEach((question, i) => defs[i]!.suggest(ctx, question))
+      }
+      return next()
+    }
+    const driver = new MockDriver()
+    await driver.init({})
+    driver.seed('tv_salon', { power: false, volume: 15 })
+    const devices: Device[] = [
+      {
+        id: 'tv_salon',
+        type: 'tv',
+        room: 'salon',
+        name: 'Salon TV',
+        driver,
+        driverConfig: {},
+      },
+    ]
+    const client = new OpenNestClient({
+      devices,
+      middleware: [
+        suggest,
+        createConfirmationMiddleware({
+          requireConfirmation: action =>
+            options.confirmVolume === true &&
+            action.kind === 'set_property' &&
+            action.property === 'volume',
+        }),
+      ],
+    })
+    const deps: ToolDeps = {
+      client,
+      runtime: createGuardedRuntime(client, {
+        ...(options.maxFailedResumes !== undefined
+          ? { maxFailedResumes: options.maxFailedResumes }
+          : {}),
+      }),
+    }
+    return { deps, driver }
+  }
+
+  const level = {
+    key: 'level',
+    type: 'number_input' as const,
+    message: 'Volume?',
+    min: 0,
+    max: 100,
+  }
+  const mode = {
+    key: 'mode',
+    type: 'choice' as const,
+    message: 'Mode?',
+    options: [
+      { value: 'low', label: 'Low' },
+      { value: 'high', label: 'High' },
+    ],
+  }
+
+  it('run_dsl completed result lists suggestions', async () => {
+    const { deps } = await makeSuggestionDeps([mode])
+    const r = await runDslTool(deps, { dsl: 'tv[salon].power = on' })
+    expect(r).toMatchObject({
+      status: 'completed',
+      suggestions: [
+        {
+          type: 'choice',
+          prompt: 'Mode?',
+          devices: ['Salon TV'],
+          choices: [
+            { id: 'low', label: 'Low' },
+            { id: 'high', label: 'High' },
+          ],
+        },
+      ],
+    })
+    if (r.status !== 'completed') return
+    expect(typeof r.suggestions![0]!.id).toBe('string')
+    expect(JSON.stringify(r.suggestions)).not.toContain('"key"')
+  })
+
+  it('answer_suggestion completes a choice follow-up', async () => {
+    const { deps, driver } = await makeSuggestionDeps([mode])
+    const first = await runDslTool(deps, { dsl: 'tv[salon].power = on' })
+    if (first.status !== 'completed') throw new Error('expected completed')
+    const done = await answerSuggestionTool(deps, {
+      suggestionId: first.suggestions![0]!.id,
+      answer: { type: 'choice', value: 'high' },
+    })
+    expect(done.status).toBe('completed')
+    if (done.status !== 'completed') return
+    expect(await driver.getProperty('tv_salon', 'volume')).toBe(80)
+    // scoped to the follow-up only, not the whole history
+    expect(done.result?.executed).toHaveLength(1)
+    expect(done.result?.executed[0]?.origin).toEqual({
+      suggestionId: first.suggestions![0]!.id,
+    })
+    expect(done).not.toHaveProperty('suggestions')
+  })
+
+  it('answer_suggestion pauses on a confirmation and respond completes it', async () => {
+    const { deps, driver } = await makeSuggestionDeps([level], {
+      confirmVolume: true,
+    })
+    const first = await runDslTool(deps, { dsl: 'tv[salon].power = on' })
+    if (first.status !== 'completed') throw new Error('expected completed')
+    const waiting = await answerSuggestionTool(deps, {
+      suggestionId: first.suggestions![0]!.id,
+      answer: { type: 'number_input', value: 30 },
+    })
+    expect(waiting).toMatchObject({
+      status: 'waiting_for_user',
+      interaction: { type: 'confirmation' },
+    })
+    const done = await respondTool(deps, {
+      response: { type: 'confirmation', confirmed: true },
+    })
+    expect(done.status).toBe('completed')
+    if (done.status !== 'completed') return
+    expect(done.result?.executed).toHaveLength(1)
+    expect(await driver.getProperty('tv_salon', 'volume')).toBe(30)
+  })
+
+  it('retries an invalid suggestion answer then completes', async () => {
+    const { deps, driver } = await makeSuggestionDeps([level])
+    const first = await runDslTool(deps, { dsl: 'tv[salon].power = on' })
+    if (first.status !== 'completed') throw new Error('expected completed')
+    const suggestionId = first.suggestions![0]!.id
+    const bad = await answerSuggestionTool(deps, {
+      suggestionId,
+      answer: { type: 'number_input', value: 500 },
+    })
+    expect(bad).toMatchObject({
+      status: 'failed',
+      error: { code: 'invalid_response' },
+    })
+    const good = await answerSuggestionTool(deps, {
+      suggestionId,
+      answer: { type: 'number_input', value: 40 },
+    })
+    expect(good.status).toBe('completed')
+    expect(await driver.getProperty('tv_salon', 'volume')).toBe(40)
+  })
+
+  it('aborts only that suggestion after too many invalid answers', async () => {
+    const { deps } = await makeSuggestionDeps([level, mode])
+    const first = await runDslTool(deps, { dsl: 'tv[salon].power = on' })
+    if (first.status !== 'completed') throw new Error('expected completed')
+    const [levelPrompt, modePrompt] = first.suggestions!
+    const historyBefore = deps.client.getSession().history.length
+    const answer = {
+      suggestionId: levelPrompt!.id,
+      answer: { type: 'number_input' as const, value: 500 },
+    }
+    for (let i = 0; i < 2; i++) {
+      const r = await answerSuggestionTool(deps, answer)
+      expect(r).toMatchObject({ error: { code: 'invalid_response' } })
+    }
+    const aborted = await answerSuggestionTool(deps, answer)
+    expect(aborted).toMatchObject({
+      status: 'failed',
+      error: { code: 'suggestion_aborted' },
+    })
+    const session = getSessionTool(deps)
+    if (session.status !== 'completed') throw new Error('expected completed')
+    expect(session.session?.suggestions?.map(s => s.id)).toEqual([
+      modePrompt!.id,
+    ])
+    expect(deps.client.getSession().history).toHaveLength(historyBefore)
+  })
+
+  it('answer_suggestion on a stale id fails with suggestion_not_found', async () => {
+    const { deps } = await makeSuggestionDeps([mode])
+    const first = await runDslTool(deps, { dsl: 'tv[salon].power = on' })
+    if (first.status !== 'completed') throw new Error('expected completed')
+    const staleId = first.suggestions![0]!.id
+    await runDslTool(deps, { dsl: 'tv[salon].volume?' })
+    const r = await answerSuggestionTool(deps, {
+      suggestionId: staleId,
+      answer: { type: 'choice', value: 'low' },
+    })
+    expect(r).toMatchObject({
+      status: 'failed',
+      error: { code: 'suggestion_not_found' },
+    })
   })
 })
