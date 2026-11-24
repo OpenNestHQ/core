@@ -7,8 +7,12 @@ import {
   createAsk,
   createConfirmationMiddleware,
   DefaultVMEventBus,
+  defineSuggestion,
 } from '@opennest/vm'
-import { createAsk as createAskFromIndex } from './index.js'
+import {
+  createAsk as createAskFromIndex,
+  defineSuggestion as defineSuggestionFromIndex,
+} from './index.js'
 import { OpenNestClient } from './client.js'
 import type { Device, Middleware, UserInteraction } from '@opennest/vm'
 
@@ -886,5 +890,136 @@ describe('OpenNestClient ask answers', () => {
 
   it('re-exports createAsk', () => {
     expect(typeof createAskFromIndex).toBe('function')
+  })
+})
+
+describe('OpenNestClient suggestions', () => {
+  let n = 0
+  const modeQuestion = {
+    key: 'level',
+    type: 'number_input' as const,
+    message: 'Volume?',
+    min: 0,
+    max: 100,
+  }
+
+  function setup(names = 1) {
+    const defs = Array.from({ length: names }, () =>
+      defineSuggestion(`sdk_suggestion_${++n}`, {
+        apply: (answer, devices) =>
+          devices.map(device => ({
+            kind: 'set_property' as const,
+            device,
+            property: 'volume',
+            value: { kind: 'number' as const, value: answer as number },
+          })),
+      }),
+    )
+    const middleware: Middleware = async (ctx, next) => {
+      if (
+        ctx.action.kind === 'set_property' &&
+        ctx.action.property === 'power'
+      ) {
+        for (const [i, def] of defs.entries()) {
+          def.suggest(ctx, { ...modeQuestion, key: `level${i}` })
+        }
+      }
+      return next()
+    }
+    return makeClient({ middleware: [middleware] })
+  }
+
+  it('exposes suggestions on the run result and getSuggestions', async () => {
+    const { client } = await setup()
+    const result = await client.runDsl('tv[salon].power = on')
+
+    expect(result.suggestions).toHaveLength(1)
+    const suggestion = result.suggestions![0]!
+    expect(suggestion.question).toEqual({ ...modeQuestion, key: 'level0' })
+    expect(suggestion.targets).toEqual([
+      { id: 'tv_salon', type: 'tv', room: 'salon', name: 'Salon TV' },
+    ])
+    expect(client.getSuggestions()).toEqual(result.suggestions)
+
+    const plain = await makeClient()
+    const none = await plain.client.runDsl('tv[salon].power = on')
+    expect(none.suggestions).toBeUndefined()
+    expect(plain.client.getSuggestions()).toEqual([])
+  })
+
+  it('answers a suggestion end to end', async () => {
+    const { client, driver } = await setup()
+    const first = await client.runDsl('tv[salon].power = on')
+    const id = first.suggestions![0]!.id
+
+    const result = await client.answerSuggestion(id, {
+      type: 'number_input',
+      value: 33,
+    })
+
+    expect(result.status).toBe('success')
+    expect(await driver.getProperty('tv_salon', 'volume')).toBe(33)
+    expect(client.getSuggestions()).toEqual([])
+  })
+
+  it('pre-validates suggestion answers without calling the VM', async () => {
+    const { client, driver } = await setup()
+    const first = await client.runDsl('tv[salon].power = on')
+    const id = first.suggestions![0]!.id
+
+    const unknown = await client.answerSuggestion('nope', {
+      type: 'number_input',
+      value: 1,
+    })
+    const mismatch = await client.answerSuggestion(id, {
+      type: 'text_input',
+      text: 'loud',
+    })
+    const invalid = await client.answerSuggestion(id, {
+      type: 'number_input',
+      value: 101,
+    })
+
+    expect(unknown.errors[0]!.code).toBe('suggestion_not_found')
+    expect(mismatch.errors[0]!.code).toBe('interaction_type_mismatch')
+    expect(invalid.errors[0]!.code).toBe('invalid_response')
+    for (const r of [unknown, mismatch, invalid]) {
+      expect(r.status).toBe('error')
+      expect(r.executed).toEqual([])
+    }
+    expect(await driver.getProperty('tv_salon', 'volume')).toBe(15)
+    expect(client.getSuggestions()).toHaveLength(1)
+  })
+
+  it('dismissSuggestion removes one suggestion and keeps siblings', async () => {
+    const { client } = await setup(2)
+    const first = await client.runDsl('tv[salon].power = on')
+    const [a, b] = first.suggestions!
+
+    expect(client.dismissSuggestion(a!.id)).toBe(true)
+    expect(client.dismissSuggestion(a!.id)).toBe(false)
+    expect(client.getSuggestions().map(s => s.id)).toEqual([b!.id])
+    expect(client.dismissSuggestion(b!.id)).toBe(true)
+    expect(client.getSuggestions()).toEqual([])
+  })
+
+  it('projects origin on follow-up entries', async () => {
+    const { client } = await setup()
+    const first = await client.runDsl('tv[salon].power = on')
+    const id = first.suggestions![0]!.id
+
+    const result = await client.answerSuggestion(id, {
+      type: 'number_input',
+      value: 20,
+    })
+
+    expect(result.executed[0]!.origin).toBeUndefined()
+    const followUp = result.executed.filter(e => e.origin !== undefined)
+    expect(followUp).toHaveLength(1)
+    expect(followUp[0]!.origin).toEqual({ suggestionId: id })
+  })
+
+  it('re-exports defineSuggestion', () => {
+    expect(defineSuggestionFromIndex).toBe(defineSuggestion)
   })
 })

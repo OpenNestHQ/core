@@ -11,6 +11,7 @@ export type {
   DeviceSummary,
   ExecutedStatementSummary,
   RunResult,
+  SuggestionSummary,
 } from './result.js'
 
 export { ParseError } from '@opennest/lang-core'
@@ -23,6 +24,7 @@ export type {
 export {
   createAsk,
   createConfirmationMiddleware,
+  defineSuggestion,
   DefaultVMEventBus,
 } from '@opennest/vm'
 export type {
@@ -44,6 +46,12 @@ export type {
   AskScope,
   AskAnswer,
   AskFn,
+  SuggestionQuestion,
+  SuggestionAnswer,
+  SuggestionApply,
+  SuggestionDefinition,
+  SuggestionResponse,
+  JsonValue,
 } from '@opennest/vm'
 
 export type { DeviceRegistry, PromptDefinitions } from '@opennest/devices'
