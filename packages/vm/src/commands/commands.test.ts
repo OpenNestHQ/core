@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import { Effect } from 'effect'
 import {
   parseHomeDSL,
   buildAction,
@@ -16,6 +17,7 @@ import {
 } from '../index.js'
 import type { Device, Session, VMCommand } from '../index.js'
 import { resumeWithResponse } from '../state.js'
+import { runCommand } from '../effect/index.js'
 
 function makeDriver(): MockDriver {
   return new MockDriver()
@@ -971,5 +973,112 @@ describe('executeCommand', () => {
       expect(commandResult.session.it!.id).toBe('vacuum_salon')
       expect(commandResult.session.history).toHaveLength(2)
     })
+  })
+})
+
+describe('programId per program run', () => {
+  const lightsOn = () => parseHomeDSL('light[salon].power = on').program!
+  const ambiguous = () => parseHomeDSL('tv.power = on').program!
+
+  it('renews programId for each new program on the same session', async () => {
+    const devs = await devices()
+    const a = await executeCommand(
+      { kind: 'run_program', program: lightsOn() },
+      { devices: devs },
+    )
+    const idA = a.session.programId
+    const b = await executeCommand(
+      { kind: 'run_program', program: lightsOn() },
+      { devices: devs, session: a.session },
+    )
+    expect(b.session.programId).not.toBe(idA)
+  })
+
+  it('keeps programId across a pause at statement 0 and its resume', async () => {
+    const devs = await devices()
+    const spy = vi.spyOn(devs[0]!.driver, 'setProperty')
+    const paused = await executeCommand(
+      { kind: 'run_program', program: ambiguous() },
+      { devices: devs },
+    )
+    expect(paused.status).toBe('awaiting_interaction')
+    const idBefore = paused.session.programId
+    const done = await executeCommand(
+      {
+        kind: 'resume_interaction',
+        response: {
+          interactionId: paused.session.pendingInteraction!.id,
+          type: 'device_selection',
+          deviceId: 'tv_salon',
+        },
+      },
+      { devices: devs, session: paused.session },
+    )
+    expect(done.status).toBe('success')
+    expect(done.session.programId).toBe(idBefore)
+    expect(spy.mock.calls[0]![4]).toMatchObject({ programId: idBefore })
+  })
+
+  it('does not change programId when rejected as interaction_pending', async () => {
+    const devs = await devices()
+    const paused = await executeCommand(
+      { kind: 'run_program', program: ambiguous() },
+      { devices: devs },
+    )
+    const idBefore = paused.session.programId
+    const rejected = await executeCommand(
+      { kind: 'run_program', program: lightsOn() },
+      { devices: devs, session: paused.session },
+    )
+    expect(rejected.errors[0]?.code).toBe('interaction_pending')
+    expect(rejected.session.programId).toBe(idBefore)
+  })
+
+  it('renews programId for execute_action and execute_statement', async () => {
+    const devs = await devices()
+    const first = await executeCommand(
+      { kind: 'run_program', program: lightsOn() },
+      { devices: devs },
+    )
+    const id0 = first.session.programId
+    const act = await executeCommand(
+      {
+        kind: 'execute_action',
+        action: buildAction('vacuum', 'start', 'salon'),
+      },
+      { devices: devs, session: first.session },
+    )
+    const idAct = act.session.programId
+    expect(idAct).not.toBe(id0)
+    const stmt = lightsOn().statements[0]!
+    const r1 = await executeCommand(
+      { kind: 'execute_statement', statement: stmt },
+      { devices: devs, session: act.session },
+    )
+    expect(r1.session.programId).not.toBe(idAct)
+    const id1 = r1.session.programId
+    const r2 = await executeCommand(
+      { kind: 'execute_statement', statement: stmt },
+      { devices: devs, session: r1.session },
+    )
+    expect(r2.session.programId).not.toBe(id1)
+  })
+
+  it('renews programId through runCommand too', async () => {
+    const devs = await devices()
+    const a = await Effect.runPromise(
+      runCommand(
+        { kind: 'run_program', program: lightsOn() },
+        { devices: devs },
+      ),
+    )
+    const idA = a.session.programId
+    const b = await Effect.runPromise(
+      runCommand(
+        { kind: 'run_program', program: lightsOn() },
+        { devices: devs, session: a.session },
+      ),
+    )
+    expect(b.session.programId).not.toBe(idA)
   })
 })

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { MockDriver } from '@opennest/devices'
-import { OpenNestClient } from '@opennest/sdk'
+import { OpenNestClient, createAsk } from '@opennest/sdk'
 import { createConfirmationMiddleware } from '@opennest/vm'
-import type { Device } from '@opennest/vm'
+import type { Device, Middleware } from '@opennest/vm'
 import { createGuardedRuntime } from './runtime.js'
 import { cancelTool, getSessionTool, respondTool, runDslTool } from './tools.js'
 import type { ToolDeps } from './tools.js'
@@ -241,5 +241,174 @@ describe('tool handlers', () => {
       status: 'failed',
       error: { code: 'core_error', message: 'boom' },
     })
+  })
+})
+
+describe('ask questions end to end', () => {
+  type AskQuestionInput = Parameters<ReturnType<typeof createAsk>>[1]
+
+  async function makeAskDeps(
+    question: AskQuestionInput,
+    maxFailedResumes?: number,
+  ): Promise<ToolDeps & { driver: MockDriver }> {
+    const driver = new MockDriver()
+    await driver.init({})
+    const devices: Device[] = [
+      {
+        id: 'tv_salon',
+        type: 'tv',
+        room: 'salon',
+        name: 'Salon TV',
+        driver,
+        driverConfig: {},
+      },
+    ]
+    driver.seed('tv_salon', { power: false, volume: 15, source: 'hdmi1' })
+    const ask = createAsk()
+    const middleware: Middleware = async (ctx, next) => {
+      if (ctx.action.kind === 'set_property') {
+        const answer = ask(ctx, question)
+        ctx.action.value =
+          typeof answer === 'number'
+            ? { kind: 'number', value: answer }
+            : { kind: 'string', value: answer }
+      }
+      return next()
+    }
+    const client = new OpenNestClient({ devices, middleware: [middleware] })
+    return {
+      client,
+      runtime: createGuardedRuntime(
+        client,
+        maxFailedResumes === undefined ? undefined : { maxFailedResumes },
+      ),
+      driver,
+    }
+  }
+
+  const numberQuestion: AskQuestionInput = {
+    key: 'volume',
+    type: 'number_input',
+    message: 'Volume?',
+    min: 0,
+    max: 100,
+  }
+
+  it('completes a choice question end to end', async () => {
+    const deps = await makeAskDeps({
+      key: 'source',
+      type: 'choice',
+      message: 'Which source?',
+      options: [
+        { value: 'hdmi1', label: 'HDMI 1' },
+        { value: 'hdmi2', label: 'HDMI 2' },
+      ],
+    })
+    const waiting = await runDslTool(deps, { dsl: 'tv[salon].source = hdmi1' })
+    expect(waiting).toEqual({
+      status: 'waiting_for_user',
+      interaction: {
+        type: 'choice',
+        prompt: 'Which source?',
+        choices: [
+          { id: 'hdmi1', label: 'HDMI 1' },
+          { id: 'hdmi2', label: 'HDMI 2' },
+        ],
+      },
+    })
+    const done = await respondTool(deps, {
+      response: { type: 'choice', value: 'hdmi2' },
+    })
+    expect(done.status).toBe('completed')
+    expect(await deps.driver.getProperty('tv_salon', 'source')).toBe('hdmi2')
+  })
+
+  it('completes a number_input question end to end', async () => {
+    const deps = await makeAskDeps(numberQuestion)
+    const waiting = await runDslTool(deps, { dsl: 'tv[salon].volume = 1' })
+    expect(waiting).toEqual({
+      status: 'waiting_for_user',
+      interaction: {
+        type: 'number_input',
+        prompt: 'Volume?',
+        min: 0,
+        max: 100,
+      },
+    })
+    const done = await respondTool(deps, {
+      response: { type: 'number_input', value: 42 },
+    })
+    expect(done.status).toBe('completed')
+    expect(await deps.driver.getProperty('tv_salon', 'volume')).toBe(42)
+  })
+
+  it('completes a text_input question end to end', async () => {
+    const deps = await makeAskDeps({
+      key: 'source',
+      type: 'text_input',
+      message: 'Source name?',
+      placeholder: 'hdmi1',
+    })
+    const waiting = await runDslTool(deps, { dsl: 'tv[salon].source = hdmi1' })
+    expect(waiting).toEqual({
+      status: 'waiting_for_user',
+      interaction: {
+        type: 'text_input',
+        prompt: 'Source name?',
+        placeholder: 'hdmi1',
+      },
+    })
+    const done = await respondTool(deps, {
+      response: { type: 'text_input', text: '  hdmi3  ' },
+    })
+    expect(done.status).toBe('completed')
+    expect(await deps.driver.getProperty('tv_salon', 'source')).toBe('hdmi3')
+  })
+
+  it('retries an invalid number answer then completes', async () => {
+    const deps = await makeAskDeps(numberQuestion)
+    await runDslTool(deps, { dsl: 'tv[salon].volume = 1' })
+
+    const invalid = await respondTool(deps, {
+      response: { type: 'number_input', value: 500 },
+    })
+    expect(invalid).toMatchObject({
+      status: 'failed',
+      error: { code: 'invalid_response' },
+    })
+    const during = getSessionTool(deps)
+    if (during.status !== 'completed') throw new Error('expected completed')
+    expect(during.session?.pendingInteraction).toMatchObject({
+      type: 'number_input',
+    })
+    expect(await deps.driver.getProperty('tv_salon', 'volume')).toBe(15)
+
+    const done = await respondTool(deps, {
+      response: { type: 'number_input', value: 30 },
+    })
+    expect(done.status).toBe('completed')
+    expect(await deps.driver.getProperty('tv_salon', 'volume')).toBe(30)
+  })
+
+  it('aborts after too many invalid answers', async () => {
+    const deps = await makeAskDeps(numberQuestion, 2)
+    await runDslTool(deps, { dsl: 'tv[salon].volume = 1' })
+    const invalid = { type: 'number_input' as const, value: 500 }
+
+    for (let i = 0; i < 2; i++) {
+      expect(await respondTool(deps, { response: invalid })).toMatchObject({
+        status: 'failed',
+        error: { code: 'invalid_response' },
+      })
+    }
+    expect(await respondTool(deps, { response: invalid })).toMatchObject({
+      status: 'failed',
+      error: { code: 'interaction_aborted' },
+    })
+    expect(deps.client.getPendingInteraction()).toBeNull()
+    const after = getSessionTool(deps)
+    if (after.status !== 'completed') throw new Error('expected completed')
+    expect(after.session?.pendingInteraction).toBeNull()
+    expect(await deps.driver.getProperty('tv_salon', 'volume')).toBe(15)
   })
 })

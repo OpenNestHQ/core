@@ -20,7 +20,11 @@ export type {
   PromptOptions,
 } from '@opennest/lang-core'
 
-export { createConfirmationMiddleware, DefaultVMEventBus } from '@opennest/vm'
+export {
+  createAsk,
+  createConfirmationMiddleware,
+  DefaultVMEventBus,
+} from '@opennest/vm'
 export type {
   Device,
   Session,
@@ -36,6 +40,10 @@ export type {
   ExecutedStatement,
   StateChange,
   PlannedAction,
+  AskQuestion,
+  AskScope,
+  AskAnswer,
+  AskFn,
 } from '@opennest/vm'
 
 export type { DeviceRegistry, PromptDefinitions } from '@opennest/devices'

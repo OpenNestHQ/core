@@ -5,7 +5,12 @@ import type {
   PromptOptions,
 } from '@opennest/lang-core'
 import type { DeviceRegistry, PromptDefinitions } from '@opennest/devices'
-import { executeCommand, createSession, validateProgram } from '@opennest/vm'
+import {
+  executeCommand,
+  createSession,
+  validateProgram,
+  checkInputAnswer,
+} from '@opennest/vm'
 import type {
   Device,
   Middleware,
@@ -167,6 +172,22 @@ export class OpenNestClient {
           'unknown_device_id',
           `Unknown device "${response.deviceId}". Valid choices: ${valid.join(', ')}.`,
         )
+      }
+    }
+    if (
+      (pending.type === 'text_input' ||
+        pending.type === 'number_input' ||
+        pending.type === 'choice') &&
+      (response.type === 'text_input' ||
+        response.type === 'number_input' ||
+        response.type === 'choice')
+    ) {
+      const check = checkInputAnswer(pending, {
+        ...response,
+        interactionId: pending.id,
+      })
+      if (!check.ok) {
+        return failedRunResult('invalid_response', check.message)
       }
     }
     return this.resume({ ...response, interactionId: pending.id })

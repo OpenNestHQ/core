@@ -3,7 +3,12 @@ import { writeFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MockDriver, DeviceRegistry } from '@opennest/devices'
-import { createConfirmationMiddleware, DefaultVMEventBus } from '@opennest/vm'
+import {
+  createAsk,
+  createConfirmationMiddleware,
+  DefaultVMEventBus,
+} from '@opennest/vm'
+import { createAsk as createAskFromIndex } from './index.js'
 import { OpenNestClient } from './client.js'
 import type { Device, Middleware, UserInteraction } from '@opennest/vm'
 
@@ -722,5 +727,164 @@ describe('OpenNestClient.analyze', () => {
 
     expect(feedback.ok).toBe(true)
     expect(feedback.validationErrors).toHaveLength(0)
+  })
+})
+
+describe('OpenNestClient ask answers', () => {
+  const ask = createAsk()
+  const volumeMiddleware: Middleware = async (ctx, next) => {
+    if (
+      ctx.action.kind === 'set_property' &&
+      ctx.action.property === 'volume'
+    ) {
+      const volume = ask(ctx, {
+        key: 'volume',
+        type: 'number_input',
+        message: 'Volume?',
+        min: 0,
+        max: 100,
+      })
+      ctx.action.value = { kind: 'number', value: volume }
+    }
+    return next()
+  }
+
+  it('rejects an out-of-range number before calling the VM', async () => {
+    const { client, driver } = await makeClient({
+      middleware: [volumeMiddleware],
+    })
+    await client.runDsl('tv[salon].volume = 1')
+    const pending = client.getPendingInteraction()
+    expect(pending?.type).toBe('number_input')
+
+    const result = await client.resumePending({
+      type: 'number_input',
+      value: 101,
+    })
+
+    expect(result.status).toBe('error')
+    expect(result.errors[0]!.code).toBe('invalid_response')
+    expect(client.getPendingInteraction()).toBe(pending)
+    expect(await driver.getProperty('tv_salon', 'volume')).toBe(15)
+  })
+
+  it('rejects an unknown choice value', async () => {
+    const { client } = await makeClient({
+      middleware: [
+        async (ctx, next) => {
+          ask(ctx, {
+            key: 'mode',
+            type: 'choice',
+            message: 'Mode?',
+            options: [{ value: 'cinema', label: 'Cinema' }],
+          })
+          return next()
+        },
+      ],
+    })
+    await client.runDsl('tv[salon].power = on')
+
+    const result = await client.resumePending({
+      type: 'choice',
+      value: 'party',
+    })
+
+    expect(result.errors[0]!.code).toBe('invalid_response')
+    expect(client.getPendingInteraction()?.type).toBe('choice')
+  })
+
+  it('rejects an empty text', async () => {
+    const { client } = await makeClient({
+      middleware: [
+        async (ctx, next) => {
+          ask(ctx, { key: 'note', type: 'text_input', message: 'Note?' })
+          return next()
+        },
+      ],
+    })
+    await client.runDsl('tv[salon].power = on')
+
+    const result = await client.resumePending({
+      type: 'text_input',
+      text: '   ',
+    })
+
+    expect(result.errors[0]!.code).toBe('invalid_response')
+    expect(client.getPendingInteraction()?.type).toBe('text_input')
+  })
+
+  it('resumes with a valid answer', async () => {
+    const { client, driver } = await makeClient({
+      middleware: [volumeMiddleware],
+    })
+    await client.runDsl('tv[salon].volume = 1')
+
+    const result = await client.resumePending({
+      type: 'number_input',
+      value: 42,
+    })
+
+    expect(result.status).toBe('success')
+    expect(await driver.getProperty('tv_salon', 'volume')).toBe(42)
+  })
+
+  it('isolates answers of two clients sharing one ask middleware', async () => {
+    const sharedAsk = createAsk()
+    const shared: Middleware[] = [
+      async (ctx, next) => {
+        if (
+          ctx.action.kind === 'set_property' &&
+          ctx.action.property === 'volume'
+        ) {
+          const volume = sharedAsk(ctx, {
+            key: 'volume',
+            type: 'number_input',
+            message: 'Volume?',
+          })
+          ctx.action.value = { kind: 'number', value: volume }
+        }
+        return next()
+      },
+    ]
+    let askedA = 0
+    let askedB = 0
+    const a = await makeClient({
+      middleware: shared,
+      onInteraction: () => {
+        askedA++
+      },
+    })
+    const b = await makeClient({
+      middleware: shared,
+      onInteraction: () => {
+        askedB++
+      },
+    })
+    const answer = (value: number) => ({ type: 'number_input', value }) as const
+
+    const a1 = await a.client.runDsl('$t = @all(tv)\n$t.volume = 1')
+    expect(a1.status).toBe('awaiting_interaction')
+    const b1 = await b.client.runDsl('$t = @all(tv)\n$t.volume = 1')
+    expect(b1.status).toBe('awaiting_interaction')
+
+    const a2 = await a.client.resumePending(answer(11))
+    expect(a2.status).toBe('awaiting_interaction')
+    const b2 = await b.client.resumePending(answer(71))
+    expect(b2.status).toBe('awaiting_interaction')
+    const a3 = await a.client.resumePending(answer(12))
+    const b3 = await b.client.resumePending(answer(72))
+
+    expect(a3.status).toBe('success')
+    expect(b3.status).toBe('success')
+    expect(await a.driver.getProperty('tv_salon', 'volume')).toBe(11)
+    expect(await a.driver.getProperty('tv_chambre', 'volume')).toBe(12)
+    expect(await b.driver.getProperty('tv_salon', 'volume')).toBe(71)
+    expect(await b.driver.getProperty('tv_chambre', 'volume')).toBe(72)
+    expect(askedA).toBe(2)
+    expect(askedB).toBe(2)
+  })
+
+  it('re-exports createAsk', () => {
+    expect(typeof createAskFromIndex).toBe('function')
   })
 })
