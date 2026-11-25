@@ -77,6 +77,11 @@ export function formatSuccess(result: RunResult, since: number = 0): string {
   return lines.join('\n')
 }
 
+/** `1` for one suggestion, `1-3` for three. */
+export function suggestionRange(count: number): string {
+  return count === 1 ? '1' : `1-${count}`
+}
+
 export function formatSuggestions(suggestions: SuggestionSummary[]): string {
   const lines: string[] = []
   lines.push(`\n${C}${B}\u{1f4a1} Suggestions:${N}`)
@@ -100,7 +105,12 @@ export function formatSuggestions(suggestions: SuggestionSummary[]): string {
       lines.push(`      ${D}text${N}`)
     }
   })
-  lines.push(`  ${D}Answer with :a <n> <answer>${N}`)
+  const first = suggestions[0]
+  const example =
+    suggestions.length === 1 && first?.question.type === 'choice'
+      ? `:a 1 ${first.question.options[0]?.value ?? '<answer>'}`
+      : `:a <n> <answer>, n = ${suggestionRange(suggestions.length)}`
+  lines.push(`  ${D}Answer with ${example}${N}`)
   return lines.join('\n')
 }
 
