@@ -46,25 +46,32 @@ function makeDevice(
 function inventory() {
   const driver = new CountingDriver()
   const devices = [
-    makeDevice(driver, 'light_1', 'light', 'salon', 'Light 1', {
+    makeDevice(driver, 'light_1', 'light', 'living_room', 'Light 1', {
       power: false,
     }),
-    makeDevice(driver, 'light_2', 'light', 'salon', 'Light 2', {
+    makeDevice(driver, 'light_2', 'light', 'living_room', 'Light 2', {
       power: false,
     }),
-    makeDevice(driver, 'light_3', 'light', 'salon', 'Light 3', {
+    makeDevice(driver, 'light_3', 'light', 'living_room', 'Light 3', {
       power: false,
-    }),
-    makeDevice(driver, 'tv_salon', 'tv', 'salon', 'Salon TV', {
-      power: false,
-      input: 'hdmi1',
     }),
     makeDevice(
       driver,
-      'thermostat_salon',
+      'tv_living_room',
+      'tv',
+      'living_room',
+      'Living Room TV',
+      {
+        power: false,
+        input: 'hdmi1',
+      },
+    ),
+    makeDevice(
+      driver,
+      'thermostat_living_room',
       'thermostat',
-      'salon',
-      'Salon Thermostat',
+      'living_room',
+      'Living Room Thermostat',
       { temperature: 20 },
     ),
   ]
@@ -140,7 +147,7 @@ describe('ask()', () => {
     }
     const h = harness([mw])
 
-    const first = await h.run('tv[salon].input = "x"')
+    const first = await h.run('tv[living_room].input = "x"')
     expect(first.status).toBe('awaiting_interaction')
     const interaction = first.interaction!
     expect(interaction.type).toBe('choice')
@@ -157,7 +164,7 @@ describe('ask()', () => {
     expect(second.status).toBe('success')
     expect(seen).toEqual(['cinema'])
     expect(h.driver.sets).toEqual([
-      { deviceId: 'tv_salon', property: 'input', value: 'cinema' },
+      { deviceId: 'tv_living_room', property: 'input', value: 'cinema' },
     ])
   })
 
@@ -177,7 +184,7 @@ describe('ask()', () => {
     }
     const h = harness([mw])
 
-    const first = await h.run('tv[salon].power = on')
+    const first = await h.run('tv[living_room].power = on')
     expect(first.interaction!.type).toBe('number_input')
     const second = await h.resume({
       interactionId: pendingId(first),
@@ -192,11 +199,11 @@ describe('ask()', () => {
     const third = await h.resume({
       interactionId: pendingId(second),
       type: 'text_input',
-      text: '  salon  ',
+      text: '  living_room  ',
     })
     expect(third.status).toBe('success')
     expect(typeof answers[0]).toBe('number')
-    expect(answers).toEqual([3, 'salon'])
+    expect(answers).toEqual([3, 'living_room'])
   })
 
   it('rejects out-of-range numbers with invalid_response and keeps the question pending', async () => {
@@ -213,7 +220,7 @@ describe('ask()', () => {
     }
     const h = harness([mw])
 
-    const first = await h.run('tv[salon].power = on')
+    const first = await h.run('tv[living_room].power = on')
     const id = pendingId(first)
     const pending = h.session.pendingInteraction
 
@@ -247,7 +254,7 @@ describe('ask()', () => {
     }
     const h = harness([mw])
 
-    const first = await h.run('tv[salon].power = on')
+    const first = await h.run('tv[living_room].power = on')
     const choiceId = pendingId(first)
     const badChoice = await h.resume({
       interactionId: choiceId,
@@ -281,7 +288,7 @@ describe('ask()', () => {
     }
     const h = harness([mw])
 
-    const first = await h.run('tv[salon].power = on')
+    const first = await h.run('tv[living_room].power = on')
     const result = await h.resume({
       interactionId: pendingId(first),
       type: 'text_input',
@@ -299,7 +306,7 @@ describe('ask()', () => {
       return next()
     }
     const h = harness([mw])
-    const code = '$l = @all(light[salon])\n$l.power = on'
+    const code = '$l = @all(light[living_room])\n$l.power = on'
 
     let result = await h.run(code)
     const ids: string[] = []
@@ -330,7 +337,7 @@ describe('ask()', () => {
     }
     const h = harness([mw])
 
-    const first = await h.run('$l = @all(light[salon])\n$l.power = on')
+    const first = await h.run('$l = @all(light[living_room])\n$l.power = on')
     const second = await h.resume({
       interactionId: pendingId(first),
       type: 'choice',
@@ -348,7 +355,7 @@ describe('ask()', () => {
     }
     const h = harness([mw])
 
-    const first = await h.run('thermostat[salon].temperature += 1')
+    const first = await h.run('thermostat[living_room].temperature += 1')
     const second = await h.resume({
       interactionId: pendingId(first),
       type: 'choice',
@@ -356,9 +363,9 @@ describe('ask()', () => {
     })
     expect(second.status).toBe('success')
     expect(h.driver.sets).toHaveLength(1)
-    expect(await h.driver.getProperty('thermostat_salon', 'temperature')).toBe(
-      21,
-    )
+    expect(
+      await h.driver.getProperty('thermostat_living_room', 'temperature'),
+    ).toBe(21)
   })
 
   it('keeps an answer across a later confirmation pause', async () => {
@@ -378,7 +385,7 @@ describe('ask()', () => {
     })
     const h = harness([askMw, confirm])
 
-    const first = await h.run('tv[salon].power = on')
+    const first = await h.run('tv[living_room].power = on')
     expect(first.interaction!.type).toBe('choice')
     const second = await h.resume({
       interactionId: pendingId(first),
@@ -404,7 +411,7 @@ describe('ask()', () => {
     }
     const h = harness([mw])
 
-    const first = await h.run('tv[salon].power = on')
+    const first = await h.run('tv[living_room].power = on')
     const done = await h.resume({
       interactionId: pendingId(first),
       type: 'choice',
@@ -412,7 +419,7 @@ describe('ask()', () => {
     })
     expect(done.status).toBe('success')
 
-    const again = await h.run('tv[salon].power = on')
+    const again = await h.run('tv[living_room].power = on')
     expect(again.status).toBe('awaiting_interaction')
     expect(again.interaction!.type).toBe('choice')
   })
@@ -455,7 +462,7 @@ describe('ask()', () => {
       return next()
     }
     const h = harness([mw])
-    await expect(h.run('tv[salon].power = on')).rejects.toThrow(/option/)
+    await expect(h.run('tv[living_room].power = on')).rejects.toThrow(/option/)
   })
 
   it('does not return an answer given to a different question type under the same key', async () => {
@@ -466,7 +473,7 @@ describe('ask()', () => {
       return next()
     }
     const h = harness([mw])
-    const first = await h.run('tv[salon].power = on')
+    const first = await h.run('tv[living_room].power = on')
     expect(first.interaction!.type).toBe('number_input')
     const second = await h.resume({
       interactionId: pendingId(first),
@@ -491,7 +498,7 @@ describe('ask()', () => {
     }
     const h = harness([mw])
 
-    const first = await h.run('tv[salon].power = on')
+    const first = await h.run('tv[living_room].power = on')
     await expect(
       h.resume({
         interactionId: pendingId(first),

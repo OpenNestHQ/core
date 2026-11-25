@@ -9,7 +9,7 @@ function makeDevice(driver: Partial<DeviceDriver>): Device {
   return {
     id: 'd1',
     type: 'light',
-    room: 'salon',
+    room: 'living_room',
     name: 'Lamp',
     driver: driver as DeviceDriver,
     driverConfig: {},

@@ -8,12 +8,12 @@ import type { Device, VMCommand } from '../index.js'
 
 async function makeLight(driver: MockDriver): Promise<Device> {
   await driver.init({})
-  driver.seed('light_salon', { power: false })
+  driver.seed('light_living_room', { power: false })
   return {
-    id: 'light_salon',
+    id: 'light_living_room',
     type: 'light',
-    room: 'salon',
-    name: 'Salon Light',
+    room: 'living_room',
+    name: 'Living Room Light',
     driver,
     driverConfig: {},
   }
@@ -36,11 +36,11 @@ class FailingReadDriver extends MockDriver {
 }
 
 const ifProgram =
-  '@if light[salon].power? == on\nlight[salon].power = off\n@endif'
+  '@if light[living_room].power? == on\nlight[living_room].power = off\n@endif'
 
 describe('runCommand', () => {
   it('runCommand returns the same VMResult as executeCommand', async () => {
-    const command = runProgram('light[salon].power = on')
+    const command = runProgram('light[living_room].power = on')
 
     const viaEffect = await Effect.runPromise(
       runCommand(command, { devices: [await makeLight(new MockDriver())] }),
