@@ -14,29 +14,29 @@ type PendingInteraction = NonNullable<Session['pendingInteraction']>
 
 const driver = new MockDriver()
 
-const salonTv: Device = {
-  id: 'tv_salon',
+const livingRoomTv: Device = {
+  id: 'tv_living_room',
   type: 'tv',
-  room: 'salon',
-  name: 'Salon TV',
+  room: 'living_room',
+  name: 'Living Room TV',
   driver,
   driverConfig: {},
 }
 
-const chambreTv: Device = {
-  id: 'tv_chambre',
+const bedroomTv: Device = {
+  id: 'tv_bedroom',
   type: 'tv',
-  room: 'chambre',
-  name: 'Chambre TV',
+  room: 'bedroom',
+  name: 'Bedroom TV',
   driver,
   driverConfig: {},
 }
 
-const salonLight: Device = {
-  id: 'light_salon',
+const livingRoomLight: Device = {
+  id: 'light_living_room',
   type: 'light',
-  room: 'salon',
-  name: 'Salon Light',
+  room: 'living_room',
+  name: 'Living Room Light',
   driver,
   driverConfig: {},
   owners: ['alice'],
@@ -64,25 +64,25 @@ function makeSession(overrides: Partial<Session> = {}): Session {
       fan: { kind: 'device_ref', deviceType: 'fan', selectors: [] },
     },
     argVariables: {},
-    it: salonTv,
+    it: livingRoomTv,
     history: [
       entry(
-        [salonTv],
+        [livingRoomTv],
         [
           {
-            deviceId: 'tv_salon',
+            deviceId: 'tv_living_room',
             property: 'volume',
             oldValue: 10,
             newValue: 15,
           },
         ],
       ),
-      entry([chambreTv], []),
+      entry([bedroomTv], []),
       entry(
-        [salonLight],
+        [livingRoomLight],
         [
           {
-            deviceId: 'light_salon',
+            deviceId: 'light_living_room',
             property: 'power',
             oldValue: false,
             newValue: true,
@@ -90,10 +90,10 @@ function makeSession(overrides: Partial<Session> = {}): Session {
         ],
       ),
       entry(
-        [salonTv],
+        [livingRoomTv],
         [
           {
-            deviceId: 'tv_salon',
+            deviceId: 'tv_living_room',
             property: 'power',
             oldValue: false,
             newValue: true,
@@ -101,12 +101,12 @@ function makeSession(overrides: Partial<Session> = {}): Session {
         ],
       ),
       entry([], []),
-      entry([salonTv, chambreTv], []),
+      entry([livingRoomTv, bedroomTv], []),
       entry(
-        [salonTv],
+        [livingRoomTv],
         [
           {
-            deviceId: 'tv_salon',
+            deviceId: 'tv_living_room',
             property: 'volume',
             oldValue: 15,
             newValue: 20,
@@ -115,8 +115,8 @@ function makeSession(overrides: Partial<Session> = {}): Session {
       ),
     ],
     cursor: 7,
-    resolvedIds: { ambience: 'light_salon' },
-    variableResolvedIds: { tv: 'tv_salon' },
+    resolvedIds: { ambience: 'light_living_room' },
+    variableResolvedIds: { tv: 'tv_living_room' },
     variableModifiers: {},
     pendingInteraction: null,
     ...overrides,
@@ -128,8 +128,8 @@ describe('toSessionSummary', () => {
     const summary = toSessionSummary(makeSession())
 
     expect(summary.variables).toStrictEqual({
-      tv: 'tv_salon',
-      ambience: 'light_salon',
+      tv: 'tv_living_room',
+      ambience: 'light_living_room',
       fan: 'unresolved',
     })
   })
@@ -138,10 +138,10 @@ describe('toSessionSummary', () => {
     const summary = toSessionSummary(makeSession())
 
     expect(summary.it).toStrictEqual({
-      id: 'tv_salon',
+      id: 'tv_living_room',
       type: 'tv',
-      room: 'salon',
-      name: 'Salon TV',
+      room: 'living_room',
+      name: 'Living Room TV',
     })
   })
 
@@ -159,17 +159,17 @@ describe('toSessionSummary', () => {
     expect(summary.historyTail[0]).toStrictEqual({
       devices: [
         {
-          id: 'light_salon',
+          id: 'light_living_room',
           type: 'light',
-          room: 'salon',
-          name: 'Salon Light',
+          room: 'living_room',
+          name: 'Living Room Light',
           owners: ['alice'],
           tags: ['cozy'],
         },
       ],
       changes: [
         {
-          deviceId: 'light_salon',
+          deviceId: 'light_living_room',
           property: 'power',
           oldValue: false,
           newValue: true,
@@ -178,11 +178,16 @@ describe('toSessionSummary', () => {
     })
     expect(summary.historyTail[4]).toStrictEqual({
       devices: [
-        { id: 'tv_salon', type: 'tv', room: 'salon', name: 'Salon TV' },
+        {
+          id: 'tv_living_room',
+          type: 'tv',
+          room: 'living_room',
+          name: 'Living Room TV',
+        },
       ],
       changes: [
         {
-          deviceId: 'tv_salon',
+          deviceId: 'tv_living_room',
           property: 'volume',
           oldValue: 15,
           newValue: 20,
@@ -209,7 +214,7 @@ describe('toSessionSummary', () => {
       id: 'interaction_1',
       type: 'device_selection',
       context: {
-        devices: [salonTv, chambreTv],
+        devices: [livingRoomTv, bedroomTv],
         deviceType: 'tv',
         variableName: undefined,
       },
@@ -223,8 +228,8 @@ describe('toSessionSummary', () => {
       type: 'device_selection',
       prompt: 'A device selection is pending. Answer it with the respond tool.',
       choices: [
-        { id: 'tv_salon', label: 'Salon TV' },
-        { id: 'tv_chambre', label: 'Chambre TV' },
+        { id: 'tv_living_room', label: 'Living Room TV' },
+        { id: 'tv_bedroom', label: 'Bedroom TV' },
       ],
     })
   })
@@ -252,7 +257,7 @@ describe('toSessionSummary', () => {
       id: 'confirm_1',
       type: 'confirmation',
       context: {
-        fingerprint: 'tv_salon::set_property::power',
+        fingerprint: 'tv_living_room::set_property::power',
         decisions: new Map<string, boolean>(),
       },
     }
@@ -280,10 +285,10 @@ describe('toSessionSummary', () => {
           ],
         },
         method: 'set_volume',
-        deviceName: 'Salon TV',
+        deviceName: 'Living Room TV',
         missing: [
           { name: 'volume', type: 'number' },
-          { name: 'mode', type: 'enum', values: ['film', 'nuit'] },
+          { name: 'mode', type: 'enum', values: ['film', 'night'] },
         ],
       },
     }
@@ -298,7 +303,7 @@ describe('toSessionSummary', () => {
         'Missing action parameters are pending. Answer with the respond tool.',
       missing: [
         { name: 'volume', type: 'number' },
-        { name: 'mode', type: 'enum', values: ['film', 'nuit'] },
+        { name: 'mode', type: 'enum', values: ['film', 'night'] },
       ],
     })
   })
@@ -322,7 +327,7 @@ describe('toSessionSummary', () => {
       id: 'interaction_1',
       type: 'device_selection',
       context: {
-        devices: [salonTv],
+        devices: [livingRoomTv],
         deviceType: 'tv',
         variableName: undefined,
       },
@@ -346,17 +351,17 @@ describe('toSessionSummary with ask questions', () => {
   ): Promise<PendingInteraction> {
     const askDriver = new MockDriver()
     await askDriver.init({})
-    askDriver.seed('tv_salon', { volume: 15 })
+    askDriver.seed('tv_living_room', { volume: 15 })
     const ask = createAsk()
     const middleware: Middleware = async (ctx, next) => {
       ask(ctx, question)
       return next()
     }
     const client = new OpenNestClient({
-      devices: [{ ...salonTv, driver: askDriver }],
+      devices: [{ ...livingRoomTv, driver: askDriver }],
       middleware: [middleware],
     })
-    await client.runDsl('tv[salon].volume = 1')
+    await client.runDsl('tv[living_room].volume = 1')
     const pending = client.getSession().pendingInteraction
     if (pending === null) throw new Error('expected a pending interaction')
     return pending
@@ -409,7 +414,7 @@ describe('toSessionSummary with ask questions', () => {
       key: 'name',
       type: 'text_input',
       message: 'Name?',
-      placeholder: 'Salon',
+      placeholder: 'Living Room',
     })
     const summary = toSessionSummary(
       makeSession({ pendingInteraction: pending }),
@@ -417,7 +422,7 @@ describe('toSessionSummary with ask questions', () => {
     expect(summary.pendingInteraction).toStrictEqual({
       type: 'text_input',
       prompt: 'Name?',
-      placeholder: 'Salon',
+      placeholder: 'Living Room',
     })
     expect(JSON.stringify(summary.pendingInteraction)).not.toContain('store')
   })
@@ -443,12 +448,12 @@ describe('toSessionSummary with suggestions', () => {
   it('get_session lists open suggestions without data', async () => {
     const suggestionDriver = new MockDriver()
     await suggestionDriver.init({})
-    suggestionDriver.seed('tv_salon', { power: false, volume: 15 })
+    suggestionDriver.seed('tv_living_room', { power: false, volume: 15 })
     const def = defineSuggestion('session_suggestion_1', {
       apply: () => [],
     })
     const client = new OpenNestClient({
-      devices: [{ ...salonTv, driver: suggestionDriver }],
+      devices: [{ ...livingRoomTv, driver: suggestionDriver }],
       middleware: [
         async (ctx, next) => {
           if (ctx.action.kind === 'set_property') {
@@ -464,7 +469,7 @@ describe('toSessionSummary with suggestions', () => {
         },
       ],
     })
-    await client.runDsl('tv[salon].power = on')
+    await client.runDsl('tv[living_room].power = on')
     const summary = toSessionSummary(
       client.getSession(),
       client.getSuggestions(),
@@ -475,7 +480,7 @@ describe('toSessionSummary with suggestions', () => {
         type: 'number_input',
         prompt: 'Volume?',
         min: 0,
-        devices: ['Salon TV'],
+        devices: ['Living Room TV'],
       },
     ])
     expect(JSON.stringify(summary)).not.toContain('secret')

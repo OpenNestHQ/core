@@ -27,11 +27,16 @@ const executed: ExecutedStatementSummary[] = [
   {
     statement,
     resolvedDevices: [
-      { id: 'tv_salon', type: 'tv', room: 'salon', name: 'Salon TV' },
+      {
+        id: 'tv_living_room',
+        type: 'tv',
+        room: 'living_room',
+        name: 'Living Room TV',
+      },
     ],
     changes: [
       {
-        deviceId: 'tv_salon',
+        deviceId: 'tv_living_room',
         property: 'power',
         oldValue: false,
         newValue: true,
@@ -45,22 +50,27 @@ const deviceSelectionInteraction: UserInteraction = {
   type: 'device_selection',
   message: 'Multiple "tv" devices found. Please select one:',
   devices: [
-    { id: 'tv_salon', name: 'Salon TV', type: 'tv', room: 'salon' },
-    { id: 'tv_chambre', name: 'Chambre TV', type: 'tv', room: 'chambre' },
+    {
+      id: 'tv_living_room',
+      name: 'Living Room TV',
+      type: 'tv',
+      room: 'living_room',
+    },
+    { id: 'tv_bedroom', name: 'Bedroom TV', type: 'tv', room: 'bedroom' },
   ],
 }
 
 const confirmationInteraction: UserInteraction = {
   id: 'confirm_1',
   type: 'confirmation',
-  message: 'Set power on Salon TV (tv in salon) to on?',
+  message: 'Set power on Living Room TV (tv in living_room) to on?',
 }
 
 const textInputInteraction: UserInteraction = {
   id: 'text_1',
   type: 'text_input',
   message: 'Which room do you mean?',
-  placeholder: 'salon',
+  placeholder: 'living_room',
 }
 
 const numberInputInteraction: UserInteraction = {
@@ -77,7 +87,7 @@ const choiceInteraction: UserInteraction = {
   message: 'Which mode?',
   options: [
     { value: 'film', label: 'Film' },
-    { value: 'nuit', label: 'Nuit' },
+    { value: 'night', label: 'Night' },
   ],
 }
 
@@ -85,12 +95,12 @@ const actionParameterInteraction: UserInteraction = {
   id: 'param_1',
   type: 'action_parameter',
   message:
-    'Missing parameters for set_volume() on Salon TV: volume: number, mode: film|nuit',
-  deviceName: 'Salon TV',
+    'Missing parameters for set_volume() on Living Room TV: volume: number, mode: film|night',
+  deviceName: 'Living Room TV',
   action: 'set_volume',
   missing: [
     { name: 'volume', type: 'number' },
-    { name: 'mode', type: 'enum', values: ['film', 'nuit'] },
+    { name: 'mode', type: 'enum', values: ['film', 'night'] },
   ],
 }
 
@@ -111,8 +121,8 @@ describe('toInteractionPrompt', () => {
       type: 'device_selection',
       prompt: 'Multiple "tv" devices found. Please select one:',
       choices: [
-        { id: 'tv_salon', label: 'Salon TV' },
-        { id: 'tv_chambre', label: 'Chambre TV' },
+        { id: 'tv_living_room', label: 'Living Room TV' },
+        { id: 'tv_bedroom', label: 'Bedroom TV' },
       ],
     })
   })
@@ -137,7 +147,7 @@ describe('toInteractionPrompt', () => {
 
     expect(prompt).toEqual({
       type: 'confirmation',
-      prompt: 'Set power on Salon TV (tv in salon) to on?',
+      prompt: 'Set power on Living Room TV (tv in living_room) to on?',
     })
   })
 
@@ -145,7 +155,7 @@ describe('toInteractionPrompt', () => {
     expect(toInteractionPrompt(textInputInteraction)).toStrictEqual({
       type: 'text_input',
       prompt: 'Which room do you mean?',
-      placeholder: 'salon',
+      placeholder: 'living_room',
     })
 
     expect(
@@ -182,7 +192,7 @@ describe('toInteractionPrompt', () => {
       prompt: 'Which mode?',
       choices: [
         { id: 'film', label: 'Film' },
-        { id: 'nuit', label: 'Nuit' },
+        { id: 'night', label: 'Night' },
       ],
     })
   })
@@ -193,10 +203,10 @@ describe('toInteractionPrompt', () => {
     expect(prompt).toStrictEqual({
       type: 'action_parameter',
       prompt:
-        'Missing parameters for set_volume() on Salon TV: volume: number, mode: film|nuit',
+        'Missing parameters for set_volume() on Living Room TV: volume: number, mode: film|night',
       missing: [
         { name: 'volume', type: 'number' },
-        { name: 'mode', type: 'enum', values: ['film', 'nuit'] },
+        { name: 'mode', type: 'enum', values: ['film', 'night'] },
       ],
     })
   })
@@ -230,7 +240,7 @@ describe('toToolResult', () => {
         ...executed[0]!,
         outcomes: [
           {
-            deviceId: 'tv_salon',
+            deviceId: 'tv_living_room',
             execution: { status: 'failed' as const, error: 'boom' },
             verification: { status: 'not_observable' as const },
           },
@@ -251,7 +261,7 @@ describe('toToolResult', () => {
     expect(result).toMatchObject({
       status: 'completed',
       deviceFailures: [
-        { deviceId: 'tv_salon', message: 'boom' },
+        { deviceId: 'tv_living_room', message: 'boom' },
         { deviceId: 'lamp', message: 'Device command failed' },
       ],
     })
@@ -293,8 +303,8 @@ describe('toToolResult', () => {
       type: 'device_selection',
       prompt: 'Multiple "tv" devices found. Please select one:',
       choices: [
-        { id: 'tv_salon', label: 'Salon TV' },
-        { id: 'tv_chambre', label: 'Chambre TV' },
+        { id: 'tv_living_room', label: 'Living Room TV' },
+        { id: 'tv_bedroom', label: 'Bedroom TV' },
       ],
     })
   })

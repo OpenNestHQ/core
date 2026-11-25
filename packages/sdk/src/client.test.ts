@@ -31,34 +31,34 @@ async function makeClient(options: MakeClientOptions = {}): Promise<{
 
   const devices: Device[] = [
     {
-      id: 'tv_salon',
+      id: 'tv_living_room',
       type: 'tv',
-      room: 'salon',
-      name: 'Salon TV',
+      room: 'living_room',
+      name: 'Living Room TV',
       driver,
       driverConfig: {},
     },
     {
-      id: 'tv_chambre',
+      id: 'tv_bedroom',
       type: 'tv',
-      room: 'chambre',
-      name: 'Chambre TV',
+      room: 'bedroom',
+      name: 'Bedroom TV',
       driver,
       driverConfig: {},
     },
     {
-      id: 'light_salon',
+      id: 'light_living_room',
       type: 'light',
-      room: 'salon',
-      name: 'Salon Light',
+      room: 'living_room',
+      name: 'Living Room Light',
       driver,
       driverConfig: {},
     },
   ]
 
-  driver.seed('tv_salon', { power: false, volume: 15 })
-  driver.seed('tv_chambre', { power: false, volume: 10 })
-  driver.seed('light_salon', { power: false, brightness: 80 })
+  driver.seed('tv_living_room', { power: false, volume: 15 })
+  driver.seed('tv_bedroom', { power: false, volume: 10 })
+  driver.seed('light_living_room', { power: false, brightness: 80 })
 
   return { client: new OpenNestClient({ devices, ...options }), driver }
 }
@@ -67,12 +67,12 @@ describe('OpenNestClient', () => {
   it('runs a deterministic program to success', async () => {
     const { client, driver } = await makeClient()
 
-    const result = await client.runDsl('tv[salon].power = on')
+    const result = await client.runDsl('tv[living_room].power = on')
 
     expect(result.status).toBe('success')
     expect(result.errors).toHaveLength(0)
     expect(result.executed).toHaveLength(1)
-    expect(await driver.getProperty('tv_salon', 'power')).toBe(true)
+    expect(await driver.getProperty('tv_living_room', 'power')).toBe(true)
   })
 
   it('suspends with awaiting_interaction on ambiguous device', async () => {
@@ -94,12 +94,12 @@ describe('OpenNestClient', () => {
     const result = await client.resume({
       interactionId: paused.interaction!.id,
       type: 'device_selection',
-      deviceId: 'tv_chambre',
+      deviceId: 'tv_bedroom',
     })
 
     expect(result.status).toBe('success')
-    expect(await driver.getProperty('tv_chambre', 'power')).toBe(true)
-    expect(await driver.getProperty('tv_salon', 'power')).toBe(false)
+    expect(await driver.getProperty('tv_bedroom', 'power')).toBe(true)
+    expect(await driver.getProperty('tv_living_room', 'power')).toBe(false)
   })
 
   it('round-trips a confirmation interaction', async () => {
@@ -109,7 +109,7 @@ describe('OpenNestClient', () => {
       ],
     })
 
-    const paused = await client.runDsl('tv[salon].power = on')
+    const paused = await client.runDsl('tv[living_room].power = on')
     expect(paused.status).toBe('awaiting_interaction')
     expect(paused.interaction).not.toBeNull()
     expect(paused.interaction!.type).toBe('confirmation')
@@ -121,7 +121,7 @@ describe('OpenNestClient', () => {
     })
 
     expect(result.status).toBe('success')
-    expect(await driver.getProperty('tv_salon', 'power')).toBe(true)
+    expect(await driver.getProperty('tv_living_room', 'power')).toBe(true)
   })
 
   it('invokes onInteraction with the pending interaction', async () => {
@@ -256,7 +256,7 @@ describe('OpenNestClient', () => {
   it('returns an error when no device matches', async () => {
     const { client } = await makeClient()
 
-    const result = await client.runDsl('camera[salon].snapshot()')
+    const result = await client.runDsl('camera[living_room].snapshot()')
 
     expect(result.status).toBe('error')
     expect(result.errors[0]!.message).toContain(
@@ -267,7 +267,7 @@ describe('OpenNestClient', () => {
   it('exposes the session through getSession', async () => {
     const { client } = await makeClient()
 
-    await client.runDsl('tv[salon].power = on')
+    await client.runDsl('tv[living_room].power = on')
 
     expect(client.getSession().history).toHaveLength(1)
   })
@@ -275,7 +275,7 @@ describe('OpenNestClient', () => {
   it('resets the session on cancel', async () => {
     const { client } = await makeClient()
 
-    await client.runDsl('tv[salon].power = on')
+    await client.runDsl('tv[living_room].power = on')
     expect(client.getSession().history).toHaveLength(1)
 
     const result = await client.cancel()
@@ -299,13 +299,13 @@ describe('OpenNestClient', () => {
   it('accepts a DeviceRegistry as the devices source', async () => {
     const registry = new DeviceRegistry({
       drivers: { mock: {} },
-      rooms: ['salon'],
+      rooms: ['living_room'],
       devices: [
         {
-          id: 'tv_salon',
+          id: 'tv_living_room',
           type: 'tv',
-          room: 'salon',
-          name: 'Salon TV',
+          room: 'living_room',
+          name: 'Living Room TV',
           driver: 'mock',
           properties: { power: { type: 'boolean' } },
           actions: [],
@@ -314,7 +314,7 @@ describe('OpenNestClient', () => {
     })
 
     const client = new OpenNestClient({ devices: registry })
-    const result = await client.runDsl('tv[salon].power = on')
+    const result = await client.runDsl('tv[living_room].power = on')
 
     expect(result.status).toBe('success')
     expect(result.executed[0]!.changes[0]!.newValue).toBe(true)
@@ -363,17 +363,17 @@ describe('OpenNestClient pending interactions', () => {
     expect(pending!.id).toBe(paused.interaction!.id)
     expect(pending).toMatchObject({
       type: 'device_selection',
-      devices: [{ id: 'tv_salon' }, { id: 'tv_chambre' }],
+      devices: [{ id: 'tv_living_room' }, { id: 'tv_bedroom' }],
     })
 
     const result = await client.resumePending({
       type: 'device_selection',
-      deviceId: 'tv_salon',
+      deviceId: 'tv_living_room',
     })
 
     expect(result.status).toBe('success')
     expect(result.errors).toHaveLength(0)
-    expect(await driver.getProperty('tv_salon', 'power')).toBe(true)
+    expect(await driver.getProperty('tv_living_room', 'power')).toBe(true)
   })
 
   it('rejects a type mismatch against the pending interaction', async () => {
@@ -393,7 +393,7 @@ describe('OpenNestClient pending interactions', () => {
 
     const result = await client.resumePending({
       type: 'device_selection',
-      deviceId: 'tv_chambre',
+      deviceId: 'tv_bedroom',
     })
     expect(result.status).toBe('success')
   })
@@ -405,13 +405,13 @@ describe('OpenNestClient pending interactions', () => {
 
     const rejected = await client.resumePending({
       type: 'device_selection',
-      deviceId: 'inconnu',
+      deviceId: 'unknown',
     })
 
     expect(rejected.status).toBe('error')
     expect(rejected.errors[0]!.code).toBe('unknown_device_id')
-    expect(rejected.errors[0]!.message).toContain('tv_salon')
-    expect(rejected.errors[0]!.message).toContain('tv_chambre')
+    expect(rejected.errors[0]!.message).toContain('tv_living_room')
+    expect(rejected.errors[0]!.message).toContain('tv_bedroom')
   })
 
   it('rejects resumePending when nothing is pending', async () => {
@@ -419,7 +419,7 @@ describe('OpenNestClient pending interactions', () => {
 
     const result = await client.resumePending({
       type: 'device_selection',
-      deviceId: 'tv_salon',
+      deviceId: 'tv_living_room',
     })
 
     expect(result.status).toBe('error')
@@ -443,18 +443,18 @@ describe('OpenNestClient pending interactions', () => {
     expect(second.status).toBe('awaiting_interaction')
     const resumed = await client.resumePending({
       type: 'device_selection',
-      deviceId: 'tv_salon',
+      deviceId: 'tv_living_room',
     })
     expect(resumed.status).toBe('success')
     expect(client.getPendingInteraction()).toBeNull()
 
     // runDsl success → null
-    const third = await client.runDsl('tv[salon].power = on')
+    const third = await client.runDsl('tv[living_room].power = on')
     expect(third.status).toBe('success')
     expect(client.getPendingInteraction()).toBeNull()
 
     // terminal error on a fresh runDsl → null (no interaction in session)
-    const failed = await client.runDsl('camera[salon].snapshot()')
+    const failed = await client.runDsl('camera[living_room].snapshot()')
     expect(failed.status).toBe('error')
     expect(client.getPendingInteraction()).toBeNull()
   })
@@ -465,18 +465,18 @@ describe('OpenNestClient pending interactions', () => {
     const paused = await client.runDsl('tv.power = on')
     expect(paused.status).toBe('awaiting_interaction')
 
-    const blocked = await client.runDsl('tv[salon].power = on')
+    const blocked = await client.runDsl('tv[living_room].power = on')
     expect(blocked.status).toBe('error')
     expect(blocked.errors[0]!.code).toBe('interaction_pending')
     expect(client.getPendingInteraction()!.id).toBe(paused.interaction!.id)
 
     const result = await client.resumePending({
       type: 'device_selection',
-      deviceId: 'tv_salon',
+      deviceId: 'tv_living_room',
     })
 
     expect(result.status).toBe('success')
-    expect(await driver.getProperty('tv_salon', 'power')).toBe(true)
+    expect(await driver.getProperty('tv_living_room', 'power')).toBe(true)
     expect(client.getPendingInteraction()).toBeNull()
   })
 
@@ -489,7 +489,7 @@ describe('OpenNestClient pending interactions', () => {
     const failed = await client.resume({
       interactionId: 'stale-id',
       type: 'device_selection',
-      deviceId: 'tv_salon',
+      deviceId: 'tv_living_room',
     })
 
     expect(failed.status).toBe('error')
@@ -500,7 +500,7 @@ describe('OpenNestClient pending interactions', () => {
   it('clears the pending interaction when a resume continuation throws', async () => {
     const boom = new Error('continuation boom')
     const throwing: Middleware = async ctx => {
-      if (ctx.action.device.id === 'tv_chambre') throw boom
+      if (ctx.action.device.id === 'tv_bedroom') throw boom
       return { kind: 'execute', actions: [ctx.action] }
     }
     const { client } = await makeClient({ middleware: [throwing] })
@@ -513,7 +513,7 @@ describe('OpenNestClient pending interactions', () => {
       client.resume({
         interactionId: paused.interaction!.id,
         type: 'device_selection',
-        deviceId: 'tv_chambre',
+        deviceId: 'tv_bedroom',
       }),
     ).rejects.toThrow('continuation boom')
 
@@ -526,12 +526,12 @@ drivers:
   mock:
     latency: 0
 rooms:
-  - salon
+  - living_room
 devices:
-  - id: tv_salon
+  - id: tv_living_room
     type: tv
-    room: salon
-    name: Salon TV
+    room: living_room
+    name: Living Room TV
     driver: mock
     properties:
       power:
@@ -554,7 +554,7 @@ describe('OpenNestClient.fromYaml', () => {
     try {
       const client = await OpenNestClient.fromYaml(path)
 
-      const result = await client.runDsl('tv[salon].power = on')
+      const result = await client.runDsl('tv[living_room].power = on')
 
       expect(result.status).toBe('success')
       expect(result.errors).toHaveLength(0)
@@ -575,7 +575,7 @@ describe('OpenNestClient.fromYaml', () => {
         onInteraction: interaction => interactions.push(interaction),
       })
 
-      const result = await client.runDsl('tv[salon].power = on')
+      const result = await client.runDsl('tv[living_room].power = on')
 
       expect(result.status).toBe('awaiting_interaction')
       expect(result.interaction!.type).toBe('confirmation')
@@ -595,7 +595,7 @@ describe('OpenNestClient.fromYaml', () => {
 
       const client = await OpenNestClient.fromYaml(path, { eventBus })
 
-      const result = await client.runDsl('tv[salon].power = on')
+      const result = await client.runDsl('tv[living_room].power = on')
 
       expect(result.status).toBe('success')
       expect(events).toContain('program:begin')
@@ -616,7 +616,7 @@ describe('OpenNestClient.fromYaml', () => {
       const prompt = client.buildPrompt()
 
       expect(prompt).toContain('- tv')
-      expect(prompt).toContain('- salon')
+      expect(prompt).toContain('- living_room')
     } finally {
       unlinkSync(path)
     }
@@ -626,13 +626,13 @@ describe('OpenNestClient.fromYaml', () => {
 function makeInventory() {
   return {
     drivers: { mock: {} },
-    rooms: ['salon'],
+    rooms: ['living_room'],
     devices: [
       {
-        id: 'tv_salon',
+        id: 'tv_living_room',
         type: 'tv',
-        room: 'salon',
-        name: 'Salon TV',
+        room: 'living_room',
+        name: 'Living Room TV',
         driver: 'mock',
         properties: { power: { type: 'boolean' } },
         actions: [],
@@ -650,7 +650,7 @@ describe('OpenNestClient.buildPrompt', () => {
 
     expect(prompt).toContain('SUPPORTED DEVICES')
     expect(prompt).toContain('- tv')
-    expect(prompt).toContain('- salon')
+    expect(prompt).toContain('- living_room')
   })
 
   it('injects preamble and custom instruction', () => {
@@ -690,7 +690,7 @@ describe('OpenNestClient.analyze', () => {
   it('returns ok with no errors for valid DSL', async () => {
     const { client } = await makeClient()
 
-    const feedback = client.analyze('tv[salon].power = on')
+    const feedback = client.analyze('tv[living_room].power = on')
 
     expect(feedback.ok).toBe(true)
     expect(feedback.parseErrors).toHaveLength(0)
@@ -712,7 +712,7 @@ describe('OpenNestClient.analyze', () => {
   it('returns validation errors for an unknown device type', async () => {
     const { client } = await makeClient()
 
-    const feedback = client.analyze('camera[salon].snapshot()')
+    const feedback = client.analyze('camera[living_room].snapshot()')
 
     expect(feedback.ok).toBe(false)
     expect(feedback.parseErrors).toHaveLength(0)
@@ -725,7 +725,7 @@ describe('OpenNestClient.analyze', () => {
   it('validates $it against the current session', async () => {
     const { client } = await makeClient()
 
-    await client.runDsl('tv[salon].power = on')
+    await client.runDsl('tv[living_room].power = on')
 
     const feedback = client.analyze('$it.power = off')
 
@@ -757,7 +757,7 @@ describe('OpenNestClient ask answers', () => {
     const { client, driver } = await makeClient({
       middleware: [volumeMiddleware],
     })
-    await client.runDsl('tv[salon].volume = 1')
+    await client.runDsl('tv[living_room].volume = 1')
     const pending = client.getPendingInteraction()
     expect(pending?.type).toBe('number_input')
 
@@ -769,7 +769,7 @@ describe('OpenNestClient ask answers', () => {
     expect(result.status).toBe('error')
     expect(result.errors[0]!.code).toBe('invalid_response')
     expect(client.getPendingInteraction()).toBe(pending)
-    expect(await driver.getProperty('tv_salon', 'volume')).toBe(15)
+    expect(await driver.getProperty('tv_living_room', 'volume')).toBe(15)
   })
 
   it('rejects an unknown choice value', async () => {
@@ -786,7 +786,7 @@ describe('OpenNestClient ask answers', () => {
         },
       ],
     })
-    await client.runDsl('tv[salon].power = on')
+    await client.runDsl('tv[living_room].power = on')
 
     const result = await client.resumePending({
       type: 'choice',
@@ -806,7 +806,7 @@ describe('OpenNestClient ask answers', () => {
         },
       ],
     })
-    await client.runDsl('tv[salon].power = on')
+    await client.runDsl('tv[living_room].power = on')
 
     const result = await client.resumePending({
       type: 'text_input',
@@ -821,7 +821,7 @@ describe('OpenNestClient ask answers', () => {
     const { client, driver } = await makeClient({
       middleware: [volumeMiddleware],
     })
-    await client.runDsl('tv[salon].volume = 1')
+    await client.runDsl('tv[living_room].volume = 1')
 
     const result = await client.resumePending({
       type: 'number_input',
@@ -829,7 +829,7 @@ describe('OpenNestClient ask answers', () => {
     })
 
     expect(result.status).toBe('success')
-    expect(await driver.getProperty('tv_salon', 'volume')).toBe(42)
+    expect(await driver.getProperty('tv_living_room', 'volume')).toBe(42)
   })
 
   it('isolates answers of two clients sharing one ask middleware', async () => {
@@ -880,10 +880,10 @@ describe('OpenNestClient ask answers', () => {
 
     expect(a3.status).toBe('success')
     expect(b3.status).toBe('success')
-    expect(await a.driver.getProperty('tv_salon', 'volume')).toBe(11)
-    expect(await a.driver.getProperty('tv_chambre', 'volume')).toBe(12)
-    expect(await b.driver.getProperty('tv_salon', 'volume')).toBe(71)
-    expect(await b.driver.getProperty('tv_chambre', 'volume')).toBe(72)
+    expect(await a.driver.getProperty('tv_living_room', 'volume')).toBe(11)
+    expect(await a.driver.getProperty('tv_bedroom', 'volume')).toBe(12)
+    expect(await b.driver.getProperty('tv_living_room', 'volume')).toBe(71)
+    expect(await b.driver.getProperty('tv_bedroom', 'volume')).toBe(72)
     expect(askedA).toBe(2)
     expect(askedB).toBe(2)
   })
@@ -931,25 +931,30 @@ describe('OpenNestClient suggestions', () => {
 
   it('exposes suggestions on the run result and getSuggestions', async () => {
     const { client } = await setup()
-    const result = await client.runDsl('tv[salon].power = on')
+    const result = await client.runDsl('tv[living_room].power = on')
 
     expect(result.suggestions).toHaveLength(1)
     const suggestion = result.suggestions![0]!
     expect(suggestion.question).toEqual({ ...modeQuestion, key: 'level0' })
     expect(suggestion.targets).toEqual([
-      { id: 'tv_salon', type: 'tv', room: 'salon', name: 'Salon TV' },
+      {
+        id: 'tv_living_room',
+        type: 'tv',
+        room: 'living_room',
+        name: 'Living Room TV',
+      },
     ])
     expect(client.getSuggestions()).toEqual(result.suggestions)
 
     const plain = await makeClient()
-    const none = await plain.client.runDsl('tv[salon].power = on')
+    const none = await plain.client.runDsl('tv[living_room].power = on')
     expect(none.suggestions).toBeUndefined()
     expect(plain.client.getSuggestions()).toEqual([])
   })
 
   it('answers a suggestion end to end', async () => {
     const { client, driver } = await setup()
-    const first = await client.runDsl('tv[salon].power = on')
+    const first = await client.runDsl('tv[living_room].power = on')
     const id = first.suggestions![0]!.id
 
     const result = await client.answerSuggestion(id, {
@@ -958,13 +963,13 @@ describe('OpenNestClient suggestions', () => {
     })
 
     expect(result.status).toBe('success')
-    expect(await driver.getProperty('tv_salon', 'volume')).toBe(33)
+    expect(await driver.getProperty('tv_living_room', 'volume')).toBe(33)
     expect(client.getSuggestions()).toEqual([])
   })
 
   it('pre-validates suggestion answers without calling the VM', async () => {
     const { client, driver } = await setup()
-    const first = await client.runDsl('tv[salon].power = on')
+    const first = await client.runDsl('tv[living_room].power = on')
     const id = first.suggestions![0]!.id
 
     const unknown = await client.answerSuggestion('nope', {
@@ -987,13 +992,13 @@ describe('OpenNestClient suggestions', () => {
       expect(r.status).toBe('error')
       expect(r.executed).toEqual([])
     }
-    expect(await driver.getProperty('tv_salon', 'volume')).toBe(15)
+    expect(await driver.getProperty('tv_living_room', 'volume')).toBe(15)
     expect(client.getSuggestions()).toHaveLength(1)
   })
 
   it('dismissSuggestion removes one suggestion and keeps siblings', async () => {
     const { client } = await setup(2)
-    const first = await client.runDsl('tv[salon].power = on')
+    const first = await client.runDsl('tv[living_room].power = on')
     const [a, b] = first.suggestions!
 
     expect(client.dismissSuggestion(a!.id)).toBe(true)
@@ -1005,7 +1010,7 @@ describe('OpenNestClient suggestions', () => {
 
   it('projects origin on follow-up entries', async () => {
     const { client } = await setup()
-    const first = await client.runDsl('tv[salon].power = on')
+    const first = await client.runDsl('tv[living_room].power = on')
     const id = first.suggestions![0]!.id
 
     const result = await client.answerSuggestion(id, {
