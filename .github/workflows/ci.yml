@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 15
     env:
       # Secrets can't be read in step `if:` conditions; expose presence here.
+      # The client id is a public GitHub App identifier, stored as a secret only
+      # for convenience; the private key is the sensitive value.
       BOT_CLIENT_ID: ${{ secrets.OPENNEST_BOT_CLIENT_ID }}
     steps:
       - name: Checkout

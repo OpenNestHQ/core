@@ -177,7 +177,7 @@ Retryable state errors can be repeated up to `OPENNEST_MAX_FAILED_RESUMES` times
 1. Call `run_dsl` with a HomeDSL program.
 2. If the result is `completed`, you are done. If it is `failed`, fix the program using `error.message` and call `run_dsl` again.
 3. If the result is `waiting_for_user` (for example an ambiguous device, a confirmation or a missing parameter), **relay `interaction.prompt` to the user** and wait for their answer. Do not guess it.
-4. Call `respond` with the answer whose `type` matches `interaction.type` (e.g. `{ "response": { "type": "device_selection", "deviceId": "light_salon_2" } }`).
+4. Call `respond` with the answer whose `type` matches `interaction.type` (e.g. `{ "response": { "type": "device_selection", "deviceId": "light_living_room_2" } }`).
 5. The result of `respond` may be `completed`, `failed`, or another `waiting_for_user` — repeat from step 3.
 6. While an interaction is pending, `run_dsl` and `answer_suggestion` return `blocked` / `interaction_pending`. Answer with `respond`, or call `cancel` to abandon the program.
 7. `get_session` shows the current state at any time without side effects.

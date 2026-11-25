@@ -23,34 +23,34 @@ OpenTelemetry Spans → OTLP Exporter → Jaeger / Tempo
 ## Usage
 
 ```ts
-import { DefaultVMEventBus } from "@opennest/vm";
-import { ExecutionEventNormalizer, OpenTelemetryTraceSink } from "@opennest/vm-opentelemetry";
-import { trace } from "@opentelemetry/api";
-import { NodeSDK } from "@opentelemetry/sdk-node";
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { DefaultVMEventBus, executeCommand } from '@opennest/vm'
+import { ExecutionEventNormalizer, OpenTelemetryTraceSink } from '@opennest/vm-opentelemetry'
+import { trace } from '@opentelemetry/api'
+import { NodeSDK } from '@opentelemetry/sdk-node'
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 
 const exporter = new OTLPTraceExporter({
-  url: "http://localhost:4318/v1/traces",
-});
+  url: 'http://localhost:4318/v1/traces',
+})
 
-const sdk = new NodeSDK({ traceExporter: exporter });
-sdk.start();
+const sdk = new NodeSDK({ traceExporter: exporter })
+sdk.start()
 
-const eventBus = new DefaultVMEventBus();
-const normalizer = new ExecutionEventNormalizer();
-const sink = new OpenTelemetryTraceSink(trace.getTracer("opennest-vm"));
+const eventBus = new DefaultVMEventBus()
+const normalizer = new ExecutionEventNormalizer()
+const sink = new OpenTelemetryTraceSink(trace.getTracer('opennest-vm'))
 
-eventBus.subscribe((event) => {
+eventBus.subscribe(event => {
   for (const normalized of normalizer.consume(event)) {
-    sink.consume(normalized);
+    sink.consume(normalized)
   }
-});
+})
 
 const result = await executeCommand(command, {
   devices,
   session,
   eventBus,
-});
+})
 
 // Spans are automatically sent to Jaeger/Tempo via the OTLP exporter
 ```
@@ -61,7 +61,7 @@ const result = await executeCommand(command, {
 
 ```ts
 class ExecutionEventNormalizer {
-  consume(event: VMEvent): ExecutionEvent[];
+  consume(event: VMEvent): ExecutionEvent[]
 }
 ```
 
@@ -71,12 +71,18 @@ Transforms VM execution events (`program:begin`, `statement:begin`, etc.) into n
 
 ```ts
 class OpenTelemetryTraceSink {
-  constructor(tracer: Tracer);
-  consume(event: ExecutionEvent): void;
+  constructor(tracer: Tracer)
+  consume(event: ExecutionEvent): void
+  getRootSpanContext(): SpanContext | undefined
+  setContinuationLink(context: SpanContext): void
 }
 ```
 
-Creates and manages OpenTelemetry spans from normalized trace events.
+Creates and manages OpenTelemetry spans from normalized trace events. `getRootSpanContext()` returns the span context of the current root span; passing it to `setContinuationLink()` before a later run links that run's root span to the earlier one, so a run resumed after a user interaction can be followed as one flow (the playground does this).
+
+### Event types
+
+The normalized events are exported as types: `ExecutionEvent` is the union of `NodeStartedEvent`, `NodeCompletedEvent`, `NodeAttributeEvent` and `NodeLogEvent` (the `node.event` variant).
 
 ## Test
 
