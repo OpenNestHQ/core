@@ -3,18 +3,18 @@ drivers:
     latency: 0
 
 rooms:
-  - salon
-  - chambre
-  - cuisine
-  - bureau
-  - salle_de_bain
-  - entrée
+  - living_room
+  - bedroom
+  - kitchen
+  - office
+  - bathroom
+  - entrance
 
 devices:
-  - id: tv_salon
+  - id: tv_living_room
     type: tv
-    room: salon
-    name: Salon TV
+    room: living_room
+    name: Living Room TV
     driver: mock
     properties:
       power:
@@ -27,10 +27,10 @@ devices:
       - play
       - pause
 
-  - id: tv_chambre
+  - id: tv_bedroom
     type: tv
-    room: chambre
-    name: Chambre TV
+    room: bedroom
+    name: Bedroom TV
     driver: mock
     properties:
       power:
@@ -43,10 +43,10 @@ devices:
       - play
       - pause
 
-  - id: light_salon_1
+  - id: light_living_room_1
     type: light
-    room: salon
-    name: Salon Light 1
+    room: living_room
+    name: Living Room Light 1
     driver: mock
     properties:
       power:
@@ -55,10 +55,10 @@ devices:
         type: number
     actions: []
 
-  - id: light_salon_2
+  - id: light_living_room_2
     type: light
-    room: salon
-    name: Salon Light 2
+    room: living_room
+    name: Living Room Light 2
     driver: mock
     properties:
       power:
@@ -67,30 +67,30 @@ devices:
         type: number
     actions: []
 
-  - id: thermostat_salon
+  - id: thermostat_living_room
     type: thermostat
-    room: salon
-    name: Salon Thermostat
+    room: living_room
+    name: Living Room Thermostat
     driver: mock
     properties:
       temperature:
         type: number
     actions: []
 
-  - id: vacuum_salon
+  - id: vacuum_living_room
     type: vacuum
-    room: salon
-    name: Salon Vacuum
+    room: living_room
+    name: Living Room Vacuum
     driver: mock
     properties: {}
     actions:
       - start
       - stop
 
-  - id: speaker_salon
+  - id: speaker_living_room
     type: speaker
-    room: salon
-    name: Salon Speaker
+    room: living_room
+    name: Living Room Speaker
     driver: mock
     properties:
       power:

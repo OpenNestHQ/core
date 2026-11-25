@@ -13,13 +13,13 @@ import type { Middleware } from '../middleware/types.js'
 describe('ask() via @opennest/vm/effect', () => {
   it('works through the @opennest/vm/effect entry point', async () => {
     const driver = new MockDriver()
-    driver.seed('tv_salon', { power: false })
+    driver.seed('tv_living_room', { power: false })
     const devices: Device[] = [
       {
-        id: 'tv_salon',
+        id: 'tv_living_room',
         type: 'tv',
-        room: 'salon',
-        name: 'Salon TV',
+        room: 'living_room',
+        name: 'Living Room TV',
         driver,
         driverConfig: {},
       },
@@ -37,7 +37,7 @@ describe('ask() via @opennest/vm/effect', () => {
       })
       return next()
     }
-    const parsed = parseHomeDSL('tv[salon].power = on')
+    const parsed = parseHomeDSL('tv[living_room].power = on')
     const ctx = { devices, session: createSession(), middleware: [mw] }
 
     const first = await Effect.runPromise(

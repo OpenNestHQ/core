@@ -56,7 +56,7 @@ function makeDevice(
   initialState: Record<string, unknown>,
 ): Device {
   driver.seed(id, initialState)
-  return { id, type, room: 'salon', name: id, driver, driverConfig: {} }
+  return { id, type, room: 'living_room', name: id, driver, driverConfig: {} }
 }
 
 function parse(code: string) {
@@ -77,14 +77,14 @@ function uniqueName(): string {
 const ambianceQ: SuggestionQuestion = {
   key: 'ambiance',
   type: 'choice',
-  message: 'Une ambiance ?',
+  message: 'Which ambiance?',
   options: [
-    { value: 'cinema', label: 'Cinéma' },
-    { value: 'lecture', label: 'Lecture' },
+    { value: 'cinema', label: 'Cinema' },
+    { value: 'reading', label: 'Reading' },
   ],
 }
 
-const brightnessFor: Record<string, number> = { cinema: 20, lecture: 80 }
+const brightnessFor: Record<string, number> = { cinema: 20, reading: 80 }
 
 const setBrightness: SuggestionApply = (answer, devices) =>
   devices.map(device => ({
@@ -145,7 +145,7 @@ function harness(middleware: Middleware[]) {
   }
 }
 
-const ALL_ON = '$l = @all(light[salon])\n$l.power = on'
+const ALL_ON = '$l = @all(light[living_room])\n$l.power = on'
 const cinema: SuggestionResponse = { type: 'choice', value: 'cinema' }
 
 describe('answer_suggestion', () => {
@@ -206,7 +206,7 @@ describe('answer_suggestion', () => {
     const h = harness([mw])
     const first = await h.run(ALL_ON)
     const staleId = first.suggestions![0]!.id
-    await h.run('$l = @all(light[salon])\n$l.power = off')
+    await h.run('$l = @all(light[living_room])\n$l.power = off')
     const writes = h.driver.writes.length
 
     const result = await h.answer(staleId, cinema)
@@ -368,7 +368,7 @@ describe('answer_suggestion', () => {
 
     const sibling = await h.answer(sb!.id, {
       type: 'choice',
-      value: 'lecture',
+      value: 'reading',
     })
     expect(sibling.status).toBe('success')
     expect(await h.driver.getProperty('light_1', 'brightness')).toBe(80)
@@ -464,7 +464,7 @@ describe('answer_suggestion', () => {
     const stranger: Device = {
       id: 'ghost',
       type: 'light',
-      room: 'salon',
+      room: 'living_room',
       name: 'ghost',
       driver: new RecordingDriver(),
       driverConfig: {},
@@ -563,7 +563,9 @@ describe('answer_suggestion', () => {
     expect(h.session.cursor).toBe(0)
 
     armed = true
-    const paused = await h.run('$l = @first(light[salon])\n$l.power = off')
+    const paused = await h.run(
+      '$l = @first(light[living_room])\n$l.power = off',
+    )
     expect(paused.status).toBe('awaiting_interaction')
     const before = h.session.history.length
 
@@ -598,7 +600,7 @@ describe('answer_suggestion', () => {
       ],
     }
 
-    const paused = await h.run('$l = @first(light[salon])\n$l.power = on')
+    const paused = await h.run('$l = @first(light[living_room])\n$l.power = on')
     expect(paused.status).toBe('awaiting_interaction')
     expect(h.session._pendingFollowUp).toBeUndefined()
 

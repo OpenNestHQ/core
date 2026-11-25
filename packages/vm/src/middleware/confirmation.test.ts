@@ -23,13 +23,27 @@ function makeDevice(
 
 async function devices(): Promise<Device[]> {
   return [
-    makeDevice('tv_salon', 'tv', 'salon', 'Salon TV', { power: false }),
-    makeDevice('light_salon', 'light', 'salon', 'Salon Light', {
+    makeDevice('tv_living_room', 'tv', 'living_room', 'Living Room TV', {
       power: false,
     }),
-    makeDevice('thermostat_salon', 'thermostat', 'salon', 'Salon Thermostat', {
-      temperature: 21,
-    }),
+    makeDevice(
+      'light_living_room',
+      'light',
+      'living_room',
+      'Living Room Light',
+      {
+        power: false,
+      },
+    ),
+    makeDevice(
+      'thermostat_living_room',
+      'thermostat',
+      'living_room',
+      'Living Room Thermostat',
+      {
+        temperature: 21,
+      },
+    ),
   ]
 }
 
@@ -56,7 +70,7 @@ describe('createConfirmationMiddleware', () => {
       requireConfirmation: () => false,
     })
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
     const result = await executeCommand(
       { kind: 'run_program', program: program },
       await ctx(undefined, [mw]),
@@ -72,7 +86,7 @@ describe('createConfirmationMiddleware', () => {
       requireConfirmation: () => true,
     })
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
     const result = await executeCommand(
       { kind: 'run_program', program: program },
       await ctx(undefined, [mw]),
@@ -81,7 +95,7 @@ describe('createConfirmationMiddleware', () => {
     expect(result.status).toBe('awaiting_interaction')
     expect(result.interaction).not.toBeNull()
     expect(result.interaction!.type).toBe('confirmation')
-    expect(result.interaction!.message).toContain('Salon TV')
+    expect(result.interaction!.message).toContain('Living Room TV')
   })
 
   it('pauses only on matching device types', async () => {
@@ -89,14 +103,14 @@ describe('createConfirmationMiddleware', () => {
       requireConfirmation: action => action.device.type === 'thermostat',
     })
 
-    const tvProgram = parse('tv[salon].power = on')
+    const tvProgram = parse('tv[living_room].power = on')
     const tvResult = await executeCommand(
       { kind: 'run_program', program: tvProgram },
       await ctx(undefined, [mw]),
     )
     expect(tvResult.status).toBe('success')
 
-    const thermoProgram = parse('thermostat[salon].temperature = 22')
+    const thermoProgram = parse('thermostat[living_room].temperature = 22')
     const thermoResult = await executeCommand(
       { kind: 'run_program', program: thermoProgram },
       await ctx(undefined, [mw]),
@@ -109,7 +123,7 @@ describe('createConfirmationMiddleware', () => {
       requireConfirmation: () => true,
     })
     const session = createSession()
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
 
     const firstResult = await executeCommand(
       { kind: 'run_program', program: program },
@@ -137,7 +151,7 @@ describe('createConfirmationMiddleware', () => {
       requireConfirmation: () => true,
     })
     const session = createSession()
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
 
     const firstResult = await executeCommand(
       { kind: 'run_program', program: program },
@@ -164,7 +178,7 @@ describe('createConfirmationMiddleware', () => {
       requireConfirmation: () => true,
     })
     const session = createSession()
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
 
     const first = await executeCommand(
       { kind: 'run_program', program: program },
@@ -195,7 +209,7 @@ describe('createConfirmationMiddleware', () => {
     })
     const session = createSession()
 
-    const programTv = parse('tv[salon].power = on')
+    const programTv = parse('tv[living_room].power = on')
     const r1 = await executeCommand(
       { kind: 'run_program', program: programTv },
       await ctx(session, [mw]),
@@ -207,7 +221,7 @@ describe('createConfirmationMiddleware', () => {
       confirmed: true,
     })
 
-    const programLight = parse('light[salon].power = on')
+    const programLight = parse('light[living_room].power = on')
     const r2 = await executeCommand(
       { kind: 'run_program', program: programLight },
       await ctx(session, [mw]),
@@ -222,13 +236,13 @@ describe('createConfirmationMiddleware', () => {
       message: action => `[CUSTOM] Allow ${action.device.name}?`,
     })
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
     const result = await executeCommand(
       { kind: 'run_program', program: program },
       await ctx(undefined, [mw]),
     )
 
     expect(result.interaction!.message).toContain('[CUSTOM]')
-    expect(result.interaction!.message).toContain('Salon TV')
+    expect(result.interaction!.message).toContain('Living Room TV')
   })
 })

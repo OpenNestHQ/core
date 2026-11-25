@@ -63,7 +63,7 @@ describe('toDeviceEntries', () => {
       {
         id: 'tv_1',
         type: 'tv',
-        room: 'salon',
+        room: 'living_room',
         name: 'TV',
         driver: {} as never,
         driverConfig: {
@@ -78,7 +78,7 @@ describe('toDeviceEntries', () => {
       {
         id: 'l_1',
         type: 'light',
-        room: 'salon',
+        room: 'living_room',
         name: 'Light',
         driver: {} as never,
         driverConfig: { properties: {}, actions: { dim: {} } },
@@ -95,7 +95,7 @@ describe('toDeviceEntries', () => {
     expect(entries[0]).toEqual({
       id: 'tv_1',
       type: 'tv',
-      room: 'salon',
+      room: 'living_room',
       name: 'TV',
       tags: ['media'],
       capabilities: {

@@ -248,7 +248,7 @@ describe('DefaultExecutionTracer', () => {
       timestamp: 1010,
       name: 'confirmation',
       actionKind: 'set_property',
-      deviceId: 'tv_salon',
+      deviceId: 'tv_living_room',
     })
     tracer.consume({
       kind: 'middleware:end',
@@ -270,7 +270,7 @@ describe('DefaultExecutionTracer', () => {
     expect(mwNode.status).toBe(NodeStatus.Success)
     expect(mwNode.attributes).toMatchObject({
       actionKind: 'set_property',
-      deviceId: 'tv_salon',
+      deviceId: 'tv_living_room',
       decision: 'execute',
     })
   })
@@ -344,8 +344,8 @@ describe('DefaultExecutionTracer', () => {
       kind: 'action:begin',
       timestamp: 1010,
       actionKind: 'set_property',
-      deviceId: 'tv_salon',
-      deviceName: 'TV Salon',
+      deviceId: 'tv_living_room',
+      deviceName: 'Living Room TV',
       property: 'power',
     })
     tracer.consume({
@@ -366,8 +366,8 @@ describe('DefaultExecutionTracer', () => {
     expect(node.name).toBe('execute:set_property')
     expect(node.status).toBe(NodeStatus.Success)
     expect(node.attributes).toMatchObject({
-      deviceId: 'tv_salon',
-      deviceName: 'TV Salon',
+      deviceId: 'tv_living_room',
+      deviceName: 'Living Room TV',
       property: 'power',
     })
   })
@@ -484,13 +484,20 @@ describe('DefaultVMEventBus', () => {
 describe('VM with event bus', () => {
   it('produces trace for a successful two-statement program', async () => {
     const driver = makeDriver()
-    const tv = await makeDevice('tv_salon', 'tv', 'salon', 'TV Salon', driver, {
-      power: false,
-    })
+    const tv = await makeDevice(
+      'tv_living_room',
+      'tv',
+      'living_room',
+      'Living Room TV',
+      driver,
+      {
+        power: false,
+      },
+    )
     const light = await makeDevice(
-      'light_salon',
+      'light_living_room',
       'light',
-      'salon',
+      'living_room',
       'Light',
       driver,
       { power: false },
@@ -500,8 +507,8 @@ describe('VM with event bus', () => {
     const bus = new DefaultVMEventBus(tracer)
 
     const program = parse(`
-      tv[salon].power = on
-      light[salon].power = on
+      tv[living_room].power = on
+      light[living_room].power = on
     `)
 
     const result = await executeCommand(
@@ -533,16 +540,25 @@ describe('VM with event bus', () => {
     expect(s1.status).toBe(NodeStatus.Success)
     expect(s1.attributes.statementKind).toBe('assignment')
 
-    expect(tv.driver.getProperty('tv_salon', 'power', {})).resolves.toBe(true)
+    expect(tv.driver.getProperty('tv_living_room', 'power', {})).resolves.toBe(
+      true,
+    )
   })
 
   it('no eventBus means no change in behavior', async () => {
     const driver = makeDriver()
-    const tv = await makeDevice('tv_salon', 'tv', 'salon', 'TV', driver, {
-      power: false,
-    })
+    const tv = await makeDevice(
+      'tv_living_room',
+      'tv',
+      'living_room',
+      'TV',
+      driver,
+      {
+        power: false,
+      },
+    )
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
 
     const result = await executeCommand(
       { kind: 'run_program', program },
@@ -557,7 +573,7 @@ describe('VM with event bus', () => {
     const tracer = new DefaultExecutionTracer()
     const bus = new DefaultVMEventBus(tracer)
 
-    const program = parse('unknown[salon].power = on')
+    const program = parse('unknown[living_room].power = on')
 
     const result = await executeCommand(
       { kind: 'run_program', program },
@@ -572,17 +588,17 @@ describe('VM with event bus', () => {
 
   it('produces trace for awaiting_interaction (ambiguous)', async () => {
     const driver = makeDriver()
-    const tv1 = await makeDevice('tv_1', 'tv', 'salon', 'TV 1', driver, {
+    const tv1 = await makeDevice('tv_1', 'tv', 'living_room', 'TV 1', driver, {
       power: false,
     })
-    const tv2 = await makeDevice('tv_2', 'tv', 'salon', 'TV 2', driver, {
+    const tv2 = await makeDevice('tv_2', 'tv', 'living_room', 'TV 2', driver, {
       power: false,
     })
 
     const tracer = new DefaultExecutionTracer()
     const bus = new DefaultVMEventBus(tracer)
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
 
     const result = await executeCommand(
       { kind: 'run_program', program },
@@ -600,13 +616,20 @@ describe('VM with event bus', () => {
 
   it('trace timestamps are monotonic within a program', async () => {
     const driver = makeDriver()
-    const tv = await makeDevice('tv_salon', 'tv', 'salon', 'TV', driver, {
-      power: false,
-    })
+    const tv = await makeDevice(
+      'tv_living_room',
+      'tv',
+      'living_room',
+      'TV',
+      driver,
+      {
+        power: false,
+      },
+    )
     const light = await makeDevice(
-      'light_salon',
+      'light_living_room',
       'light',
-      'salon',
+      'living_room',
       'Light',
       driver,
       { power: false },
@@ -616,8 +639,8 @@ describe('VM with event bus', () => {
     const bus = new DefaultVMEventBus(tracer)
 
     const program = parse(`
-      tv[salon].power = on
-      light[salon].power = on
+      tv[living_room].power = on
+      light[living_room].power = on
     `)
 
     await executeCommand(
@@ -643,17 +666,17 @@ describe('VM with event bus', () => {
 
   it('multi-turn (manual resolve + rerun) creates independent traces', async () => {
     const driver = makeDriver()
-    const tv1 = await makeDevice('tv_1', 'tv', 'salon', 'TV 1', driver, {
+    const tv1 = await makeDevice('tv_1', 'tv', 'living_room', 'TV 1', driver, {
       power: false,
     })
-    const tv2 = await makeDevice('tv_2', 'tv', 'salon', 'TV 2', driver, {
+    const tv2 = await makeDevice('tv_2', 'tv', 'living_room', 'TV 2', driver, {
       power: false,
     })
 
     const tracer1 = new DefaultExecutionTracer()
     const bus1 = new DefaultVMEventBus(tracer1)
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
 
     const first = await executeCommand(
       { kind: 'run_program', program },
@@ -693,7 +716,7 @@ describe('VM with event bus', () => {
     const kitchen = await makeDevice(
       'kitchen_light',
       'light',
-      'cuisine',
+      'kitchen',
       'Kitchen Light',
       driver,
       { power: false },
@@ -701,7 +724,7 @@ describe('VM with event bus', () => {
     const bedroom = await makeDevice(
       'bedroom_light',
       'light',
-      'chambre',
+      'bedroom',
       'Bedroom Light',
       driver,
       { power: false },
@@ -711,8 +734,8 @@ describe('VM with event bus', () => {
     const bus = new DefaultVMEventBus(tracer)
 
     const program = parse(`
-      light[cuisine].power = on
-      light[chambre].power = off
+      light[kitchen].power = on
+      light[bedroom].power = off
     `)
 
     await executeCommand(
@@ -747,9 +770,16 @@ describe('VM with event bus', () => {
 
   it('traces middleware evaluations when createConfirmationMiddleware is active', async () => {
     const driver = makeDriver()
-    const tv = await makeDevice('tv_salon', 'tv', 'salon', 'TV', driver, {
-      power: false,
-    })
+    const tv = await makeDevice(
+      'tv_living_room',
+      'tv',
+      'living_room',
+      'TV',
+      driver,
+      {
+        power: false,
+      },
+    )
 
     const tracer = new DefaultExecutionTracer()
     const bus = new DefaultVMEventBus(tracer)
@@ -758,7 +788,7 @@ describe('VM with event bus', () => {
       requireConfirmation: () => false,
     })
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
 
     await executeCommand(
       { kind: 'run_program', program },
@@ -776,17 +806,17 @@ describe('VM with event bus', () => {
 
   it('traces handler for device_selection ambiguity', async () => {
     const driver = makeDriver()
-    const tv1 = await makeDevice('tv_1', 'tv', 'salon', 'TV 1', driver, {
+    const tv1 = await makeDevice('tv_1', 'tv', 'living_room', 'TV 1', driver, {
       power: false,
     })
-    const tv2 = await makeDevice('tv_2', 'tv', 'salon', 'TV 2', driver, {
+    const tv2 = await makeDevice('tv_2', 'tv', 'living_room', 'TV 2', driver, {
       power: false,
     })
 
     const tracer = new DefaultExecutionTracer()
     const bus = new DefaultVMEventBus(tracer)
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
 
     await executeCommand(
       { kind: 'run_program', program },
@@ -804,9 +834,16 @@ describe('VM with event bus', () => {
 
   it('traces middleware and handler when createConfirmationMiddleware pauses', async () => {
     const driver = makeDriver()
-    const tv = await makeDevice('tv_salon', 'tv', 'salon', 'TV', driver, {
-      power: false,
-    })
+    const tv = await makeDevice(
+      'tv_living_room',
+      'tv',
+      'living_room',
+      'TV',
+      driver,
+      {
+        power: false,
+      },
+    )
 
     const tracer = new DefaultExecutionTracer()
     const bus = new DefaultVMEventBus(tracer)
@@ -815,7 +852,7 @@ describe('VM with event bus', () => {
       requireConfirmation: () => true,
     })
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
 
     const result = await executeCommand(
       { kind: 'run_program', program },
@@ -841,13 +878,20 @@ describe('VM with event bus', () => {
 
   it('traces @if body statements as children of the if statement', async () => {
     const driver = makeDriver()
-    const tv = await makeDevice('tv_salon', 'tv', 'salon', 'TV', driver, {
-      power: false,
-    })
+    const tv = await makeDevice(
+      'tv_living_room',
+      'tv',
+      'living_room',
+      'TV',
+      driver,
+      {
+        power: false,
+      },
+    )
     const light = await makeDevice(
-      'light_salon',
+      'light_living_room',
       'light',
-      'salon',
+      'living_room',
       'Light',
       driver,
       { power: false },
@@ -857,9 +901,9 @@ describe('VM with event bus', () => {
     const bus = new DefaultVMEventBus(tracer)
 
     const program = parse(`
-      @if tv[salon].power? == off
-        tv[salon].power = on
-        light[salon].power = on
+      @if tv[living_room].power? == off
+        tv[living_room].power = on
+        light[living_room].power = on
       @endif
     `)
 
@@ -886,9 +930,9 @@ describe('VM with event bus', () => {
   it('middleware events include deviceId and actionKind attributes', async () => {
     const driver = makeDriver()
     const vacuum = await makeDevice(
-      'vacuum_salon',
+      'vacuum_living_room',
       'vacuum',
-      'salon',
+      'living_room',
       'Vacuum',
       driver,
       {},
@@ -901,7 +945,7 @@ describe('VM with event bus', () => {
       requireConfirmation: () => false,
     })
 
-    const program = parse('vacuum[salon].start()')
+    const program = parse('vacuum[living_room].start()')
 
     await executeCommand(
       { kind: 'run_program', program },
@@ -911,19 +955,26 @@ describe('VM with event bus', () => {
     const trace = tracer.getTrace()
     const mwNode = trace.root.children[0]!.children[0]!
     expect(mwNode.attributes.actionKind).toBe('invoke_action')
-    expect(mwNode.attributes.deviceId).toBe('vacuum_salon')
+    expect(mwNode.attributes.deviceId).toBe('vacuum_living_room')
   })
 
   it('traces Execute nodes for each PlannedAction', async () => {
     const driver = makeDriver()
-    const tv = await makeDevice('tv_salon', 'tv', 'salon', 'TV', driver, {
-      power: false,
-    })
+    const tv = await makeDevice(
+      'tv_living_room',
+      'tv',
+      'living_room',
+      'TV',
+      driver,
+      {
+        power: false,
+      },
+    )
 
     const tracer = new DefaultExecutionTracer()
     const bus = new DefaultVMEventBus(tracer)
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
 
     await executeCommand(
       { kind: 'run_program', program },
@@ -936,15 +987,22 @@ describe('VM with event bus', () => {
     expect(execNodes).toHaveLength(1)
     expect(execNodes[0]!.name).toBe('execute:set_property')
     expect(execNodes[0]!.status).toBe(NodeStatus.Success)
-    expect(execNodes[0]!.attributes.deviceId).toBe('tv_salon')
+    expect(execNodes[0]!.attributes.deviceId).toBe('tv_living_room')
     expect(execNodes[0]!.attributes.property).toBe('power')
   })
 
   it('traces Execute nodes after Middleware nodes under the same Statement', async () => {
     const driver = makeDriver()
-    const tv = await makeDevice('tv_salon', 'tv', 'salon', 'TV', driver, {
-      power: false,
-    })
+    const tv = await makeDevice(
+      'tv_living_room',
+      'tv',
+      'living_room',
+      'TV',
+      driver,
+      {
+        power: false,
+      },
+    )
 
     const tracer = new DefaultExecutionTracer()
     const bus = new DefaultVMEventBus(tracer)
@@ -953,7 +1011,7 @@ describe('VM with event bus', () => {
       requireConfirmation: () => false,
     })
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
 
     await executeCommand(
       { kind: 'run_program', program },
@@ -979,9 +1037,9 @@ describe('VM with event bus', () => {
   it('traces Execute nodes with invoke_action method', async () => {
     const driver = makeDriver()
     const vacuum = await makeDevice(
-      'vacuum_salon',
+      'vacuum_living_room',
       'vacuum',
-      'salon',
+      'living_room',
       'Vacuum',
       driver,
       {},
@@ -990,7 +1048,7 @@ describe('VM with event bus', () => {
     const tracer = new DefaultExecutionTracer()
     const bus = new DefaultVMEventBus(tracer)
 
-    const program = parse('vacuum[salon].start()')
+    const program = parse('vacuum[living_room].start()')
 
     await executeCommand(
       { kind: 'run_program', program },
@@ -1006,17 +1064,17 @@ describe('VM with event bus', () => {
 
   it('full trace tree with middleware, handlers, and execute nodes', async () => {
     const driver = makeDriver()
-    const tv1 = await makeDevice('tv_1', 'tv', 'salon', 'TV 1', driver, {
+    const tv1 = await makeDevice('tv_1', 'tv', 'living_room', 'TV 1', driver, {
       power: false,
     })
-    const tv2 = await makeDevice('tv_2', 'tv', 'salon', 'TV 2', driver, {
+    const tv2 = await makeDevice('tv_2', 'tv', 'living_room', 'TV 2', driver, {
       power: false,
     })
 
     const tracer = new DefaultExecutionTracer()
     const bus = new DefaultVMEventBus(tracer)
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
 
     await executeCommand(
       { kind: 'run_program', program },

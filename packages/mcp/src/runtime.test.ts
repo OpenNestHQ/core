@@ -75,11 +75,16 @@ const executed: ExecutedStatementSummary[] = [
   {
     statement,
     resolvedDevices: [
-      { id: 'tv_salon', type: 'tv', room: 'salon', name: 'Salon TV' },
+      {
+        id: 'tv_living_room',
+        type: 'tv',
+        room: 'living_room',
+        name: 'Living Room TV',
+      },
     ],
     changes: [
       {
-        deviceId: 'tv_salon',
+        deviceId: 'tv_living_room',
         property: 'power',
         oldValue: false,
         newValue: true,
@@ -93,8 +98,13 @@ const deviceSelection: UserInteraction = {
   type: 'device_selection',
   message: 'Multiple "tv" devices found. Please select one:',
   devices: [
-    { id: 'tv_salon', name: 'Salon TV', type: 'tv', room: 'salon' },
-    { id: 'tv_cuisine', name: 'Kitchen TV', type: 'tv', room: 'cuisine' },
+    {
+      id: 'tv_living_room',
+      name: 'Living Room TV',
+      type: 'tv',
+      room: 'living_room',
+    },
+    { id: 'tv_kitchen', name: 'Kitchen TV', type: 'tv', room: 'kitchen' },
   ],
 }
 
@@ -103,12 +113,17 @@ const secondDeviceSelection: UserInteraction = {
   type: 'device_selection',
   message: 'Multiple "light" devices found. Please select one:',
   devices: [
-    { id: 'lamp_salon', name: 'Salon Lamp', type: 'light', room: 'salon' },
     {
-      id: 'lamp_cuisine',
+      id: 'lamp_living_room',
+      name: 'Living Room Lamp',
+      type: 'light',
+      room: 'living_room',
+    },
+    {
+      id: 'lamp_kitchen',
       name: 'Kitchen Lamp',
       type: 'light',
-      room: 'cuisine',
+      room: 'kitchen',
     },
   ],
 }
@@ -116,14 +131,17 @@ const secondDeviceSelection: UserInteraction = {
 const confirmationInteraction: UserInteraction = {
   id: 'confirm_1',
   type: 'confirmation',
-  message: 'Set power on Salon TV (tv in salon) to on?',
+  message: 'Set power on Living Room TV (tv in living_room) to on?',
 }
 
-const answer: ResumeAnswer = { type: 'device_selection', deviceId: 'tv_salon' }
+const answer: ResumeAnswer = {
+  type: 'device_selection',
+  deviceId: 'tv_living_room',
+}
 
 const wrongTypeAnswer: ResumeAnswer = {
   type: 'text_input',
-  text: 'the salon one',
+  text: 'the living room one',
 }
 
 function fakeClient(pending: UserInteraction | null) {
@@ -285,7 +303,7 @@ describe('createGuardedRuntime', () => {
       )
       const runtime = createGuardedRuntime(client)
 
-      const result = await runtime.runDsl('camera[salon].power = on')
+      const result = await runtime.runDsl('camera[living_room].power = on')
 
       expect(result).toStrictEqual(
         failed(
@@ -294,7 +312,7 @@ describe('createGuardedRuntime', () => {
           FIX_PROGRAM_HINT,
         ),
       )
-      expect(analyze).toHaveBeenCalledWith('camera[salon].power = on')
+      expect(analyze).toHaveBeenCalledWith('camera[living_room].power = on')
       expect(runDsl).not.toHaveBeenCalled()
     })
 
@@ -303,10 +321,10 @@ describe('createGuardedRuntime', () => {
       runDsl.mockResolvedValue(runResult({ executed }))
       const runtime = createGuardedRuntime(client)
 
-      const result = await runtime.runDsl('tv[salon].power = on')
+      const result = await runtime.runDsl('tv[living_room].power = on')
 
-      expect(analyze).toHaveBeenCalledWith('tv[salon].power = on')
-      expect(runDsl).toHaveBeenCalledWith('tv[salon].power = on')
+      expect(analyze).toHaveBeenCalledWith('tv[living_room].power = on')
+      expect(runDsl).toHaveBeenCalledWith('tv[living_room].power = on')
       expect(result).toStrictEqual({
         status: 'completed',
         result: { status: 'success', executed, errors: [] },
@@ -320,10 +338,10 @@ describe('createGuardedRuntime', () => {
         fakeClient(null)
       const runtime = createGuardedRuntime(client)
 
-      const result = await runtime.check('tv[salon].power = on')
+      const result = await runtime.check('tv[living_room].power = on')
 
       expect(result).toStrictEqual({ status: 'completed' })
-      expect(analyze).toHaveBeenCalledWith('tv[salon].power = on')
+      expect(analyze).toHaveBeenCalledWith('tv[living_room].power = on')
       expect(runDsl).not.toHaveBeenCalled()
       expect(resumePending).not.toHaveBeenCalled()
       expect(cancel).not.toHaveBeenCalled()
@@ -348,7 +366,7 @@ describe('createGuardedRuntime', () => {
       )
       const runtime = createGuardedRuntime(client)
 
-      const result = await runtime.check('camera[salon].power = on')
+      const result = await runtime.check('camera[living_room].power = on')
 
       expect(result).toStrictEqual(
         failed(
@@ -363,7 +381,7 @@ describe('createGuardedRuntime', () => {
       const { client, analyze, runDsl } = fakeClient(deviceSelection)
       const runtime = createGuardedRuntime(client)
 
-      const result = await runtime.check('tv[salon].power = on')
+      const result = await runtime.check('tv[living_room].power = on')
 
       expect(result).toStrictEqual({
         status: 'blocked',
@@ -461,15 +479,15 @@ describe('createGuardedRuntime', () => {
 
       const { client, resumePending, cancel } = fakeClient(deviceSelection)
       resumePending.mockResolvedValue(
-        errorResult('unknown_device_id', 'Unknown device id: tv_inconnu'),
+        errorResult('unknown_device_id', 'Unknown device id: tv_unknown'),
       )
       const runtime = createGuardedRuntime(client)
 
       expect(await runtime.respond(answer)).toStrictEqual(
-        failed('unknown_device_id', 'Unknown device id: tv_inconnu'),
+        failed('unknown_device_id', 'Unknown device id: tv_unknown'),
       )
       expect(await runtime.respond(answer)).toStrictEqual(
-        failed('unknown_device_id', 'Unknown device id: tv_inconnu'),
+        failed('unknown_device_id', 'Unknown device id: tv_unknown'),
       )
       expect(await runtime.respond(answer)).toStrictEqual(
         failed('interaction_aborted', ABORT_MESSAGE),
@@ -515,8 +533,8 @@ describe('createGuardedRuntime', () => {
         type: 'device_selection',
         prompt: 'Multiple "light" devices found. Please select one:',
         choices: [
-          { id: 'lamp_salon', label: 'Salon Lamp' },
-          { id: 'lamp_cuisine', label: 'Kitchen Lamp' },
+          { id: 'lamp_living_room', label: 'Living Room Lamp' },
+          { id: 'lamp_kitchen', label: 'Kitchen Lamp' },
         ],
       })
 
@@ -586,7 +604,7 @@ describe('createGuardedRuntime', () => {
       )
 
       getPendingInteraction.mockReturnValue(null)
-      const run = await runtime.runDsl('tv[salon].power = on')
+      const run = await runtime.runDsl('tv[living_room].power = on')
       expect(run).toStrictEqual({
         status: 'completed',
         result: { status: 'success', executed, errors: [] },
@@ -619,7 +637,7 @@ describe('createGuardedRuntime', () => {
       )
 
       getPendingInteraction.mockReturnValue(null)
-      const check = await runtime.check('camera[salon].power = on')
+      const check = await runtime.check('camera[living_room].power = on')
       expect(check).toStrictEqual(
         failed(
           'validation_error',
@@ -650,7 +668,7 @@ describe('createGuardedRuntime', () => {
       )
 
       getPendingInteraction.mockReturnValue(null)
-      const check = await runtime.check('tv[salon].power = on')
+      const check = await runtime.check('tv[living_room].power = on')
       expect(check).toStrictEqual({ status: 'completed' })
 
       getPendingInteraction.mockReturnValue(deviceSelection)

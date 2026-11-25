@@ -44,10 +44,10 @@ function makeDevice(
 function inventory() {
   const driver = new FlakyDriver()
   const devices = [
-    makeDevice(driver, 'light_1', 'light', 'salon', { power: false }),
-    makeDevice(driver, 'light_2', 'light', 'salon', { power: false }),
-    makeDevice(driver, 'light_3', 'light', 'salon', { power: false }),
-    makeDevice(driver, 'tv_salon', 'tv', 'salon', { power: false }),
+    makeDevice(driver, 'light_1', 'light', 'living_room', { power: false }),
+    makeDevice(driver, 'light_2', 'light', 'living_room', { power: false }),
+    makeDevice(driver, 'light_3', 'light', 'living_room', { power: false }),
+    makeDevice(driver, 'tv_living_room', 'tv', 'living_room', { power: false }),
   ]
   return { driver, devices }
 }
@@ -76,9 +76,9 @@ function harness(middleware: Middleware[]) {
   }
 }
 
-const ONE = '$l = @first(light[salon])\n$l.power = on'
-const ONE_OFF = '$l = @first(light[salon])\n$l.power = off'
-const ALL = '$l = @all(light[salon])\n$l.power = on'
+const ONE = '$l = @first(light[living_room])\n$l.power = on'
+const ONE_OFF = '$l = @first(light[living_room])\n$l.power = off'
+const ALL = '$l = @all(light[living_room])\n$l.power = on'
 
 let counter = 0
 function uniqueName(): string {
@@ -127,7 +127,7 @@ function fakeCtx(): MiddlewareContext {
 
 describe('suggestions', () => {
   it('opens one suggestion for a successful statement', async () => {
-    const { def, mw } = suggester({ data: { room: 'salon' } })
+    const { def, mw } = suggester({ data: { room: 'living_room' } })
     const h = harness([mw])
 
     const result = await h.run(ONE)
@@ -139,7 +139,7 @@ describe('suggestions', () => {
     expect(s!.id).toMatch(/^suggestion_/)
     expect(s!.targets).toEqual(['light_1'])
     expect(s!.question).toEqual(choiceQ)
-    expect(s!.data).toEqual({ room: 'salon' })
+    expect(s!.data).toEqual({ room: 'living_room' })
     expect(h.session.suggestions).toEqual(result.suggestions)
     expect(JSON.parse(JSON.stringify(h.session.suggestions))).toEqual(
       h.session.suggestions,
@@ -225,14 +225,14 @@ describe('suggestions', () => {
     const { def } = suggester()
     const mw: Middleware = async (ctx, next) => {
       def.suggest(ctx, choiceQ)
-      if (ctx.action.device.id === 'tv_salon') {
+      if (ctx.action.device.id === 'tv_living_room') {
         return { kind: 'blocked', middlewareName: 'guard', reason: 'no' }
       }
       return next()
     }
     const h = harness([mw])
 
-    const result = await h.run(`${ONE}\ntv[salon].power = on`)
+    const result = await h.run(`${ONE}\ntv[living_room].power = on`)
 
     expect(result.status).toBe('error')
     expect(result.suggestions).toBeUndefined()
@@ -244,7 +244,7 @@ describe('suggestions', () => {
     const { mw } = suggester()
     const h = harness([mw])
 
-    const result = await h.run('tv[salon].power?')
+    const result = await h.run('tv[living_room].power?')
 
     expect(result.status).toBe('success')
     expect(result.suggestions).toBeUndefined()
@@ -260,7 +260,7 @@ describe('suggestions', () => {
     const a = await h.run(ONE)
     expect(a.suggestions).toHaveLength(1)
 
-    const b = await h.run('tv[salon].power = on')
+    const b = await h.run('tv[living_room].power = on')
     expect(b.status).toBe('success')
     expect(b.suggestions).toBeUndefined()
     expect(h.session.suggestions ?? []).toEqual([])
@@ -291,7 +291,7 @@ describe('suggestions', () => {
       context: null,
     }
 
-    const rejected = await h.run('tv[salon].power = on')
+    const rejected = await h.run('tv[living_room].power = on')
 
     expect(rejected.errors[0]!.code).toBe('interaction_pending')
     expect(h.session.suggestions).toEqual(opened)
@@ -314,7 +314,7 @@ describe('suggestions', () => {
     const h = harness([mw])
 
     const result = await h.run(
-      '@if tv[salon].power? == off\ntv[salon].power = on\ntv[salon].volume = 5\n@endif',
+      '@if tv[living_room].power? == off\ntv[living_room].power = on\ntv[living_room].volume = 5\n@endif',
     )
 
     expect(result.status).toBe('success')

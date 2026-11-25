@@ -90,8 +90,8 @@ describe('runCommand with a stop', () => {
     const { stop, trigger } = makeStop()
 
     const promise = start(
-      runProgram('light[salon].power = on\nlight[chambre].power = on'),
-      { devices: [light('salon', driver), light('chambre', driver)] },
+      runProgram('light[living_room].power = on\nlight[bedroom].power = on'),
+      { devices: [light('living_room', driver), light('bedroom', driver)] },
       { stop },
     )
     await vi.advanceTimersByTimeAsync(100)
@@ -105,7 +105,7 @@ describe('runCommand with a stop', () => {
       'not_observable',
     )
     const writtenIds = driver.setProperty.mock.calls.map(call => call[0])
-    expect(writtenIds).toEqual(['light_salon'])
+    expect(writtenIds).toEqual(['light_living_room'])
     expect(vi.getTimerCount()).toBe(0)
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
@@ -122,13 +122,13 @@ describe('runCommand with a stop', () => {
 
     const promise = start(
       runProgram(
-        '$lights = @all(light[*])\n$lights.power = on\nlight[salon].power = off',
+        '$lights = @all(light[*])\n$lights.power = on\nlight[living_room].power = off',
       ),
       {
         devices: [
-          light('salon', driver),
-          light('chambre', driver),
-          light('cuisine', driver),
+          light('living_room', driver),
+          light('bedroom', driver),
+          light('kitchen', driver),
         ],
       },
       { stop },
@@ -143,9 +143,9 @@ describe('runCommand with a stop', () => {
     expect(result.completedStatements).toBe(2)
     expect(result.executed).toHaveLength(2)
     expect(result.executed[1]!.changes.map(c => c.deviceId).sort()).toEqual([
-      'light_chambre',
-      'light_cuisine',
-      'light_salon',
+      'light_bedroom',
+      'light_kitchen',
+      'light_living_room',
     ])
     expect(driver.setProperty).toHaveBeenCalledTimes(3)
     expect(vi.getTimerCount()).toBe(0)
@@ -170,8 +170,8 @@ describe('runCommand with a stop', () => {
     const { stop, trigger } = makeStop()
 
     const promise = start(
-      runProgram('light[salon].power = on'),
-      { devices: [light('salon', driver)] },
+      runProgram('light[living_room].power = on'),
+      { devices: [light('living_room', driver)] },
       { stop },
     )
     await vi.waitFor(() => expect(driver.setProperty).toHaveBeenCalled())
@@ -189,9 +189,9 @@ describe('runCommand with a stop', () => {
 
     const promise = start(
       runProgram(
-        '@if light[salon].power? == on\nlight[salon].power = off\n@endif',
+        '@if light[living_room].power? == on\nlight[living_room].power = off\n@endif',
       ),
-      { devices: [light('salon', driver)] },
+      { devices: [light('living_room', driver)] },
       { stop },
     )
     await vi.waitFor(() => expect(getProperty).toHaveBeenCalled())
@@ -207,13 +207,13 @@ describe('runCommand with a stop', () => {
   it('stop after completion or while awaiting interaction has no effect', async () => {
     const mock = new MockDriver()
     await mock.init({})
-    mock.seed('light_salon', { power: false })
-    mock.seed('light_chambre', { power: false })
-    const devices = [light('salon', mock), light('chambre', mock)]
+    mock.seed('light_living_room', { power: false })
+    mock.seed('light_bedroom', { power: false })
+    const devices = [light('living_room', mock), light('bedroom', mock)]
 
     const completed = makeStop()
     const success = await start(
-      runProgram('light[salon].power = on'),
+      runProgram('light[living_room].power = on'),
       { devices },
       { stop: completed.stop },
     )
@@ -239,10 +239,10 @@ describe('runCommand with a stop', () => {
       ...neverConfirming,
       subscribeProperty: () => () => {},
     })
-    const devices = [light('salon', driver), light('chambre', driver)]
+    const devices = [light('living_room', driver), light('bedroom', driver)]
     const { stop, trigger } = makeStop()
     const promise = start(
-      runProgram('light[salon].power = on\nlight[chambre].power = on'),
+      runProgram('light[living_room].power = on\nlight[bedroom].power = on'),
       { devices },
       { stop },
     )
@@ -254,7 +254,9 @@ describe('runCommand with a stop', () => {
     expect(interrupted.session._pendingProgram).toBeUndefined()
     expect(interrupted.session.pendingInteraction).toBeNull()
 
-    const next = runProgram('light[salon].power = off\ntv[salon].power = on')
+    const next = runProgram(
+      'light[living_room].power = off\ntv[living_room].power = on',
+    )
     const result = await Effect.runPromise(
       runCommand(next, { devices, session: interrupted.session }),
     )
@@ -271,8 +273,8 @@ describe('runCommand with a stop', () => {
     const { stop, trigger } = makeStop()
 
     const promise = start(
-      runProgram('light[salon].power = on'),
-      { devices: [light('salon', driver)], eventBus },
+      runProgram('light[living_room].power = on'),
+      { devices: [light('living_room', driver)], eventBus },
       { stop },
     )
     await vi.waitFor(() => expect(getProperty).toHaveBeenCalled())
@@ -294,8 +296,8 @@ describe('runCommand with a stop', () => {
     const driver = makeDriver({ getProperty })
 
     const result = await start(
-      runProgram('light[salon].power = on'),
-      { devices: [light('salon', driver)] },
+      runProgram('light[living_room].power = on'),
+      { devices: [light('living_room', driver)] },
       { stop: Effect.void },
     )
 
@@ -322,8 +324,8 @@ describe('runCommand with a stop', () => {
     const { stop, trigger } = makeStop()
 
     const promise = start(
-      runProgram('light[salon].power = on'),
-      { devices: [light('salon', driver)], middleware: [confirmLater] },
+      runProgram('light[living_room].power = on'),
+      { devices: [light('living_room', driver)], middleware: [confirmLater] },
       { stop },
     )
     await vi.waitFor(() => expect(entered).toBe(true))
@@ -344,9 +346,9 @@ describe('runCommand with a stop', () => {
   it('a stop during a batch records only the sent elements', async () => {
     const hungRead = new Promise<unknown>(() => {})
     const driver = makeDriver({
-      // The cuisine light never answers its pre-write read.
+      // The kitchen light never answers its pre-write read.
       getProperty: async (id: string) =>
-        id === 'light_cuisine' ? hungRead : false,
+        id === 'light_kitchen' ? hungRead : false,
     })
     const { stop, trigger } = makeStop()
 
@@ -354,9 +356,9 @@ describe('runCommand with a stop', () => {
       runProgram('$lights = @all(light[*])\n$lights.power = on'),
       {
         devices: [
-          light('salon', driver),
-          light('chambre', driver),
-          light('cuisine', driver),
+          light('living_room', driver),
+          light('bedroom', driver),
+          light('kitchen', driver),
         ],
       },
       { stop },
@@ -369,13 +371,15 @@ describe('runCommand with a stop', () => {
     expect(result.completedStatements).toBe(1)
     const batch = result.executed[1]!
     expect(batch.changes.map(c => c.deviceId).sort()).toEqual([
-      'light_chambre',
-      'light_salon',
+      'light_bedroom',
+      'light_living_room',
     ])
     expect(batch.resolvedDevices.map(d => d.id).sort()).toEqual([
-      'light_chambre',
-      'light_salon',
+      'light_bedroom',
+      'light_living_room',
     ])
-    expect(['light_chambre', 'light_salon']).toContain(result.session.it?.id)
+    expect(['light_bedroom', 'light_living_room']).toContain(
+      result.session.it?.id,
+    )
   })
 })

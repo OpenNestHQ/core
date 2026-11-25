@@ -66,10 +66,17 @@ function parse(dsl: string) {
 async function makeDevice(
   driver: TestDriver,
   driverConfig: Record<string, unknown> = {},
-  id = 'light_salon',
+  id = 'light_living_room',
 ): Promise<Device> {
   await driver.init()
-  return { id, type: 'light', room: 'salon', name: id, driver, driverConfig }
+  return {
+    id,
+    type: 'light',
+    room: 'living_room',
+    name: id,
+    driver,
+    driverConfig,
+  }
 }
 
 const TURN_ON = {
@@ -83,7 +90,7 @@ describe('ActionOutcome — verification', () => {
     const dev = await makeDevice(driver, TURN_ON)
 
     const result = await executeCommand(
-      { kind: 'run_program', program: parse('light[salon].turnOn()') },
+      { kind: 'run_program', program: parse('light[living_room].turnOn()') },
       { devices: [dev] },
     )
 
@@ -101,7 +108,7 @@ describe('ActionOutcome — verification', () => {
     const dev = await makeDevice(driver, TURN_ON)
 
     const result = await executeCommand(
-      { kind: 'run_program', program: parse('light[salon].turnOn()') },
+      { kind: 'run_program', program: parse('light[living_room].turnOn()') },
       { devices: [dev] },
     )
 
@@ -118,7 +125,7 @@ describe('ActionOutcome — verification', () => {
     const dev = await makeDevice(driver, { actions: { turnOn: {} } })
 
     const result = await executeCommand(
-      { kind: 'run_program', program: parse('light[salon].turnOn()') },
+      { kind: 'run_program', program: parse('light[living_room].turnOn()') },
       { devices: [dev] },
     )
 
@@ -135,7 +142,7 @@ describe('ActionOutcome — verification', () => {
     const dev = await makeDevice(driver, TURN_ON)
 
     const result = await executeCommand(
-      { kind: 'run_program', program: parse('light[salon].turnOn()') },
+      { kind: 'run_program', program: parse('light[living_room].turnOn()') },
       { devices: [dev] },
     )
 
@@ -152,7 +159,7 @@ describe('ActionOutcome — assignment and increment', () => {
     const dev = await makeDevice(driver, {})
 
     const result = await executeCommand(
-      { kind: 'run_program', program: parse('light[salon].power = on') },
+      { kind: 'run_program', program: parse('light[living_room].power = on') },
       { devices: [dev] },
     )
 
@@ -167,7 +174,7 @@ describe('ActionOutcome — assignment and increment', () => {
     const dev = await makeDevice(driver, {})
 
     const result = await executeCommand(
-      { kind: 'run_program', program: parse('light[salon].power = on') },
+      { kind: 'run_program', program: parse('light[living_room].power = on') },
       { devices: [dev] },
     )
 
@@ -179,11 +186,11 @@ describe('ActionOutcome — assignment and increment', () => {
 
   it('confirms an increment', async () => {
     const driver = new TestDriver()
-    driver.state.set('light_salon', { power: false, volume: 10 })
+    driver.state.set('light_living_room', { power: false, volume: 10 })
     const dev = await makeDevice(driver, {})
 
     const result = await executeCommand(
-      { kind: 'run_program', program: parse('light[salon].volume += 5') },
+      { kind: 'run_program', program: parse('light[living_room].volume += 5') },
       { devices: [dev] },
     )
 
@@ -201,7 +208,7 @@ describe('ActionOutcome — polling', () => {
     const dev = await makeDevice(driver, TURN_ON)
 
     const promise = executeCommand(
-      { kind: 'run_program', program: parse('light[salon].turnOn()') },
+      { kind: 'run_program', program: parse('light[living_room].turnOn()') },
       { devices: [dev] },
     )
     await vi.advanceTimersByTimeAsync(200)
@@ -221,7 +228,7 @@ describe('ActionOutcome — polling', () => {
     const dev = await makeDevice(driver, TURN_ON)
 
     const promise = executeCommand(
-      { kind: 'run_program', program: parse('light[salon].turnOn()') },
+      { kind: 'run_program', program: parse('light[living_room].turnOn()') },
       { devices: [dev] },
     )
     await vi.advanceTimersByTimeAsync(200)
@@ -278,10 +285,10 @@ describe('ActionOutcome — event verification', () => {
   async function makeEventDevice(driver: EventDriver): Promise<Device> {
     await driver.init()
     return {
-      id: 'light_salon',
+      id: 'light_living_room',
       type: 'light',
-      room: 'salon',
-      name: 'light_salon',
+      room: 'living_room',
+      name: 'light_living_room',
       driver,
       driverConfig: {},
     }
@@ -289,7 +296,7 @@ describe('ActionOutcome — event verification', () => {
 
   it('confirms immediately when the state already matches', async () => {
     const driver = new EventDriver()
-    driver.state.set('light_salon', { power: true })
+    driver.state.set('light_living_room', { power: true })
     const dev = await makeEventDevice(driver)
 
     const verification = await verifyState(
@@ -304,7 +311,7 @@ describe('ActionOutcome — event verification', () => {
 
   it('confirms once the driver signals a state change', async () => {
     const driver = new EventDriver()
-    driver.state.set('light_salon', { power: false })
+    driver.state.set('light_living_room', { power: false })
     const dev = await makeEventDevice(driver)
 
     const promise = verifyState(
@@ -316,7 +323,7 @@ describe('ActionOutcome — event verification', () => {
 
     await new Promise(resolve => setTimeout(resolve, 0))
 
-    driver.state.set('light_salon', { power: true })
+    driver.state.set('light_living_room', { power: true })
     driver.emitChange()
 
     const verification = await promise
@@ -327,7 +334,7 @@ describe('ActionOutcome — event verification', () => {
   it('falls back to mismatch when the driver cannot subscribe', async () => {
     const driver = new EventDriver()
     driver.subscribable = false
-    driver.state.set('light_salon', { power: false })
+    driver.state.set('light_living_room', { power: false })
     const dev = await makeEventDevice(driver)
 
     const verification = await verifyState(
@@ -344,7 +351,7 @@ describe('ActionOutcome — event verification', () => {
   it('times out when no event arrives', async () => {
     vi.useFakeTimers()
     const driver = new EventDriver()
-    driver.state.set('light_salon', { power: false })
+    driver.state.set('light_living_room', { power: false })
     const dev = await makeEventDevice(driver)
 
     const promise = verifyState(
@@ -376,10 +383,10 @@ describe('verifyStateEffect', () => {
       subscribeProperty: () => unsubscribe,
     }
     const dev: Device = {
-      id: 'light_salon',
+      id: 'light_living_room',
       type: 'light',
-      room: 'salon',
-      name: 'light_salon',
+      room: 'living_room',
+      name: 'light_living_room',
       driver,
       driverConfig: {},
     }
@@ -418,10 +425,10 @@ describe('verifyStateEffect event deadline', () => {
       },
     }
     return {
-      id: 'light_salon',
+      id: 'light_living_room',
       type: 'light',
-      room: 'salon',
-      name: 'light_salon',
+      room: 'living_room',
+      name: 'light_living_room',
       driver,
       driverConfig: {},
     }
@@ -490,7 +497,7 @@ describe('backward compatibility', () => {
     })
 
     expect(change).toEqual({
-      deviceId: 'light_salon',
+      deviceId: 'light_living_room',
       property: 'action:turnOn',
       oldValue: null,
       newValue: 'called',
@@ -504,15 +511,17 @@ describe('backward compatibility', () => {
     const result = await executeCommand(
       {
         kind: 'run_program',
-        program: parse('light[salon].power = on\nlight[salon].volume = 20'),
+        program: parse(
+          'light[living_room].power = on\nlight[living_room].volume = 20',
+        ),
       },
       { devices: [dev] },
     )
 
     expect(result.status).toBe('success')
     expect(result.executed).toHaveLength(2)
-    expect(await driver.getProperty('light_salon', 'power')).toBe(true)
-    expect(await driver.getProperty('light_salon', 'volume')).toBe(20)
+    expect(await driver.getProperty('light_living_room', 'power')).toBe(true)
+    expect(await driver.getProperty('light_living_room', 'volume')).toBe(20)
   })
 })
 
@@ -532,7 +541,7 @@ describe('ActionOutcome — verification defects', () => {
     const dev = await makeDevice(driver, TURN_ON)
 
     const result = await executeCommand(
-      { kind: 'run_program', program: parse('light[salon].turnOn()') },
+      { kind: 'run_program', program: parse('light[living_room].turnOn()') },
       { devices: [dev] },
     )
 

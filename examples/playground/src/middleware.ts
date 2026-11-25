@@ -32,11 +32,11 @@ export const quietVolume: Middleware = async (ctx, next) => {
   const choice = ask(ctx, {
     key: 'loud-volume',
     type: 'choice',
-    message: `${action.device.name}: le volume ${requested} est élevé. Que faire ?`,
+    message: `${action.device.name}: volume ${requested} is high. What should I do?`,
     options: [
-      { value: 'keep', label: `Garder ${requested}` },
-      { value: 'lower', label: `Baisser à ${QUIET_VOLUME}` },
-      { value: 'skip', label: 'Ne pas changer cet appareil' },
+      { value: 'keep', label: `Keep ${requested}` },
+      { value: 'lower', label: `Lower to ${QUIET_VOLUME}` },
+      { value: 'skip', label: "Don't change this device" },
     ],
   })
 
@@ -67,8 +67,8 @@ export const doorPin: Middleware = async (ctx, next) => {
   const pin = ask(ctx, {
     key: 'door-pin',
     type: 'text_input',
-    message: 'Code PIN pour déverrouiller la porte :',
-    placeholder: '4 chiffres',
+    message: 'PIN to unlock the door:',
+    placeholder: '4 digits',
     scope: 'statement',
   })
 
@@ -80,7 +80,7 @@ export const doorPin: Middleware = async (ctx, next) => {
 
 /**
  * Lighting ambiance: once lights are switched on, offers `cinema` (dim, warm
- * white) or `lecture` (bright, reading mode). Answer it with `:a <n> <value>`.
+ * white) or `reading` (bright, reading mode). Answer it with `:a <n> <value>`.
  *
  *   light[living_room].power = on
  */
@@ -121,10 +121,10 @@ export const suggestAmbiance: Middleware = async (ctx, next) => {
     ambiance.suggest(ctx, {
       key: 'ambiance',
       type: 'choice',
-      message: 'Quelle ambiance pour ces lumières ?',
+      message: 'Which ambiance for these lights?',
       options: [
-        { value: 'cinema', label: 'Cinéma (faible, blanc chaud)' },
-        { value: 'lecture', label: 'Lecture (forte, mode lecture)' },
+        { value: 'cinema', label: 'Cinema (dim, warm white)' },
+        { value: 'reading', label: 'Reading (bright, reading mode)' },
       ],
     })
   }

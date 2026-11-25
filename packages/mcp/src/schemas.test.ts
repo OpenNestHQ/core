@@ -14,7 +14,7 @@ void assignable
 
 describe('respondInputSchema', () => {
   const variants: RespondAnswer[] = [
-    { type: 'device_selection', deviceId: 'tv_salon' },
+    { type: 'device_selection', deviceId: 'tv_living_room' },
     { type: 'confirmation', confirmed: true },
     { type: 'text_input', text: 'hello' },
     { type: 'number_input', value: 42 },

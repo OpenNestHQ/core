@@ -10,12 +10,12 @@ describe('extractPromptDefinitions', () => {
   it('derives devices and rooms from instances', () => {
     const defs = extractPromptDefinitions(
       inventory({
-        rooms: ['salon'],
+        rooms: ['living_room'],
         devices: [
           {
             id: 'tv1',
             type: 'tv',
-            room: 'salon',
+            room: 'living_room',
             name: 'TV',
             driver: 'mock',
             properties: {
@@ -37,7 +37,7 @@ describe('extractPromptDefinitions', () => {
         { kind: 'action', name: 'play' },
       ],
     })
-    expect(defs.rooms).toEqual({ salon: {} })
+    expect(defs.rooms).toEqual({ living_room: {} })
   })
 
   it('enriches from definitions (description, range, enum, parameters)', () => {
@@ -47,7 +47,7 @@ describe('extractPromptDefinitions', () => {
           {
             id: 'tv1',
             type: 'tv',
-            room: 'salon',
+            room: 'living_room',
             name: 'TV',
             driver: 'mock',
             properties: {
@@ -106,7 +106,7 @@ describe('extractPromptDefinitions', () => {
           {
             id: 'tv1',
             type: 'tv',
-            room: 'salon',
+            room: 'living_room',
             name: 'TV',
             driver: 'mock',
             properties: {},
@@ -200,7 +200,7 @@ describe('extractPromptDefinitions', () => {
           {
             id: 'tv1',
             type: 'tv',
-            room: 'salon',
+            room: 'living_room',
             name: 'TV',
             driver: 'mock',
             properties: { power: { type: 'boolean' } },

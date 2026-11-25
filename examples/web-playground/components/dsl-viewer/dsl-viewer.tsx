@@ -12,12 +12,12 @@ export function DSLViewer() {
       <CardHeader className="py-2 px-3">
         <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
           <Code2 className="h-3.5 w-3.5" />
-          Programme DSL
+          DSL Program
         </CardTitle>
       </CardHeader>
       <CardContent className="flex-1 min-h-0 p-0">
         <pre className="h-full p-3 text-xs font-mono text-foreground whitespace-pre-wrap overflow-auto">
-          {state.dslSource || '// Aucun programme'}
+          {state.dslSource || '// No program'}
         </pre>
       </CardContent>
     </Card>
