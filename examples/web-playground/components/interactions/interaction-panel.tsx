@@ -20,7 +20,7 @@ export function InteractionPanel() {
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
-          Aucune interaction en attente
+          No pending interaction
         </CardContent>
       </Card>
     )
@@ -69,7 +69,7 @@ export function InteractionPanel() {
         {interaction.type !== 'device_selection' &&
           interaction.type !== 'confirmation' && (
             <div className="text-xs text-muted-foreground">
-              Type d&apos;interaction non supporté : {interaction.type}
+              Unsupported interaction type: {interaction.type}
             </div>
           )}
       </CardContent>
@@ -134,7 +134,7 @@ function ConfirmationView({
           onClick={onConfirm}
           className="flex-1 text-xs"
         >
-          Confirmer
+          Confirm
         </Button>
         <Button
           variant="destructive"
@@ -142,7 +142,7 @@ function ConfirmationView({
           onClick={onDeny}
           className="flex-1 text-xs"
         >
-          Annuler
+          Cancel
         </Button>
       </div>
     </div>

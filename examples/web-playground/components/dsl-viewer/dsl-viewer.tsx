@@ -17,7 +17,7 @@ export function DSLViewer() {
       </CardHeader>
       <CardContent className="flex-1 min-h-0 p-0">
         <pre className="h-full p-3 text-xs font-mono text-foreground whitespace-pre-wrap overflow-auto">
-          {state.dslSource || '// Aucun programme'}
+          {state.dslSource || '// No program'}
         </pre>
       </CardContent>
     </Card>

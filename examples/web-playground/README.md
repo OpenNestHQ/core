@@ -91,9 +91,9 @@ A "policy" is a VM [middleware](../../packages/vm/README.md#middleware).
 
 ## Demo scenario
 
-Click **Demo** or type `light[salon].power = on`:
+Click **Demo** or type `light[living_room].power = on`:
 
-1. The VM resolves `light[salon]` → finds 2 lights → triggers `device_selection` interaction
+1. The VM resolves `light[living_room]` → finds 2 lights → triggers `device_selection` interaction
 2. User selects a device → VM resumes
 3. The confirmation middleware fires → `confirmation` interaction
 4. User confirms → action executes

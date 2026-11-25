@@ -63,7 +63,7 @@ export function VMEventsPanel() {
         <ScrollArea className="h-full">
           {state.events.length === 0 ? (
             <div className="flex items-center justify-center h-full text-xs text-muted-foreground p-4">
-              Aucun événement
+              No events
             </div>
           ) : (
             <div className="flex flex-col font-mono">

@@ -43,9 +43,9 @@ Some middleware can offer an optional follow-up after a program ran (for example
 > light[living_room].power = on
 ...
 💡 Suggestions:
-  [1] Quelle ambiance pour ces lumières ? (Living Room Ceiling Light, Living Room Lamp)
-      [cinema] Cinéma (faible, blanc chaud)
-      [lecture] Lecture (forte, mode lecture)
+  [1] Which ambiance for these lights? (Living Room Ceiling Light, Living Room Lamp)
+      [cinema] Cinema (dim, warm white)
+      [reading] Reading (bright, reading mode)
   Answer with :a <n> <answer>
 
 > :a 1 cinema
@@ -102,7 +102,7 @@ The playground wires four middleware (`src/middleware.ts`, `src/index.ts`) to sh
 | `doorPin` | Unlocking a door asks for a PIN (`PLAYGROUND_DOOR_PIN`, default `1234`); a wrong PIN blocks the action |
 | `quietVolume` | A TV or speaker volume above 60 asks whether to keep it, lower it to 30, or skip that device |
 | `createConfirmationMiddleware` | Setting a thermostat temperature asks for confirmation |
-| `suggestAmbiance` | Switching a light on offers a `cinema` / `lecture` ambiance as a suggestion |
+| `suggestAmbiance` | Switching a light on offers a `cinema` / `reading` ambiance as a suggestion |
 
 ## OpenTelemetry (optional)
 
