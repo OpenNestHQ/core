@@ -1412,7 +1412,7 @@ describe('HADriver', () => {
       await driver.setProperty('d1', 'power', false, {
         properties: {
           power: {
-            entity: 'lock.porte',
+            entity: 'lock.door',
             set_service: 'lock.{value}',
           },
         },
@@ -2307,7 +2307,7 @@ describe('HADriver', () => {
 
       const driver = await initDriver()
       await driver.setProperty('d1', 'power', true, {
-        properties: { power: { entity: 'lock.porte' } },
+        properties: { power: { entity: 'lock.door' } },
       })
 
       expect(calls[0]!.url).toContain('/api/services/lock/lock')

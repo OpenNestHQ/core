@@ -65,7 +65,7 @@ describe('normalizePropertyConfig', () => {
 
   it('should map set_service without set_value_key to inferred set strategy', () => {
     const binding = normalizePropertyConfig({
-      entity: 'lock.porte',
+      entity: 'lock.door',
       set_service: 'lock.{value}',
     })
 

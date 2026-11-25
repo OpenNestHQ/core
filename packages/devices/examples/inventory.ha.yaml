@@ -79,7 +79,7 @@ devices:
   - id: thermostat_bedroom
     type: thermostat
     room: bedroom
-    name: Thermostat de la bedroom
+    name: Bedroom Thermostat
     driver: homeassistant
     properties:
       # No `get` declared → the default state strategy stays; write-only
@@ -152,7 +152,7 @@ devices:
   - id: tv_living_room
     type: tv
     room: living_room
-    name: TV du living_room
+    name: Living Room TV
     driver: homeassistant
     properties:
       power:
