@@ -312,7 +312,8 @@ Commands:${N}
 
 ${B}NL Mode:${N}
   Type natural language commands in NL mode (${C}:nl${N}).
-  Requires ${G}OPENAI_API_KEY${N} in ${C}.env${N} file.
+  Requires ${G}OPENAI_API_KEY${N} and/or ${G}OPENAI_BASE_URL${N} (OpenAI-compatible
+  provider, key optional) in the environment or a ${C}.env${N} file.
   Set ${C}OPENNEST_MODEL${N} to override the default model (openai/gpt-4o-mini).
 
 ${B}Tips:${N}

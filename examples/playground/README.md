@@ -68,15 +68,19 @@ The playground includes an AI agent (`:nl`) that translates natural language to 
 ```
 
 **Requirements:**
-- `OPENAI_API_KEY` environment variable (a warning is printed when switching to `:nl` without it)
-- Optional: `OPENAI_BASE_URL` for an OpenAI-compatible provider
+- `OPENAI_API_KEY` and/or `OPENAI_BASE_URL`, at least one of them (a warning is printed when switching to `:nl` with neither):
+  - `OPENAI_API_KEY` alone: OpenAI
+  - `OPENAI_BASE_URL`: an OpenAI-compatible provider; the key is optional, so a local server that needs none (Ollama, LM Studio...) works with the base URL only
 - Optional: `OPENNEST_MODEL` to override the default model (`openai/gpt-4o-mini`; only the part after the first `/` is sent as the model name)
 
 ```bash
-# examples/playground/.env
+# examples/playground/.env — OpenAI
 OPENAI_API_KEY=sk-...
-# OPENAI_BASE_URL=https://api.openai.com/v1
 # OPENNEST_MODEL=openai/gpt-4o
+
+# or a keyless OpenAI-compatible server
+# OPENAI_BASE_URL=http://localhost:11434/v1
+# OPENNEST_MODEL=ollama/llama3.1
 ```
 
 `pnpm --filter @opennest/playground run print:prompt` prints the system prompt sent to the model.

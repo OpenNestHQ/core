@@ -27,7 +27,7 @@ import {
   N,
   Rcol,
 } from './format.js'
-import { translateNlToDsl } from './agent.js'
+import { getNlConfig, translateNlToDsl } from './agent.js'
 import type { AttemptCallback } from './agent.js'
 import type { TelemetryHandle } from './telemetry.js'
 
@@ -551,9 +551,9 @@ export async function startRepl(
       return
     }
     if (trimmed === ':nl') {
-      if (!process.env['OPENAI_API_KEY']) {
+      if (!getNlConfig()) {
         process.stdout.write(
-          `  ${Rcol}Warning: OPENAI_API_KEY not set. NL mode requires an API key.${N}\n`,
+          `  ${Rcol}Warning: NL mode is not configured. Set OPENAI_API_KEY, or OPENAI_BASE_URL for an OpenAI-compatible provider.${N}\n`,
         )
       }
       state.nlMode = true
