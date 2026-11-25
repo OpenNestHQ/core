@@ -1,11 +1,18 @@
-import type { Device, DeviceSummary, Session, StateChange } from '@opennest/sdk'
+import type {
+  Device,
+  DeviceSummary,
+  Session,
+  StateChange,
+  SuggestionSummary,
+} from '@opennest/sdk'
 import { isAskContext } from '@opennest/vm'
 import type { AskContext, MissingParameter } from '@opennest/vm'
-import { toMissingParameterSummary } from './result.js'
+import { toMissingParameterSummary, toSuggestionPrompt } from './result.js'
 import type {
   InteractionChoice,
   InteractionPrompt,
   MissingParameterSummary,
+  SuggestionPrompt,
 } from './result.js'
 
 /** One condensed history entry: devices touched and state changes applied. */
@@ -28,11 +35,16 @@ export interface SessionSummary {
   /** At most the last `HISTORY_TAIL_LENGTH` history entries. */
   historyTail: SessionHistoryEntry[]
   pendingInteraction: InteractionPrompt | null
+  /** Open follow-up suggestions; omitted when there are none. */
+  suggestions?: SuggestionPrompt[]
 }
 
 const HISTORY_TAIL_LENGTH = 5
 
-export function toSessionSummary(session: Session): SessionSummary {
+export function toSessionSummary(
+  session: Session,
+  suggestions: SuggestionSummary[] = [],
+): SessionSummary {
   return {
     programId: session.programId,
     variables: projectVariables(session),
@@ -46,6 +58,9 @@ export function toSessionSummary(session: Session): SessionSummary {
       session.pendingInteraction === null
         ? null
         : toPendingInteractionPrompt(session.pendingInteraction),
+    ...(suggestions.length > 0
+      ? { suggestions: suggestions.map(toSuggestionPrompt) }
+      : {}),
   }
 }
 

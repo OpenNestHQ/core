@@ -5,11 +5,18 @@ import type { ToolResult } from './result.js'
 import { createGuardedRuntime } from './runtime.js'
 import type { InteractionClient } from './runtime.js'
 import {
+  answerSuggestionInputSchema,
   emptyInputSchema,
   respondInputSchema,
   runDslInputSchema,
 } from './schemas.js'
-import { cancelTool, getSessionTool, respondTool, runDslTool } from './tools.js'
+import {
+  answerSuggestionTool,
+  cancelTool,
+  getSessionTool,
+  respondTool,
+  runDslTool,
+} from './tools.js'
 
 export interface DeviceResourceEntry {
   id: string
@@ -90,6 +97,17 @@ export function createOpenNestServer(
       annotations: { destructiveHint: true, openWorldHint: true },
     },
     input => enqueue(() => respondTool(deps, input)).then(toMcpResult),
+  )
+  server.registerTool(
+    'answer_suggestion',
+    {
+      title: 'Answer a suggestion',
+      description:
+        "Answer an optional follow-up `suggestions[]` entry of a completed result, with the user's own answer. The `type` must match the suggestion.",
+      inputSchema: answerSuggestionInputSchema,
+      annotations: { destructiveHint: true, openWorldHint: true },
+    },
+    input => enqueue(() => answerSuggestionTool(deps, input)).then(toMcpResult),
   )
   server.registerTool(
     'cancel',

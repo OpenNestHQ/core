@@ -163,21 +163,22 @@ export function createAsk(): AskFn {
   }
 }
 
-function validateQuestion(question: AskQuestion): void {
+/** `caller` prefixes error messages: `ask` or `suggest`. */
+export function validateQuestion(question: AskQuestion, caller = 'ask'): void {
   if (question.key.trim() === '') {
-    throw new Error('ask(): question key must be a non-empty string')
+    throw new Error(`${caller}(): question key must be a non-empty string`)
   }
   switch (question.type) {
     case 'choice': {
       if (question.options.length === 0) {
         throw new Error(
-          `ask(): choice question "${question.key}" needs at least one option`,
+          `${caller}(): choice question "${question.key}" needs at least one option`,
         )
       }
       const values = new Set(question.options.map(o => o.value))
       if (values.size !== question.options.length) {
         throw new Error(
-          `ask(): choice question "${question.key}" has duplicate option values`,
+          `${caller}(): choice question "${question.key}" has duplicate option values`,
         )
       }
       return
@@ -189,7 +190,7 @@ function validateQuestion(question: AskQuestion): void {
       ] as const) {
         if (bound !== undefined && !Number.isFinite(bound)) {
           throw new Error(
-            `ask(): number question "${question.key}" has a non-finite ${name} (${bound}); bounds must be finite numbers`,
+            `${caller}(): number question "${question.key}" has a non-finite ${name} (${bound}); bounds must be finite numbers`,
           )
         }
       }
@@ -199,7 +200,7 @@ function validateQuestion(question: AskQuestion): void {
         question.min > question.max
       ) {
         throw new Error(
-          `ask(): number question "${question.key}" has min (${question.min}) > max (${question.max})`,
+          `${caller}(): number question "${question.key}" has min (${question.min}) > max (${question.max})`,
         )
       }
       return

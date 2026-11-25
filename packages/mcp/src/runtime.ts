@@ -3,6 +3,8 @@ import type {
   ResumeAnswer,
   RunResult,
   Session,
+  SuggestionResponse,
+  SuggestionSummary,
   UserInteraction,
 } from '@opennest/sdk'
 import { toToolResult } from './result.js'
@@ -16,12 +18,16 @@ export interface InteractionClient {
   getPendingInteraction(): UserInteraction | null
   cancel(): Promise<RunResult>
   getSession(): Session
+  getSuggestions(): SuggestionSummary[]
+  answerSuggestion(id: string, answer: SuggestionResponse): Promise<RunResult>
+  dismissSuggestion(id: string): boolean
 }
 
 export interface GuardedRuntime {
   runDsl(dsl: string): Promise<ToolResult>
   check(dsl: string): Promise<ToolResult>
   respond(answer: ResumeAnswer): Promise<ToolResult>
+  answerSuggestion(id: string, answer: SuggestionResponse): Promise<ToolResult>
 }
 
 export const DEFAULT_MAX_FAILED_RESUMES = 2
@@ -37,6 +43,18 @@ const RETRYABLE_CODES = [
   'invalid_response',
 ]
 
+// Codes `answerSuggestion` reports as-is: toToolResult would flatten them
+// to `execution_failed`. Only `invalid_response` spends the retry budget;
+// `interaction_type_mismatch` neither spends nor resets it.
+const SUGGESTION_ERROR_CODES = [
+  'suggestion_not_found',
+  'suggestion_unavailable',
+  'interaction_type_mismatch',
+  'invalid_response',
+]
+
+const SUGGESTION_ABORT_MESSAGE =
+  'Too many invalid answers; this suggestion was dismissed. Other suggestions and the session are unchanged.'
 const RUN_DSL_BLOCKED_MESSAGE =
   'Resolve the pending interaction with `respond`, or call `cancel`. `run_dsl` is disabled until then.'
 const CHECK_BLOCKED_MESSAGE =
@@ -107,6 +125,8 @@ export function createGuardedRuntime(
   const maxFailedResumes =
     options?.maxFailedResumes ?? DEFAULT_MAX_FAILED_RESUMES
   let failedResumes = 0
+  // Invalid-answer counters per suggestion id, separate from `respond`'s.
+  const failedSuggestions = new Map<string, number>()
   // Length of `session.history` when the current program started: the SDK's
   // `executed` is the whole history, so results are sliced from here.
   let executedBaseline = 0
@@ -143,6 +163,8 @@ export function createGuardedRuntime(
       return coreErrorResult(error)
     }
     failedResumes = 0
+    // A new command drops every open suggestion, and their counters.
+    failedSuggestions.clear()
     return toToolResult(result, { executedFrom: executedBaseline })
   }
 
@@ -217,5 +239,58 @@ export function createGuardedRuntime(
     return toToolResult(result, { executedFrom: executedBaseline })
   }
 
-  return { runDsl, check, respond }
+  const answerSuggestion = async (
+    id: string,
+    answer: SuggestionResponse,
+  ): Promise<ToolResult> => {
+    let pending: UserInteraction | null
+    try {
+      pending = client.getPendingInteraction()
+    } catch (error) {
+      return coreErrorResult(error)
+    }
+    if (pending !== null) {
+      return blockedResult(
+        'interaction_pending',
+        'Resolve the pending interaction with `respond`, or call `cancel`. `answer_suggestion` is disabled until then.',
+        pending,
+      )
+    }
+    let result: RunResult
+    try {
+      executedBaseline = client.getSession().history.length
+      result = await client.answerSuggestion(id, answer)
+    } catch (error) {
+      return coreErrorResult(error)
+    }
+    const code = result.errors[0]?.code
+    if (
+      result.status === 'error' &&
+      code !== undefined &&
+      SUGGESTION_ERROR_CODES.includes(code)
+    ) {
+      const message = result.errors.map(error => error.message).join('; ')
+      if (code !== 'invalid_response') {
+        // A wrong answer type spends no budget and leaves the counter as is.
+        if (code !== 'interaction_type_mismatch') failedSuggestions.delete(id)
+        return failedResult(code, message)
+      }
+      const count = (failedSuggestions.get(id) ?? 0) + 1
+      if (count > maxFailedResumes) {
+        failedSuggestions.delete(id)
+        try {
+          client.dismissSuggestion(id)
+        } catch {
+          // dismissal is best-effort once the retry budget is exhausted
+        }
+        return failedResult('suggestion_aborted', SUGGESTION_ABORT_MESSAGE)
+      }
+      failedSuggestions.set(id, count)
+      return failedResult(code, message)
+    }
+    failedSuggestions.delete(id)
+    return toToolResult(result, { executedFrom: executedBaseline })
+  }
+
+  return { runDsl, check, respond, answerSuggestion }
 }

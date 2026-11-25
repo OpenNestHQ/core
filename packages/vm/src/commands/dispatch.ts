@@ -10,6 +10,8 @@ import { runPromiseRethrowingOriginal } from '../effect/run.js'
 import { makeStopToken, neverStop, toVMResult } from '../effect/stop.js'
 import type { EffectVMResult, StopToken } from '../effect/stop.js'
 import { interpretProgramEffect } from '../interpreter.js'
+import { clearSuggestionRun } from '../suggestions/collect.js'
+import { answerSuggestionEffect } from '../suggestions/answer.js'
 
 export interface RunOptions {
   /**
@@ -70,6 +72,8 @@ function dispatch(
           error => Effect.succeed(interactionErrorResult(error, context)),
         ),
       )
+    case 'answer_suggestion':
+      return answerSuggestionEffect(command, context, stop)
     case 'cancel_execution':
       return Effect.succeed({
         status: 'success',
@@ -130,6 +134,11 @@ function runProgram(
     // Each new program is its own run: later features key data by programId.
     if (context.session !== undefined) {
       context.session.programId = crypto.randomUUID()
+      // A real new command ends the previous suggestions' window.
+      delete context.session.suggestions
+      clearSuggestionRun(context.session)
+      // A follow-up left by a failed run must never be resumed in its place.
+      delete context.session._pendingFollowUp
     }
 
     return interpretProgramEffect(

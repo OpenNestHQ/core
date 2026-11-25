@@ -5,6 +5,8 @@ import type {
   ResumeAnswer,
   RunResult,
   Session,
+  SuggestionResponse,
+  SuggestionSummary,
   UserInteraction,
 } from '@opennest/sdk'
 import { createGuardedRuntime, DEFAULT_MAX_FAILED_RESUMES } from './runtime.js'
@@ -132,6 +134,10 @@ function fakeClient(pending: UserInteraction | null) {
   const resumePending = vi.fn<(answer: ResumeAnswer) => Promise<RunResult>>()
   const getPendingInteraction = vi.fn((): UserInteraction | null => pending)
   const cancel = vi.fn<() => Promise<RunResult>>()
+  const getSuggestions = vi.fn((): SuggestionSummary[] => [])
+  const answerSuggestion =
+    vi.fn<(id: string, answer: SuggestionResponse) => Promise<RunResult>>()
+  const dismissSuggestion = vi.fn<(id: string) => boolean>(() => true)
   const session = { history: [] as unknown[] }
   const getSession = vi.fn(() => session as unknown as Session)
   const client: InteractionClient = {
@@ -141,6 +147,9 @@ function fakeClient(pending: UserInteraction | null) {
     resumePending,
     getPendingInteraction,
     cancel,
+    getSuggestions,
+    answerSuggestion,
+    dismissSuggestion,
   }
   return {
     client,
@@ -149,11 +158,78 @@ function fakeClient(pending: UserInteraction | null) {
     resumePending,
     getPendingInteraction,
     cancel,
+    answerSuggestion,
+    dismissSuggestion,
+    setPending(next: UserInteraction | null) {
+      pending = next
+    },
     session,
   }
 }
 
 describe('createGuardedRuntime', () => {
+  describe('answerSuggestion budget', () => {
+    const suggestionAnswer: SuggestionResponse = {
+      type: 'number_input',
+      value: 500,
+    }
+
+    it('still aborts when invalid answers alternate with a wrong type', async () => {
+      const { client, answerSuggestion, dismissSuggestion } = fakeClient(null)
+      const runtime = createGuardedRuntime(client)
+      const invalid = errorResult('invalid_response', 'out of range')
+      const mismatch = errorResult('interaction_type_mismatch', 'wrong type')
+      answerSuggestion
+        .mockResolvedValueOnce(invalid)
+        .mockResolvedValueOnce(mismatch)
+        .mockResolvedValueOnce(invalid)
+        .mockResolvedValueOnce(mismatch)
+        .mockResolvedValueOnce(invalid)
+
+      const codes: string[] = []
+      for (let i = 0; i < 5; i++) {
+        const r = await runtime.answerSuggestion('s1', suggestionAnswer)
+        codes.push((r as { error: { code: string } }).error.code)
+      }
+
+      expect(codes).toEqual([
+        'invalid_response',
+        'interaction_type_mismatch',
+        'invalid_response',
+        'interaction_type_mismatch',
+        'suggestion_aborted',
+      ])
+      expect(dismissSuggestion).toHaveBeenCalledWith('s1')
+    })
+
+    it('keeps the suggestion counter separate from respond failures', async () => {
+      const fake = fakeClient(deviceSelection)
+      const runtime = createGuardedRuntime(fake.client)
+      const invalid = errorResult('invalid_response', 'bad')
+      fake.resumePending.mockResolvedValue(invalid)
+      fake.answerSuggestion.mockResolvedValue(invalid)
+
+      fake.setPending(null)
+      for (let i = 0; i < 2; i++) {
+        expect(
+          await runtime.answerSuggestion('s1', suggestionAnswer),
+        ).toMatchObject({ error: { code: 'invalid_response' } })
+      }
+      // respond's own budget was not spent by the suggestion failures.
+      fake.setPending(deviceSelection)
+      for (let i = 0; i < 2; i++) {
+        expect(await runtime.respond(answer)).toMatchObject({
+          error: { code: 'invalid_response' },
+        })
+      }
+      // ...and neither did respond's failures spend the suggestion's.
+      fake.setPending(null)
+      expect(
+        await runtime.answerSuggestion('s1', suggestionAnswer),
+      ).toMatchObject({ error: { code: 'suggestion_aborted' } })
+    })
+  })
+
   describe('runDsl guard', () => {
     it('blocks run_dsl while an interaction is pending without calling the core', async () => {
       const { client, runDsl, analyze } = fakeClient(deviceSelection)

@@ -1,5 +1,6 @@
 import type { Action, Program, Statement } from '@opennest/lang-core'
 import type { UserResponse } from '../interactions/types.js'
+import type { SuggestionResponse } from '../suggestions/types.js'
 
 export interface RunProgramCommand {
   kind: 'run_program'
@@ -27,9 +28,17 @@ export interface CancelExecutionCommand {
   kind: 'cancel_execution'
 }
 
+/** Answers an open suggestion: runs its follow-up as a new, middleware-gated execution. */
+export interface AnswerSuggestionCommand {
+  kind: 'answer_suggestion'
+  suggestionId: string
+  response: SuggestionResponse
+}
+
 export type VMCommand =
   | RunProgramCommand
   | ExecuteActionCommand
   | ExecuteStatementCommand
   | ResumeInteractionCommand
   | CancelExecutionCommand
+  | AnswerSuggestionCommand

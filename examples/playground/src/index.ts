@@ -1,7 +1,7 @@
 import { OpenNestClient, createConfirmationMiddleware } from '@opennest/sdk'
 import type { PlannedAction, Middleware } from '@opennest/sdk'
 import { createPlaygroundRegistry } from './devices.js'
-import { doorPin, quietVolume } from './middleware.js'
+import { doorPin, quietVolume, suggestAmbiance } from './middleware.js'
 import { startRepl } from './repl.js'
 import { initTelemetry } from './telemetry.js'
 
@@ -21,7 +21,12 @@ async function main(): Promise<void> {
     },
   })
 
-  const middleware: Middleware[] = [doorPin, quietVolume, confirmThermostat]
+  const middleware: Middleware[] = [
+    doorPin,
+    quietVolume,
+    confirmThermostat,
+    suggestAmbiance,
+  ]
 
   const client = new OpenNestClient({
     devices: registry,

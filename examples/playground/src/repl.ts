@@ -7,10 +7,13 @@ import type {
   DeviceSelectionInteraction,
   ResumeAnswer,
   RunResult,
+  SuggestionResponse,
+  SuggestionQuestion,
 } from '@opennest/sdk'
 import {
   formatSuccess,
   formatInteraction,
+  formatSuggestions,
   formatErrors,
   formatParseErrors,
   formatDevices,
@@ -48,6 +51,31 @@ function createState(
   }
 }
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+  ? Omit<T, K>
+  : never
+
+/** Parses a typed answer to a text, number or choice question; null if invalid. */
+function parseInputAnswer(
+  question: DistributiveOmit<SuggestionQuestion, 'key'>,
+  trimmed: string,
+): SuggestionResponse | null {
+  if (question.type === 'text_input') {
+    return { type: 'text_input', text: trimmed }
+  }
+  if (question.type === 'number_input') {
+    const value = Number(trimmed)
+    if (trimmed === '' || !Number.isFinite(value)) return null
+    return { type: 'number_input', value }
+  }
+  const byValue = question.options.find(o => o.value === trimmed)
+  const byIndex = /^\d+$/.test(trimmed)
+    ? question.options[parseInt(trimmed, 10) - 1]
+    : undefined
+  const chosen = byValue ?? byIndex
+  return chosen ? { type: 'choice', value: chosen.value } : null
+}
+
 function presentResult(
   result: RunResult,
   prevHistoryLen: number,
@@ -56,6 +84,10 @@ function presentResult(
     process.stdout.write(formatSuccess(result, prevHistoryLen) + '\n')
   } else if (result.status === 'success') {
     process.stdout.write('  (no-ops)\n\n')
+  }
+
+  if (result.suggestions && result.suggestions.length > 0) {
+    process.stdout.write(formatSuggestions(result.suggestions) + '\n')
   }
 
   if (result.status === 'awaiting_interaction') {
@@ -159,35 +191,21 @@ async function handleInteraction(
       type: 'action_parameter',
       values,
     }
-  } else if (interaction.type === 'text_input') {
-    response = {
-      type: 'text_input',
-      text: trimmed,
-    }
-  } else if (interaction.type === 'number_input') {
-    const value = Number(trimmed)
-    if (trimmed === '' || !Number.isFinite(value)) {
-      process.stdout.write('  Invalid number.\n\n')
+  } else if (
+    interaction.type === 'text_input' ||
+    interaction.type === 'number_input' ||
+    interaction.type === 'choice'
+  ) {
+    const parsed = parseInputAnswer(interaction, trimmed)
+    if (!parsed) {
+      process.stdout.write(
+        interaction.type === 'number_input'
+          ? '  Invalid number.\n\n'
+          : '  Invalid choice.\n\n',
+      )
       return null
     }
-    response = {
-      type: 'number_input',
-      value,
-    }
-  } else if (interaction.type === 'choice') {
-    const byValue = interaction.options.find(o => o.value === trimmed)
-    const byIndex = /^\d+$/.test(trimmed)
-      ? interaction.options[parseInt(trimmed, 10) - 1]
-      : undefined
-    const chosen = byValue ?? byIndex
-    if (!chosen) {
-      process.stdout.write('  Invalid choice.\n\n')
-      return null
-    }
-    response = {
-      type: 'choice',
-      value: chosen.value,
-    }
+    response = parsed
   } else {
     process.stdout.write('  Unsupported interaction type.\n\n')
     return null
@@ -199,6 +217,30 @@ async function handleInteraction(
 
   const result = await state.client.resumePending(response)
 
+  state.telemetry?.endCycle(result.status === 'awaiting_interaction')
+  return presentResult(result, prevHistoryLen)
+}
+
+async function answerSuggestion(
+  state: State,
+  n: number,
+  answer: string,
+): Promise<UserInteraction | null> {
+  const open = state.client.getSuggestions()
+  const suggestion = open[n - 1]
+  if (!suggestion) {
+    process.stdout.write('  No such suggestion.\n\n')
+    return null
+  }
+  const response = parseInputAnswer(suggestion.question, answer.trim())
+  if (!response) {
+    process.stdout.write('  Invalid answer.\n\n')
+    return null
+  }
+
+  const prevHistoryLen = state.client.getSession().history.length
+  state.telemetry?.beginCycle()
+  const result = await state.client.answerSuggestion(suggestion.id, response)
   state.telemetry?.endCycle(result.status === 'awaiting_interaction')
   return presentResult(result, prevHistoryLen)
 }
@@ -262,6 +304,7 @@ const COMMANDS = [
   ':{',
   ':}',
   ':cancel',
+  ':a',
   ':nl',
   ':dsl',
 ]
@@ -492,6 +535,19 @@ export async function startRepl(
 
       state.telemetry?.endCycle(false)
       process.stdout.write('Session reset.\n\n')
+      return
+    }
+    const answerMatch = /^:a\s+(\d+)(?:\s+(.*))?$/.exec(trimmed)
+    if (answerMatch) {
+      pendingInteraction = await answerSuggestion(
+        state,
+        parseInt(answerMatch[1]!, 10),
+        answerMatch[2] ?? '',
+      )
+      return
+    }
+    if (trimmed === ':a' || trimmed.startsWith(':a ')) {
+      process.stdout.write('  Usage: :a <n> <answer>\n\n')
       return
     }
     if (trimmed === ':nl') {

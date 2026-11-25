@@ -44,5 +44,27 @@ describe('buildInstructions', () => {
   it('documents invalid_response as retryable', () => {
     expect(text).toContain('invalid_response')
     expect(text).toMatch(/invalid_response[^\n]*retr/i)
+    expect(text).toMatch(
+      /invalid_response[^\n]*`respond`[^\n]*`answer_suggestion`[^\n]*same `suggestionId`/,
+    )
+  })
+
+  it('documents suggestions and answer_suggestion', () => {
+    expect(text).toContain('answer_suggestion')
+    expect(text).toMatch(/never required/i)
+    expect(text).toMatch(/never answer one on the user's behalf/i)
+    expect(text).toMatch(/next `run_dsl` drops all open suggestions/)
+    expect(text).toMatch(/`run_dsl` and `answer_suggestion` are `blocked`/)
+    expect(text).toMatch(
+      /suggestion_unavailable[^\n]*not registered in this runtime/,
+    )
+    expect(text).not.toMatch(/devices are gone/)
+    for (const code of [
+      'suggestion_not_found',
+      'suggestion_unavailable',
+      'suggestion_aborted',
+    ]) {
+      expect(text).toContain(code)
+    }
   })
 })
