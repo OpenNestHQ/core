@@ -141,7 +141,7 @@ const answer: ResumeAnswer = {
 
 const wrongTypeAnswer: ResumeAnswer = {
   type: 'text_input',
-  text: 'the living_room one',
+  text: 'the living room one',
 }
 
 function fakeClient(pending: UserInteraction | null) {

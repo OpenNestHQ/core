@@ -76,7 +76,7 @@ export function createPlaygroundDevices(): PlaygroundFixture {
       id: 'thermostat_living_room',
       type: 'thermostat',
       room: 'living_room',
-      name: 'Thermostat Living Room',
+      name: 'Living Room Thermostat',
       initialState: { temperature: 21 },
     },
     {

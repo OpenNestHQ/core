@@ -85,8 +85,8 @@ describe('parseHomeDSL', () => {
     })
 
     it('should parse enum value with underscores', () => {
-      expect(parseHomeDSL('tv.source = bathroom')).toEqual(
-        result([assignment([seg('tv'), seg('source')], 'bathroom')]),
+      expect(parseHomeDSL('tv.source = living_room')).toEqual(
+        result([assignment([seg('tv'), seg('source')], 'living_room')]),
       )
     })
 

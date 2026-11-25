@@ -23,7 +23,7 @@ const client = new OpenNestClient({
       id: 'tv_living_room',
       type: 'tv',
       room: 'living_room',
-      name: 'Living room TV',
+      name: 'Living Room TV',
       driver,
       driverConfig: {},
     },
