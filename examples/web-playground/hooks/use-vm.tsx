@@ -143,7 +143,7 @@ export function VMProvider({ children }: { children: ReactNode }) {
       type: 'ADD_MESSAGE',
       message: buildChatMessage(
         'system',
-        '**Middleware actifs :** ' +
+        '**Active middleware:** ' +
           adapterRef.current
             .getPolicies()
             .map(p => p.name)

@@ -577,7 +577,7 @@ describe('capability rendering', () => {
                 name: 'mode',
                 type: 'enum',
                 values: ['silent', 'turbo'],
-                description: 'Mode de nettoyage',
+                description: 'Cleaning mode',
               },
             ],
           },
@@ -585,7 +585,7 @@ describe('capability rendering', () => {
       },
       {},
     ).prompt()
-    expect(prompt).toContain('- clean(mode?: silent|turbo — Mode de nettoyage)')
+    expect(prompt).toContain('- clean(mode?: silent|turbo — Cleaning mode)')
   })
 })
 

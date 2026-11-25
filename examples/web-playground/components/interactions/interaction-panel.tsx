@@ -31,7 +31,7 @@ export function InteractionPanel() {
       <CardHeader className="py-2 px-3">
         <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
           <MessageSquareWarning className="h-3.5 w-3.5" />
-          Interaction requise
+          Interaction required
           <Badge variant="warning" className="ml-auto">
             {interaction.type}
           </Badge>

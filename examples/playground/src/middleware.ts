@@ -68,7 +68,7 @@ export const doorPin: Middleware = async (ctx, next) => {
     key: 'door-pin',
     type: 'text_input',
     message: 'PIN to unlock the door:',
-    placeholder: '4 chiffres',
+    placeholder: '4 digits',
     scope: 'statement',
   })
 
