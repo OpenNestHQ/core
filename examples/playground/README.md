@@ -1,19 +1,21 @@
 # @opennest/playground
 
-Interactive TUI REPL for testing HomeDSL with 14 mock devices across 4 rooms.
+Interactive TUI REPL for testing HomeDSL with 14 mock devices across 3 rooms (`living_room`, `bedroom`, `entrance`), plus a natural-language mode that translates natural language into HomeDSL with an LLM.
 
 ## Quick Start
 
 ```bash
-pnpm run start
+pnpm run start    # from the repo root; builds, then launches the REPL
 ```
+
+The playground loads a `.env` file from its working directory at startup (`process.loadEnvFile()`; with `pnpm run start` that is `examples/playground/`) and exits with an `ENOENT` error if there is none, so create one first, even an empty one (see [NL Mode](#nl-mode) for its content).
 
 ## Modes
 
 | Mode | Command | Description |
 |---|---|---|
-| **HomeDSL** | *(default)* | Type HomeDSL statements directly |
-| **Natural Language** | `:nl` | Type natural language, AI translates to HomeDSL |
+| **HomeDSL** | *(default)* | Type HomeDSL statements directly (see the [HomeDSL reference](../../packages/lang-core/README.md#homedsl-reference)) |
+| **Natural Language** | `:nl` | Type natural language, an AI translates it to HomeDSL |
 
 ## Commands
 
@@ -23,37 +25,88 @@ pnpm run start
 | `:devices` | `:d` | List all devices |
 | `:session` | `:s` | Show session state (variables, history, `$it`) |
 | `:reset` | `:r` | Reset session |
+| `:a <n> <answer>` | — | Answer open suggestion `n` (see [Suggestions](#suggestions)) |
 | `:nl` | — | Switch to natural language mode |
 | `:dsl` | — | Switch to HomeDSL mode |
-| `:{` | — | Start multi-line input |
-| `:}` | — | End multi-line input |
+| `:{` | — | Start multi-line input (executed on `:}` or a blank line) |
+| `:}` | — | End multi-line input and execute it |
+| `:cancel` | — | While an interaction is pending, cancel it (`:q` also cancels) |
 | `:quit` | `:q` | Exit |
+
+When a statement is ambiguous or needs approval, the REPL asks a question: type the number of the device, `y`/`n` for a confirmation, or the requested value.
+
+### Suggestions
+
+Some middleware can offer an optional follow-up after a program ran (for example, which ambiance to apply once lights are switched on). The REPL prints them as a numbered **Suggestions** list; answer one with `:a <n> <answer>`, where `<answer>` is a choice value or its index, a number or text depending on the question:
+
+```text
+> light[living_room].power = on
+...
+💡 Suggestions:
+  [1] Quelle ambiance pour ces lumières ? (Living Room Ceiling Light, Living Room Lamp)
+      [cinema] Cinéma (faible, blanc chaud)
+      [lecture] Lecture (forte, mode lecture)
+  Answer with :a <n> <answer>
+
+> :a 1 cinema
+```
+
+The statements a suggestion runs are listed under the result with a `↳ suggestion` marker, so they can be told apart from the ones you typed.
 
 ## NL Mode
 
-Translates natural language to HomeDSL using OpenAI (or compatible API).
+The playground includes an AI agent (`:nl`) that translates natural language to HomeDSL, validates the result with the parser and retries (up to 5 attempts) on parse errors:
+
+```text
+[NL] > turn on all lights in the living room and set the tv volume to 20
+  Translated to HomeDSL:
+  $lights = @all(light[living_room])
+  $lights.power = on
+  $tv = @oneof(tv[living_room])
+  $tv.volume = 20
+  ✓ OK
+```
 
 **Requirements:**
-- `OPENAI_API_KEY` environment variable
-- Optional: `OPENAI_BASE_URL` for alternative providers
-- Optional: `OPENNEST_MODEL` to override default model (`openai/gpt-4o-mini`)
+- `OPENAI_API_KEY` environment variable (a warning is printed when switching to `:nl` without it)
+- Optional: `OPENAI_BASE_URL` for an OpenAI-compatible provider
+- Optional: `OPENNEST_MODEL` to override the default model (`openai/gpt-4o-mini`; only the part after the first `/` is sent as the model name)
 
 ```bash
-# .env file
+# examples/playground/.env
 OPENAI_API_KEY=sk-...
 # OPENAI_BASE_URL=https://api.openai.com/v1
 # OPENNEST_MODEL=openai/gpt-4o
 ```
 
+`pnpm --filter @opennest/playground run print:prompt` prints the system prompt sent to the model.
+
 ## Devices
 
-14 mock devices across 4 rooms:
+14 mock devices across 3 rooms, defined in [`inventory.yaml`](./inventory.yaml):
 
 | Room | Devices |
 |---|---|
-| salon | 2 TVs, 2 lights, thermostat, speaker, vacuum |
-| chambre | TV, light, speaker, fan |
-| entrée | camera, door, switch |
+| `living_room` | 2 TVs, 2 lights, thermostat, speaker, vacuum |
+| `bedroom` | TV, light, speaker, fan |
+| `entrance` | camera, door, switch |
+
+Owners (`Alice`, `Bob`, `kids`, `everybody`) and tags are set on some devices, so selectors such as `light[owner:Alice]` work.
+
+## Demo middleware
+
+The playground wires four middleware (`src/middleware.ts`, `src/index.ts`) to showcase the [VM middleware and interactions](../../packages/vm/README.md#middleware):
+
+| Middleware | Behavior |
+|---|---|
+| `doorPin` | Unlocking a door asks for a PIN (`PLAYGROUND_DOOR_PIN`, default `1234`); a wrong PIN blocks the action |
+| `quietVolume` | A TV or speaker volume above 60 asks whether to keep it, lower it to 30, or skip that device |
+| `createConfirmationMiddleware` | Setting a thermostat temperature asks for confirmation |
+| `suggestAmbiance` | Switching a light on offers a `cinema` / `lecture` ambiance as a suggestion |
+
+## OpenTelemetry (optional)
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` (an OTLP/HTTP traces URL such as `http://localhost:4318/v1/traces`) to export every run as spans through [`@opennest/vm-opentelemetry`](../../packages/vm-opentelemetry/README.md). `OTEL_SERVICE_NAME` overrides the service name (default `opennest-playground`). Without the endpoint, tracing is off.
 
 ## Tab Completion
 
