@@ -17,7 +17,7 @@ No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm w
 | `packages/vm` | `@opennest/vm` | interpreter: `executeCommand()`, resolution, middleware, interactions, validation, tracing, verification; also `@opennest/vm/effect` | `lang-core`, `devices` (+ `effect`) |
 | `packages/vm-opentelemetry` | `@opennest/vm-opentelemetry` | OpenTelemetry trace sink for the VM `ExecutionTrace` | `@opentelemetry/api` (dev: `vm`, types only) |
 | `packages/sdk` | `@opennest/sdk` | Deterministic execution facade (`OpenNestClient`) over parser + devices + VM | `lang-core`, `devices`, `vm` |
-| `packages/mcp` | `@opennest/mcp` | Stdio MCP server exposing the runtime (HomeDSL execution, interactions, session) to AI agents | `sdk`, `vm`, `devices` |
+| `packages/mcp` | `@opennest/mcp` | Stdio MCP server exposing the runtime (HomeDSL execution, interactions, suggestions, session) to AI agents | `sdk`, `vm`, `devices` |
 | `examples/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `sdk` |
 
 Cross-package deps use `"workspace:*"` in package.json, resolved by pnpm.
@@ -41,7 +41,10 @@ pnpm run test
 # Test a single package
 pnpm --filter @opennest/vm run test
 
-# Generate HomeAgent prompt markdown
+# Test all packages with coverage (what CI runs; config: vitest.coverage.config.ts)
+pnpm run test:coverage
+
+# Regenerate packages/lang-core/example-prompt.md
 pnpm run build:prompt
 
 # Run playground REPL
@@ -131,14 +134,14 @@ Key flags:
 - **VM**: `executeCommand(command: VMCommand, context: VMContext) → Promise<VMResult>` in `packages/vm/src/commands/dispatch.ts`. Single Promise entry point, a façade over `runCommand` (see "Effect core"). Delegates to the interpreter for `run_program`, handles `resume_interaction` and `cancel_execution` directly.
 - **VM (Effect)**: `runCommand(command, context, options?: RunOptions) → Effect<EffectVMResult, VMInfraError>`, exported from `@opennest/vm/effect`.
 - **Parser**: `parseHomeDSL(source: string) → ParseResult` in `packages/lang-core/src/parser/parser.ts`.
-- **Prompt**: `generateHomeAgentPrompt(config?: PromptConfig) → string` in `packages/lang-core/src/prompt/generator.ts`.
-- **Registry**: `DeviceRegistry.fromYaml(yaml: string)` in `packages/devices/src/registry.ts`.
-- **AST Builders**: `buildProgram()`, `buildAction()`, `buildAssignment()`, `buildQuery()`, `buildIncrement()`, `buildRoomSelector()` in `packages/lang-core/src/ast/builders.ts`.
+- **Prompt**: `new OpenNestPrompt(devices, rooms, owners?, tags?).prompt(options?)` in `packages/lang-core/src/prompt/generator.ts` (defaults: `DEFAULT_DEVICES`, `DEFAULT_ROOMS`, `DEFAULT_OWNERS`, `DEFAULT_TAGS`). `OpenNestClient.buildPrompt()` wraps it.
+- **Registry**: `DeviceRegistry.fromYaml(path: string)` (reads the inventory from a YAML **file path**) in `packages/devices/src/registry.ts`.
+- **AST Builders**: `buildProgram()`, `buildAction()`, `buildAssignment()`, `buildQuery()`, `buildIncrement()`, `buildRoomSelector()`, `buildOwnerSelector()`, `buildTagSelector()` in `packages/lang-core/src/ast/builders.ts`.
 - **SDK**: `OpenNestClient` in `packages/sdk/src/client.ts` — high-level facade (`parse`/`execute`/`runDsl`/`resume`/`cancel`/`getSession`) + `buildPrompt` + `analyze`. See `packages/sdk/README.md` for the full surface.
 
 ### VMCommand layer
 
-`executeCommand` accepts a discriminated union of 5 commands:
+`executeCommand` accepts a discriminated union of 6 commands:
 
 | Command | `kind` | Purpose |
 |---|---|---|
@@ -147,6 +150,7 @@ Key flags:
 | `ExecuteStatementCommand` | `"execute_statement"` | Execute a single statement, optionally scoped to `deviceId` |
 | `ResumeInteractionCommand` | `"resume_interaction"` | Resume after a user interaction with `UserResponse` |
 | `CancelExecutionCommand` | `"cancel_execution"` | Cancel and reset session to empty |
+| `AnswerSuggestionCommand` | `"answer_suggestion"` | Answer an open follow-up suggestion (`suggestionId`, `response`) |
 
 Commands `execute_action` and `execute_statement` build a `Program` internally via the AST builders from `lang-core`. When a `deviceId` is provided, the context's device list is filtered to that single device (scoped execution).
 
@@ -155,7 +159,7 @@ Commands `execute_action` and `execute_statement` build a `Program` internally v
 - `VMContext = { devices: Device[], session?: Session, middleware?: Middleware[], eventBus?: VMEventBus }`. Devices embed a `DeviceDriver` instance, not a driver name.
 - `Device` = `{ id, type, room, name, driver: DeviceDriver, driverConfig }`.
 - `DeviceDriver` (in `packages/devices/src/drivers/interface.ts`) exposes: `name`, `init()`, `getProperty()`, `setProperty()`, `executeAction()`. The `getProperty()`, `setProperty()`, and `executeAction()` methods each accept an optional trailing `runtime?: DriverRuntimeContext` argument (`{ programId: string, signal?: AbortSignal }`) identifying the current program run. `signal` aborts reads at any time; a write already sent is never aborted (the signal is only checked before sending). Optional methods: `whenReady()`, `validateDeviceConfig()`, `getVerificationStrategy()`, `subscribeProperty()` (see "State verification").
-- `Session` carries: `programId` (stable per program run), `variables`, `argVariables` (named action-argument bundles), `it`, `history`, `cursor`, `resolvedIds`, `variableResolvedIds`, `variableModifiers`, `pendingInteraction`, `_pendingProgram`.
+- `Session` carries: `programId` (stable per program run), `variables`, `argVariables` (named action-argument bundles), `it`, `history`, `cursor`, `resolvedIds`, `variableResolvedIds`, `variableModifiers`, `pendingInteraction`, `_pendingProgram`, and the optional `suggestions` (open follow-up suggestions, plain JSON), `_suggestionCandidates` (internal: suggestions being collected during a run) and `_pendingFollowUp` (internal: a suspended follow-up run).
 
 ### VMResult
 
@@ -203,6 +207,7 @@ Interaction types (`type` field discriminates):
 | `text_input` | `{ message, placeholder? }` | Free-form text input |
 | `number_input` | `{ message, min?, max? }` | Numeric input |
 | `choice` | `{ message, options[] }` | Pick from a list |
+| `action_parameter` | `{ message, deviceName, action, missing[] }` | Required action parameters are missing (declared in `driverConfig.actions.<name>.parameters`) |
 
 Interaction handlers follow the `InteractionHandler` interface:
 ```typescript
@@ -216,6 +221,14 @@ interface InteractionHandler<TContext = unknown> {
 Handlers are registered in a global registry (`packages/vm/src/interactions/registry.ts`). Device selection is one handler among many. Adding a new interaction type requires only a new handler + registration — zero VM core changes.
 
 The caller sends a `UserResponse` (discriminated union matching `UserInteraction`) via `executeCommand({ kind: "resume_interaction", response }, ...)` with the updated session.
+
+### Asking questions (`ask()`)
+
+`createAsk()` (`packages/vm/src/interactions/ask.ts`) returns an `ask(ctx, question)` function for middleware. The question is `text_input`, `number_input` or `choice` with a `key`; the first call suspends the run (`awaiting_interaction`), and once the user answers via `resume_interaction`, the replayed middleware gets the answer synchronously. Answers are stored per `programId` in an in-memory `AskStore`, and invalid answers are rejected with the retryable `invalid_response` code. Details: [`packages/vm/README.md`](packages/vm/README.md#asking-questions-with-ask).
+
+### Follow-up suggestions
+
+A suggestion is a follow-up question offered **after** a successful run; it never blocks the run. `defineSuggestion(name, { apply })` (`suggestions/define.ts`) registers a definition in a process-wide **by-name registry** and returns an object whose `.suggest(ctx, question)` is called from a middleware. Lifetime rule: suggestions open only when the run ends in `success` (listed in `VMResult.suggestions` and stored in `session.suggestions`), and are cleared by a new `run_program` / `execute_action` / `execute_statement` and by `cancel_execution`. Answer with `executeCommand({ kind: 'answer_suggestion', suggestionId, response }, ctx)`: the follow-up runs through the middleware pipeline (it may pause; its in-flight state is `session._pendingFollowUp`). Error codes: `suggestion_not_found`, `suggestion_unavailable` (name not defined in this runtime). The MCP server exposes this as the `answer_suggestion` tool. Details: [`packages/vm/README.md`](packages/vm/README.md#suggestions).
 
 ### Intent filtering (auto-disambiguation)
 
@@ -276,12 +289,12 @@ Each `ExecutionNode` records: `id`, `parentId`, `kind`, `name`, `status` (Runnin
 
 ```typescript
 // Usage
-import { DefaultVMEventBus, DefaultExecutionTracer } from "@opennest/vm";
-const eventBus = new DefaultVMEventBus();
+import { DefaultVMEventBus, DefaultExecutionTracer, executeCommand } from "@opennest/vm";
 const tracer = new DefaultExecutionTracer();
-eventBus.on(tracer.consume.bind(tracer));
+const eventBus = new DefaultVMEventBus(tracer); // feeds every event to the tracer
 const result = await executeCommand(command, { devices, session, eventBus });
-const trace: ExecutionTrace = tracer.getTrace(); // { root: ExecutionNode }
+const trace = tracer.getTrace(); // { root: ExecutionNode }
+// Other listeners: eventBus.subscribe(event => …) returns an unsubscribe function.
 ```
 
 ### Collections & wildcards
@@ -289,7 +302,7 @@ const trace: ExecutionTrace = tracer.getTrace(); // { root: ExecutionNode }
 - `@all(type[room])` — expands to all matches, bypasses ambiguity, executes in batch.
 - `@first(type[room])` — selects the first match.
 - `[*]` wildcard room selector — matches devices in all rooms but stays subject to ambiguity (use `@all` for batch).
-- Variables remember their modifier: `$lights = @all(light[salon])` binds with `@all` semantics.
+- Variables remember their modifier: `$lights = @all(light[living_room])` binds with `@all` semantics.
 
 ### `it` context
 
@@ -300,22 +313,23 @@ The last successfully resolved device is stored in `session.it`. It persists acr
 Variables MUST be prefixed with `$` in the DSL (both assignment and usage). The parser strips the `$` and sets `Segment.isVariable = true` on the first segment. The VM resolver uses `isVariable` to dispatch to variable resolution instead of checking `session.variables` at runtime.
 
 ```
-$tv = tv[salon]       # assignment — name stored as "tv"
+$tv = tv[living_room]       # assignment — name stored as "tv"
 $tv.power = on        # usage — path[0].isVariable === true
 ```
 
 - `$it` is the context reference — auto-managed by the VM, cannot be reassigned (`$it = ...` is rejected).
-- Room selectors on variable references (`$tv[salon].power`) are rejected.
+- Room selectors on variable references (`$tv[living_room].power`) are rejected.
 
 ### Default devices & rooms
 
 Defined in `packages/lang-core/src/prompt/defaults.ts`:
 - **11 device types**: tv, light, speaker, thermostat, fan, blind, camera, vacuum, nightstand, door, switch
-- **6 rooms** (French): `salon`, `chambre`, `cuisine`, `bureau`, `salle_de_bain`, `entrée`
+- **6 rooms** (English): `living_room`, `bedroom`, `kitchen`, `office`, `bathroom`, `entrance`
 
 ## Project file structure
 
 ```
+vitest.coverage.config.ts  # Root vitest config used by `pnpm run test:coverage` (and CI)
 packages/
   devices/
     src/
@@ -345,14 +359,14 @@ packages/
         defaults.ts      # DEFAULT_DEVICES, DEFAULT_ROOMS
         types.ts         # PromptConfig, DeviceDefinition, etc.
     scripts/
-      build-prompt.js    # Generates homeagent-prompt.md
-    homeagent-prompt.md  # Generated output (260 lines)
+      build-prompt.js    # Generates example-prompt.md
+    example-prompt.md    # Generated output
   vm/
     src/
       index.ts           # Public API — re-exports everything below
       types.ts           # VMContext, VMResult, Session, Device, ResolutionFilter, etc.
       commands/
-        types.ts         # VMCommand discriminated union (5 variants)
+        types.ts         # VMCommand discriminated union (6 variants)
         dispatch.ts      # runCommand() (Effect, RunOptions.stop) + executeCommand() Promise façade
       effect/
         errors.ts        # DriverError, MiddlewareError, VMInfraError, toOriginalError
@@ -364,9 +378,22 @@ packages/
       interactions/
         types.ts         # UserInteraction, UserResponse, InteractionHandler, PendingInteraction
         registry.ts      # Handler registry + createInteraction()/processInteractionResponse()
-        device-selection.ts # DeviceSelectionHandler
+        device-selection.ts # deviceSelectionHandler
         confirmation.ts  # ConfirmationHandler
+        action-parameter.ts # actionParameterHandler (missing required action parameters)
+        ask.ts           # createAsk() / AskStore — middleware questions (text_input, number_input, choice)
+        input-answer.ts  # checkInputAnswer() — validates ask() answers
+        input-handlers.ts # Handlers for text_input / number_input / choice
+        register-defaults.ts # Registers the default interaction handlers
+        errors.ts        # InteractionError, InteractionErrorCode
         index.ts         # Re-exports + auto-registration of handlers
+      suggestions/
+        define.ts        # defineSuggestion() — named suggestion + suggest()
+        registry.ts      # By-name suggestion registry
+        collect.ts       # Candidate collection / open-suggestion bookkeeping
+        answer.ts        # answer_suggestion command handling
+        follow-up.ts     # Follow-up steps and run (middleware-gated)
+        types.ts         # OpenSuggestion, SuggestionResponse, FollowUpStep, ...
       middleware/
         types.ts         # Middleware, PlannedAction, PipelineOutcome, signals
         pipeline.ts       # runMiddlewarePipeline() — sequential chain evaluator
@@ -401,7 +428,7 @@ packages/
       index.ts           # Public API — createOpenNestServer, createGuardedRuntime, types
       cli.ts             # stdio entry point (bin): loads inventory, connects transport, clean shutdown
       server.ts          # createOpenNestServer() — registers tools/resources, single-flight queue
-      tools.ts           # run_dsl / respond / cancel / get_session handlers
+      tools.ts           # run_dsl / respond / answer_suggestion / cancel / get_session handlers
       runtime.ts         # createGuardedRuntime() — pending guard, retry budget, executed scoping
       result.ts          # ToolResult envelope, InteractionPrompt projection, deviceFailures
       session.ts         # toSessionSummary() — sanitized session projection
@@ -412,7 +439,7 @@ examples/
     src/
       index.ts           # main(): creates devices, starts REPL
       devices.ts         # createPlaygroundRegistry() — 14 mock devices
-      repl.ts            # startRepl() — readline-based interactive loop (handles 5 interaction types)
+      repl.ts            # startRepl() — readline-based interactive loop (handles all 6 interaction types)
       format.ts          # Colored output formatting
   web-playground/
     lib/vm/              # VM adapter + device fixtures
@@ -424,9 +451,9 @@ examples/
 - **ESLint** — flat config at repo root `eslint.config.js`: `@eslint/js` recommended + `typescript-eslint` recommended + `eslint-config-prettier` (disables style rules that conflict with Prettier). ESLint covers correctness only; formatting is Prettier's job.
 - **Prettier** — config at `.prettierrc.json`: `semi: false`, `singleQuote: true`, `arrowParens: avoid`. Write code matching this style (no semicolons, single quotes) so `format` doesn't churn.
 - `lint` targets `examples/` + `packages/`; `format`/`format:check` target `(examples|packages)/**/*.+(js|ts|json|tsx)`.
-- No CI and no pre-commit hooks — run `pnpm run lint` and `pnpm run format:check` manually.
+- CI (`.github/workflows/ci.yml`) runs on PRs and pushes to `main`/`develop`: install, lint, format check, build, tests with coverage (`pnpm run test:coverage`), a coverage report (PR comment when the OpenNest GitHub App is configured, Job Summary otherwise) and a check that the generated prompt is up to date. There are no pre-commit hooks — run `pnpm run lint` and `pnpm run format:check` locally.
 
 ## Generated files (do not edit)
 
-- `homeagent-prompt.md` in `packages/lang-core/` — generated by `pnpm run build:prompt`.
+- `example-prompt.md` in `packages/lang-core/` — generated by `pnpm run build:prompt`.
 - `dist/` in each package — generated by `pnpm run build`.
