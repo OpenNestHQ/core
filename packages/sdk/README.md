@@ -20,17 +20,17 @@ await driver.init({})
 const client = new OpenNestClient({
   devices: [
     {
-      id: 'tv_salon',
+      id: 'tv_living_room',
       type: 'tv',
-      room: 'salon',
-      name: 'Salon TV',
+      room: 'living_room',
+      name: 'Living room TV',
       driver,
       driverConfig: {},
     },
   ],
 })
 
-const result = await client.runDsl('tv[salon].power = on') // status: 'success'
+const result = await client.runDsl('tv[living_room].power = on') // status: 'success'
 ```
 
 ## API
@@ -187,7 +187,7 @@ if (result.status === 'awaiting_interaction' && result.interaction) {
   const resumed = await client.resume({
     interactionId: interaction.id,
     type: 'device_selection',
-    deviceId: 'tv_salon',
+    deviceId: 'tv_living_room',
   })
 }
 ```
@@ -211,7 +211,7 @@ leaving the interaction pending, so you can retry) with one of these codes:
 ```ts
 const resumed = await client.resumePending({
   type: 'device_selection',
-  deviceId: 'tv_salon',
+  deviceId: 'tv_living_room',
 })
 ```
 
@@ -237,7 +237,8 @@ the vm README's [Suggestions](../vm/README.md#suggestions). The original command
 has already executed; the user may answer later, or never.
 
 ```ts
-const result = await client.runDsl('$lights = @all(light[salon])\n$lights.power = on')
+// Assumes a registered suggestion whose question is a `choice` with a `relax` option.
+const result = await client.runDsl('$lights = @all(light[living_room])\n$lights.power = on')
 
 // 1. list — also available any time via client.getSuggestions()
 for (const suggestion of result.suggestions ?? []) {
@@ -273,7 +274,9 @@ removes only that suggestion and appends the suggestions its follow-up opens.
 | `interaction_type_mismatch` | The answer's `type` differs from the suggestion's question type.                       |
 | `invalid_response`          | The answer violates the question's constraints (`min`/`max`, `choice` options, …).     |
 
-The last two are retryable: the suggestion stays open. Suggestions are dropped
+Every rejection leaves the suggestion open. `interaction_pending`,
+`interaction_type_mismatch` and `invalid_response` can be retried (resolve the
+pending interaction first for `interaction_pending`). Suggestions are dropped
 when a new run starts and by `cancel()`.
 
 ## Exports

@@ -165,7 +165,7 @@ import { block, type Middleware } from '@opennest/vm'
 const noBathroomSpeaker: Middleware = async (ctx, next) => {
   if (
     ctx.action.device.type === 'speaker' &&
-    ctx.action.device.room === 'salle_de_bain'
+    ctx.action.device.room === 'bathroom'
   ) {
     return block('Speakers are disabled in the bathroom')
   }
@@ -193,7 +193,7 @@ const askTemperature: Middleware = (ctx, next) => {
     const value = ask(ctx, {
       key: 'temperature',
       type: 'number_input',
-      message: 'Quelle température ?',
+      message: 'Which temperature?',
       min: 10,
       max: 30,
     })
@@ -283,7 +283,7 @@ After each write, the VM checks whether the device reached the expected state, a
 }
 ```
 
-**Expected state.** For `set_property` and `increment_property`, the expected state is the new property value. For `invoke_action`, it comes from the device config, `driverConfig.actions.<name>.expectedEffects` (property → value); an action without `expectedEffects` is `not_observable`. Reads produce no outcome.
+**Expected state.** For `set_property` and `increment_property`, the expected state is the new property value. For `invoke_action`, it comes from the device config, `driverConfig.actions.<name>.expectedEffects` (property → value); an action without `expectedEffects` is `not_observable`. A successful read produces no outcome; a failed read is reported as `execution: failed` (with `verification: not_observable`) and the run continues.
 
 **Strategy.** The driver chooses how to observe through its optional `getVerificationStrategy()`:
 

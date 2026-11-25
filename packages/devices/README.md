@@ -450,7 +450,7 @@ entries are left untouched (retrocompatibility). Failures cite the device
 and the property or action:
 
 ```text
-Invalid HA binding for device "lamp_salon", property "power": unknown get kind "levitate" (expected: state, attribute, template, script, service_response)
+Invalid HA binding for device "lamp_living_room", property "power": unknown get kind "levitate" (expected: state, attribute, template, script, service_response)
 ```
 
 Checked among others: unknown strategy kinds, service id format

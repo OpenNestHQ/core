@@ -157,7 +157,7 @@ Commands `execute_action` and `execute_statement` build a `Program` internally v
 ### VM context types
 
 - `VMContext = { devices: Device[], session?: Session, middleware?: Middleware[], eventBus?: VMEventBus }`. Devices embed a `DeviceDriver` instance, not a driver name.
-- `Device` = `{ id, type, room, name, driver: DeviceDriver, driverConfig }`.
+- `Device` = `{ id, type, room, name, owners?, tags?, driver: DeviceDriver, driverConfig }`.
 - `DeviceDriver` (in `packages/devices/src/drivers/interface.ts`) exposes: `name`, `init()`, `getProperty()`, `setProperty()`, `executeAction()`. The `getProperty()`, `setProperty()`, and `executeAction()` methods each accept an optional trailing `runtime?: DriverRuntimeContext` argument (`{ programId: string, signal?: AbortSignal }`) identifying the current program run. `signal` aborts reads at any time; a write already sent is never aborted (the signal is only checked before sending). Optional methods: `whenReady()`, `validateDeviceConfig()`, `getVerificationStrategy()`, `subscribeProperty()` (see "State verification").
 - `Session` carries: `programId` (stable per program run), `variables`, `argVariables` (named action-argument bundles), `it`, `history`, `cursor`, `resolvedIds`, `variableResolvedIds`, `variableModifiers`, `pendingInteraction`, `_pendingProgram`, and the optional `suggestions` (open follow-up suggestions, plain JSON), `_suggestionCandidates` (internal: suggestions being collected during a run) and `_pendingFollowUp` (internal: a suspended follow-up run).
 
@@ -168,7 +168,8 @@ Commands `execute_action` and `execute_statement` build a `Program` internally v
   session: Session,
   executed: ExecutedStatement[],
   interaction: UserInteraction | null,
-  errors: VMError[] }
+  errors: VMError[],
+  suggestions?: OpenSuggestion[] }  // only on success, when non-empty
 ```
 
 ### Effect core
@@ -356,7 +357,7 @@ packages/
         parser.ts        # parseHomeDSL() + ParseError
       prompt/
         generator.ts     # OpenNestPrompt
-        defaults.ts      # DEFAULT_DEVICES, DEFAULT_ROOMS
+        defaults.ts      # DEFAULT_DEVICES, DEFAULT_ROOMS, DEFAULT_OWNERS, DEFAULT_TAGS
         types.ts         # PromptOptions, DeviceDefinition, RoomDefinition, OwnerDefinition, TagDefinition, ...
     scripts/
       build-prompt.js    # Generates example-prompt.md
