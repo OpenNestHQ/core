@@ -13,22 +13,22 @@ drivers:
     token: <long-lived-access-token>
 
 rooms:
-  - salon
-  - chambre
+  - living_room
+  - bedroom
 
 devices:
   # Boolean light: explicit state get + inferred set. `inferred` resolves the
   # service from the entity domain (light.turn_on / light.turn_off); it can
   # only write booleans.
-  - id: lamp_salon
+  - id: lamp_living_room
     type: light
-    room: salon
-    name: Lampe du salon
+    room: living_room
+    name: Living Room Lamp
     driver: homeassistant
     properties:
       power:
         type: boolean
-        entity: light.salon
+        entity: light.living_room
         get:
           kind: state
         set:
@@ -38,15 +38,15 @@ devices:
   # Speaker: attribute get + service set writing the value under a declared
   # key, service actions with target/data, and a script action taking a
   # declared argument.
-  - id: speaker_salon
+  - id: speaker_living_room
     type: speaker
-    room: salon
-    name: Enceinte du salon
+    room: living_room
+    name: Living Room Speaker
     driver: homeassistant
     properties:
       volume:
         type: number
-        entity: media_player.salon
+        entity: media_player.living_room
         get:
           kind: attribute
           attribute: volume_level
@@ -56,7 +56,7 @@ devices:
           key: volume_level
       playing:
         type: boolean
-        entity: media_player.salon
+        entity: media_player.living_room
         get:
           kind: state
         set:
@@ -66,20 +66,20 @@ devices:
         kind: service
         service: media_player.media_play
         target:
-          entity_id: media_player.salon
+          entity_id: media_player.living_room
       play_favorites:
         kind: script
         script: script.play_favorites
         fields:
-          speaker: media_player.salon
+          speaker: media_player.living_room
 
   # Thermostat: script set carrying the value through $value, mapped hvac
   # mode with an explicit map_set, plain attribute gets, a template read
   # and a service_response read.
-  - id: thermostat_chambre
+  - id: thermostat_bedroom
     type: thermostat
-    room: chambre
-    name: Thermostat de la chambre
+    room: bedroom
+    name: Thermostat de la bedroom
     driver: homeassistant
     properties:
       # No `get` declared → the default state strategy stays; write-only
@@ -95,7 +95,7 @@ devices:
       hvac_mode:
         type: string
         values: [auto, heat, cool, off]
-        entity: climate.chambre
+        entity: climate.bedroom
         get:
           kind: attribute
           attribute: hvac_mode
@@ -118,7 +118,7 @@ devices:
       # is a convention, not an enforced contract.
       current_temperature:
         type: number
-        entity: climate.chambre
+        entity: climate.bedroom
         get:
           kind: attribute
           attribute: current_temperature
@@ -149,15 +149,15 @@ devices:
 
   # TV: state get on a media player entity, a script read (websocket response
   # variable) and a service action with fixed data.
-  - id: tv_salon
+  - id: tv_living_room
     type: tv
-    room: salon
-    name: TV du salon
+    room: living_room
+    name: TV du living_room
     driver: homeassistant
     properties:
       power:
         type: boolean
-        entity: media_player.salon
+        entity: media_player.living_room
         get:
           kind: state
         set:
@@ -171,6 +171,6 @@ devices:
         kind: service
         service: media_player.volume_mute
         target:
-          entity_id: media_player.salon
+          entity_id: media_player.living_room
         data:
           is_volume_muted: true

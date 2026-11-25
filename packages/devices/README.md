@@ -166,7 +166,7 @@ contract:
 properties:
   power:
     type: boolean
-    entity: light.salon
+    entity: light.living_room
     get: { kind: state }
     set: { kind: inferred }
 ```
@@ -200,7 +200,7 @@ properties:
 properties:
   volume:
     type: number
-    entity: media_player.salon
+    entity: media_player.living_room
     get:
       kind: attribute
       attribute: volume_level
@@ -286,7 +286,7 @@ flushed once the socket is ready again.
 properties:
   power:
     type: boolean
-    entity: light.salon
+    entity: light.living_room
     set: { kind: inferred }
 ```
 
@@ -300,7 +300,7 @@ writing one through an undeclared set resolves the invalid
 properties:
   volume:
     type: number
-    entity: media_player.salon
+    entity: media_player.living_room
     set:
       kind: service
       service: media_player.volume_set
@@ -348,7 +348,7 @@ properties:
   hvac_mode:
     type: string
     values: [auto, heat, cool, off]
-    entity: climate.salon
+    entity: climate.living_room
     get:
       kind: attribute
       attribute: hvac_mode
@@ -403,12 +403,12 @@ actions:
     kind: service
     service: media_player.media_play
     target:
-      entity_id: media_player.salon
+      entity_id: media_player.living_room
   mute:
     kind: service
     service: media_player.volume_mute
     target:
-      entity_id: media_player.salon
+      entity_id: media_player.living_room
     data:
       is_volume_muted: true
 ```

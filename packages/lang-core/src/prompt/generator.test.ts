@@ -238,14 +238,14 @@ describe('OpenNestPrompt', () => {
   describe('with custom rooms', () => {
     const customRooms: Record<string, RoomDefinition> = {
       garage: {},
-      jardin: {},
+      garden: {},
     }
 
     const prompt = new OpenNestPrompt(DEFAULT_DEVICES, customRooms).prompt()
 
     it('should only list the provided rooms', () => {
       expect(prompt).toContain('- garage')
-      expect(prompt).toContain('- jardin')
+      expect(prompt).toContain('- garden')
       expect(prompt).not.toContain('- living_room')
       expect(prompt).not.toContain('- bedroom')
     })
@@ -259,7 +259,7 @@ describe('OpenNestPrompt', () => {
   // --- Custom instruction ---
 
   describe('with custom instruction', () => {
-    const instruction = 'Always prefer salon when no room is specified.'
+    const instruction = 'Always prefer living_room when no room is specified.'
     const prompt = new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt({
       customInstruction: instruction,
     })
@@ -296,7 +296,7 @@ describe('OpenNestPrompt', () => {
 
   describe('with additional rules', () => {
     const rules = [
-      'Always prefer salon when no room is specified.',
+      'Always prefer living_room when no room is specified.',
       'Never output explanations.',
     ]
     const prompt = new OpenNestPrompt(DEFAULT_DEVICES, DEFAULT_ROOMS).prompt({
@@ -306,7 +306,7 @@ describe('OpenNestPrompt', () => {
     it('should contain the additional rules section', () => {
       expect(prompt).toContain('# ADDITIONAL RULES')
       expect(prompt).toContain(
-        '- Always prefer salon when no room is specified.',
+        '- Always prefer living_room when no room is specified.',
       )
       expect(prompt).toContain('- Never output explanations.')
     })
@@ -544,25 +544,25 @@ describe('capability rendering', () => {
             kind: 'property',
             name: 'power',
             type: 'power',
-            description: 'Allume ou éteint',
+            description: 'Turns on or off',
           },
         ]),
       },
       {},
     ).prompt()
-    expect(prompt).toContain('- power (on/off) — Allume ou éteint')
+    expect(prompt).toContain('- power (on/off) — Turns on or off')
   })
 
   it('should render action description inline', () => {
     const prompt = new OpenNestPrompt(
       {
         robot: makeDevice([
-          { kind: 'action', name: 'clean', description: 'Nettoie la pièce' },
+          { kind: 'action', name: 'clean', description: 'Cleans the room' },
         ]),
       },
       {},
     ).prompt()
-    expect(prompt).toContain('- clean() — Nettoie la pièce')
+    expect(prompt).toContain('- clean() — Cleans the room')
   })
 
   it('should render parameter description inline', () => {

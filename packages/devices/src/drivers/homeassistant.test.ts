@@ -574,7 +574,7 @@ describe('HADriver', () => {
           hvac_mode: {
             type: 'string',
             values: ['auto', 'heat', 'cool', 'off'],
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             map: { cooling: 'cool', heating: 'heat' },
             get: { kind: 'attribute', attribute: 'hvac_action' },
             set: {
@@ -596,7 +596,7 @@ describe('HADriver', () => {
       const value = await driver.getProperty('d1', 'hvac_mode', {
         properties: {
           hvac_mode: {
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             map: { cooling: 'cool', heating: 'heat' },
             get: { kind: 'state' },
           },
@@ -616,7 +616,7 @@ describe('HADriver', () => {
             hvac_mode: {
               type: 'string',
               values: ['cool', 'heat'],
-              entity: 'climate.salon',
+              entity: 'climate.living_room',
               map: { cooling: 'cool', heating: 'heat' },
               get: { kind: 'state' },
             },
@@ -637,7 +637,7 @@ describe('HADriver', () => {
             hvac_mode: {
               type: 'string',
               values: ['auto', 'off'],
-              entity: 'climate.salon',
+              entity: 'climate.living_room',
               get: { kind: 'state' },
             },
           },
@@ -653,7 +653,7 @@ describe('HADriver', () => {
         properties: {
           hvac_mode: {
             type: 'string',
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             get: { kind: 'state' },
           },
         },
@@ -737,7 +737,7 @@ describe('HADriver', () => {
           hvac_mode: {
             type: 'string',
             values: ['auto', 'heat', 'cool', 'off'],
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             map: { cooling: 'cool', heating: 'heat' },
             get: { kind: 'state' },
           },
@@ -762,7 +762,7 @@ describe('HADriver', () => {
           properties: {
             temperature: {
               type: 'number',
-              entity: 'climate.salon',
+              entity: 'climate.living_room',
               get: { kind: 'attribute', attribute: 'current_temperature' },
             },
           },
@@ -774,7 +774,7 @@ describe('HADriver', () => {
             hvac_mode: {
               type: 'string',
               values: ['auto', 'heat', 'cool', 'off'],
-              entity: 'climate.salon',
+              entity: 'climate.living_room',
               map: { cooling: 'cool', heating: 'heat' },
               get: { kind: 'attribute', attribute: 'hvac_action' },
             },
@@ -1020,7 +1020,7 @@ describe('HADriver', () => {
       const config = {
         properties: {
           hvac_mode: {
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             type: 'string',
             values: ['heat', 'cool'],
             map: { heating: 'heat', cooling: 'cool' },
@@ -1394,7 +1394,7 @@ describe('HADriver', () => {
 
       const driver = await initDriver()
       await driver.setProperty('d1', 'power', true, {
-        properties: { power: { entity: 'light.salon' } },
+        properties: { power: { entity: 'light.living_room' } },
       })
 
       expect(calls[0]!.url).toContain('/api/services/light/turn_on')
@@ -1551,7 +1551,7 @@ describe('HADriver', () => {
       await driver.setProperty('d1', 'away', 'vacation', {
         properties: {
           away: {
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             set: {
               kind: 'script',
               script: 'script.set_away',
@@ -1575,7 +1575,7 @@ describe('HADriver', () => {
           hvac_mode: {
             type: 'string',
             values: ['auto', 'heat', 'cool', 'off'],
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             map: { cooling: 'cool', heating: 'heat' },
             get: { kind: 'attribute', attribute: 'hvac_action' },
             set: {
@@ -1600,7 +1600,7 @@ describe('HADriver', () => {
         expect(calls[0]!.url).toContain('/api/services/climate/set_hvac_mode')
         const body = JSON.parse(calls[0]!.body)
         expect(body).toEqual({
-          entity_id: 'climate.salon',
+          entity_id: 'climate.living_room',
           hvac_mode: 'cooling',
         })
       })
@@ -1620,7 +1620,7 @@ describe('HADriver', () => {
           properties: {
             power: {
               type: 'boolean',
-              entity: 'switch.salon',
+              entity: 'switch.living_room',
               map: { on: 'true', off: 'false' },
               get: { kind: 'state' },
               set: {
@@ -1655,7 +1655,7 @@ describe('HADriver', () => {
           properties: {
             power: {
               type: 'boolean',
-              entity: 'switch.salon',
+              entity: 'switch.living_room',
               map: { '1': 'on', '0': 'off' },
               get: { kind: 'state' },
               set: {
@@ -1690,7 +1690,7 @@ describe('HADriver', () => {
           properties: {
             level: {
               type: 'number',
-              entity: 'sensor.salon',
+              entity: 'sensor.living_room',
               map: { low: '1', high: '2' },
               get: { kind: 'state' },
               set: {
@@ -1733,7 +1733,7 @@ describe('HADriver', () => {
         await driver.setProperty('d1', 'hvac_mode', 'cool', {
           properties: {
             hvac_mode: {
-              entity: 'climate.salon',
+              entity: 'climate.living_room',
               map: { cooling: 'cool' },
               map_set: { cool: 'frost' },
               set: {
@@ -1755,7 +1755,7 @@ describe('HADriver', () => {
           driver.setProperty('d1', 'hvac_mode', 'turbo', {
             properties: {
               hvac_mode: {
-                entity: 'climate.salon',
+                entity: 'climate.living_room',
                 map_set: { cool: 'cooling', heat: 'heating' },
                 set: {
                   kind: 'service',
@@ -1784,7 +1784,7 @@ describe('HADriver', () => {
               hvac_mode: {
                 type: 'string',
                 values: ['auto', 'heat', 'cool', 'off'],
-                entity: 'climate.salon',
+                entity: 'climate.living_room',
                 set: {
                   kind: 'service',
                   service: 'climate.set_hvac_mode',
@@ -1805,7 +1805,7 @@ describe('HADriver', () => {
           driver.setProperty('d1', 'hvac_mode', 'turbo', {
             properties: {
               hvac_mode: {
-                entity: 'climate.salon',
+                entity: 'climate.living_room',
                 values: ['auto', 'heat', 'cool', 'off'],
                 set_service: 'climate.set_hvac_mode',
                 set_value_key: 'hvac_mode',
@@ -1826,7 +1826,7 @@ describe('HADriver', () => {
         await driver.setProperty('d1', 'hvac_mode', 'unmapped', {
           properties: {
             hvac_mode: {
-              entity: 'climate.salon',
+              entity: 'climate.living_room',
               values: ['cool', 'heat'],
               set: {
                 kind: 'script',
@@ -1852,7 +1852,7 @@ describe('HADriver', () => {
         await driver.setProperty('d1', 'hvac_mode', 'cool', {
           properties: {
             hvac_mode: {
-              entity: 'climate.salon',
+              entity: 'climate.living_room',
               map: { cooling: 'cool' },
               set: {
                 kind: 'script',
@@ -1878,7 +1878,7 @@ describe('HADriver', () => {
         await driver.setProperty('d1', 'hvac_mode', 'unmapped', {
           properties: {
             hvac_mode: {
-              entity: 'climate.salon',
+              entity: 'climate.living_room',
               map_set: { cool: 'cooling' },
               set: {
                 kind: 'script',
@@ -1904,7 +1904,7 @@ describe('HADriver', () => {
         await driver.setProperty('d1', 'hvac_mode', 'cool', {
           properties: {
             hvac_mode: {
-              entity: 'climate.salon',
+              entity: 'climate.living_room',
               map: { cooling: 'cool' },
               set_service: 'climate.set_hvac_mode',
               set_value_key: 'hvac_mode',
@@ -1922,7 +1922,7 @@ describe('HADriver', () => {
           driver.setProperty('d1', 'hvac_mode', 'cool', {
             properties: {
               hvac_mode: {
-                entity: 'climate.salon',
+                entity: 'climate.living_room',
                 map: { cooling: 'cool', freezing: 'cool' },
                 set_service: 'climate.set_hvac_mode',
                 set_value_key: 'hvac_mode',
@@ -2005,7 +2005,7 @@ describe('HADriver', () => {
       await driver.executeAction(
         'd1',
         'announce',
-        { message: 'bonjour' },
+        { message: 'hello' },
         {
           actions: {
             announce: {
@@ -2018,7 +2018,7 @@ describe('HADriver', () => {
 
       const body = JSON.parse(calls[0]!.body)
       expect(body.entity_id).toBe('media_player.test')
-      expect(body.message).toBe('bonjour')
+      expect(body.message).toBe('hello')
     })
 
     it('should be a no-op when action is not found', async () => {

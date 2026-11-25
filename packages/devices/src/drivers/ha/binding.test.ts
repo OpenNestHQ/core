@@ -40,14 +40,14 @@ describe('normalizePropertyBinding', () => {
 
 describe('normalizePropertyConfig', () => {
   it('should map entity without attribute to state get strategy', () => {
-    const binding = normalizePropertyConfig({ entity: 'switch.salon' })
+    const binding = normalizePropertyConfig({ entity: 'switch.living_room' })
 
     expect(binding.get).toEqual({ kind: 'state' })
   })
 
   it('should map entity with attribute to attribute get strategy', () => {
     const binding = normalizePropertyConfig({
-      entity: 'media_player.salon',
+      entity: 'media_player.living_room',
       attribute: 'volume_level',
     })
 
@@ -58,7 +58,7 @@ describe('normalizePropertyConfig', () => {
   })
 
   it('should map config without set_service to inferred set strategy', () => {
-    const binding = normalizePropertyConfig({ entity: 'switch.salon' })
+    const binding = normalizePropertyConfig({ entity: 'switch.living_room' })
 
     expect(binding.set).toEqual({ kind: 'inferred' })
   })
@@ -123,14 +123,14 @@ describe('normalizeActionConfig', () => {
   it('should map target and data to service action strategy', () => {
     const strategy = normalizeActionConfig({
       service: 'media_player.volume_set',
-      target: { entity_id: 'media_player.salon' },
+      target: { entity_id: 'media_player.living_room' },
       data: { volume_level: 0.5 },
     })
 
     expect(strategy).toEqual({
       kind: 'service',
       service: 'media_player.volume_set',
-      target: { entity_id: 'media_player.salon' },
+      target: { entity_id: 'media_player.living_room' },
       data: { volume_level: 0.5 },
     })
   })
