@@ -13,25 +13,104 @@ pnpm add @opennest/devices
 ### `DeviceRegistry`
 
 Loads device inventories from YAML and instantiates drivers.
+`DeviceRegistry.fromYaml(path)` takes the **path** of a YAML inventory file
+(read synchronously with `readFileSync`); `new DeviceRegistry(inventory)`
+takes an already-parsed `InventoryYaml` object.
 
 ```ts
-import { DeviceRegistry } from "@opennest/devices";
+import { DeviceRegistry } from '@opennest/devices'
 
-const registry = DeviceRegistry.fromYaml(yamlString);
-const devices = registry.getDevices();
+const registry = DeviceRegistry.fromYaml('./inventory.yaml')
+const devices = registry.getDevices()
+
+await registry.whenReady() // drivers connected / authenticated
+// ...
+await registry.close() // release driver resources
 ```
+
+Other methods: `getDevice(id)`, `getDriver(name)`, `getPromptDefinitions()`.
 
 ### `DeviceDriver` interface
 
 ```ts
+interface DriverRuntimeContext {
+  programId: string
+  signal?: AbortSignal
+}
+
 interface DeviceDriver {
-  readonly name: string;
-  init(config: Record<string, unknown>): Promise<void>;
-  getProperty(deviceId: string, property: string): Promise<unknown>;
-  setProperty(deviceId: string, property: string, value: unknown): Promise<void>;
-  executeAction(deviceId: string, action: string, params?: Record<string, unknown>): Promise<unknown>;
+  readonly name: string
+  init(
+    globalConfig: Record<string, unknown>,
+    deviceInitConfigs?: Record<string, Record<string, unknown>>,
+  ): Promise<void>
+  close(): Promise<void> // idempotent
+  getProperty(
+    deviceId: string,
+    property: string,
+    deviceConfig: Record<string, unknown>,
+    runtime?: DriverRuntimeContext,
+  ): Promise<unknown>
+  setProperty(
+    deviceId: string,
+    property: string,
+    value: unknown,
+    deviceConfig: Record<string, unknown>,
+    runtime?: DriverRuntimeContext,
+  ): Promise<void>
+  executeAction(
+    deviceId: string,
+    action: string,
+    args: Record<string, unknown>,
+    deviceConfig: Record<string, unknown>,
+    runtime?: DriverRuntimeContext,
+  ): Promise<void>
+
+  // Optional
+  whenReady?(): Promise<void>
+  validateDeviceConfig?(
+    deviceId: string,
+    deviceConfig: Record<string, unknown>,
+  ): void
+  getVerificationStrategy?(
+    deviceId: string,
+    targetKind: 'action' | 'property',
+    targetName: string,
+    deviceConfig: Record<string, unknown>,
+  ): VerificationStrategy | null
+  subscribeProperty?(
+    deviceId: string,
+    property: string,
+    deviceConfig: Record<string, unknown>,
+    onStateChange: () => void,
+  ): (() => void) | null
 }
 ```
+
+#### `DriverRuntimeContext`
+
+`getProperty`, `setProperty` and `executeAction` each take an optional trailing
+`runtime` argument, `{ programId, signal? }`: `programId` identifies the
+program run issuing the call, and `signal` is an `AbortSignal` for that call.
+
+**Abort rule:** the signal aborts **reads** at any time. A **write** already
+sent is never aborted — the signal is only checked *before* sending.
+
+#### Optional methods
+
+- `whenReady()` — resolves once the driver can serve requests (e.g. the HA
+  websocket is connected and authenticated), rejects on a fatal init error.
+  `DeviceRegistry.whenReady()` awaits it on every driver.
+- `validateDeviceConfig(deviceId, deviceConfig)` — load-time check of the
+  device config the driver consumes at call time; `DeviceRegistry` calls it
+  with the built `driverConfig`. Drivers without it skip validation.
+- `getVerificationStrategy(deviceId, targetKind, targetName, deviceConfig)` —
+  tells the VM how to observe state after a write (`poll`, `event`, or `null`
+  for a single immediate observation); see the vm README's
+  [State verification](../vm/README.md#state-verification).
+- `subscribeProperty(deviceId, property, deviceConfig, onStateChange)` —
+  push subscription used by `event` verification; returns an unsubscribe
+  function, or `null` when the property cannot be observed that way.
 
 ### Drivers
 
@@ -430,5 +509,9 @@ heuristic.
 | `DeviceRegistry` | class | YAML → Device factory |
 | `MockDriver` | class | In-memory mock driver |
 | `HADriver` | class | Home Assistant driver (REST + websocket) |
-| `DeviceDriver` | type | Driver interface |
+| `extractPromptDefinitions` | function | Inventory → `PromptDefinitions` (used by `getPromptDefinitions()`) |
+| `DeviceDriver`, `DriverRuntimeContext` | types | Driver interface and per-call runtime context |
+| `PromptDefinitions` | type | Device types, rooms, owners and tags for prompt generation |
 | `Device`, `DeviceEntry`, `InventoryYaml` | types | Device and inventory types |
+| `DevicePropertyConfig`, `ActionParameterConfig`, `ActionEntryConfig`, `DriverGlobalConfig` | types | Inventory entry configs |
+| `DeviceTypeDefinition`, `OwnerTypeDefinition`, `TagTypeDefinition`, `InventoryDefinitions` | types | Inventory definitions |
