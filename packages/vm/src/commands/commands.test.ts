@@ -652,7 +652,7 @@ describe('executeCommand', () => {
           response: {
             interactionId: first.interaction!.id,
             type: 'device_selection',
-            deviceId: 'tv_inexistant',
+            deviceId: 'tv_nonexistent',
           },
         },
         { devices: ctx.devices, session },
@@ -706,7 +706,7 @@ describe('executeCommand', () => {
           response: {
             interactionId: first.interaction!.id,
             type: 'device_selection',
-            deviceId: 'tv_inexistant',
+            deviceId: 'tv_nonexistent',
           },
         },
         { devices: ctx.devices, session },
@@ -818,7 +818,7 @@ describe('executeCommand', () => {
           response: {
             interactionId: first.interaction!.id,
             type: 'device_selection',
-            deviceId: 'tv_inconnu',
+            deviceId: 'tv_unknown',
           },
         },
         { devices: ctx.devices, session },

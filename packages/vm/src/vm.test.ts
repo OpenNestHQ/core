@@ -2713,7 +2713,7 @@ describe('interpret_home_dsl', () => {
 
     it('should collect multiple errors across statements', async () => {
       const program = parse(
-        'camera[living_room].snapshot()\ntv[kitchen].power = on\nlight[inconnue].power = off',
+        'camera[living_room].snapshot()\ntv[kitchen].power = on\nlight[unknown].power = off',
       )
       const { validateProgram } = await import('./index.js')
       const devs = await devices()
@@ -2721,7 +2721,7 @@ describe('interpret_home_dsl', () => {
       expect(errors).toHaveLength(3)
       expect(errors[0]!.message).toContain('camera')
       expect(errors[1]!.message).toContain('kitchen')
-      expect(errors[2]!.message).toContain('inconnue')
+      expect(errors[2]!.message).toContain('unknown')
     })
 
     it('should error when variable is not defined', async () => {
