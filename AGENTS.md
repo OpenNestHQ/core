@@ -131,7 +131,7 @@ Key flags:
 
 ### Entry points
 
-- **VM**: `executeCommand(command: VMCommand, context: VMContext) → Promise<VMResult>` in `packages/vm/src/commands/dispatch.ts`. Single Promise entry point, a façade over `runCommand` (see "Effect core"). Delegates to the interpreter for `run_program`, handles `resume_interaction` and `cancel_execution` directly.
+- **VM**: `executeCommand(command: VMCommand, context: VMContext) → Promise<VMResult>` in `packages/vm/src/commands/dispatch.ts`. Single Promise entry point, a façade over `runCommand` (see "Effect core"). Delegates to the interpreter for `run_program`, handles `resume_interaction` (resume the suspended program), `answer_suggestion` (run the follow-up of an open suggestion, `suggestions/answer.ts`) and `cancel_execution` (reset the session) directly.
 - **VM (Effect)**: `runCommand(command, context, options?: RunOptions) → Effect<EffectVMResult, VMInfraError>`, exported from `@opennest/vm/effect`.
 - **Parser**: `parseHomeDSL(source: string) → ParseResult` in `packages/lang-core/src/parser/parser.ts`.
 - **Prompt**: `new OpenNestPrompt(devices, rooms, owners?, tags?).prompt(options?)` in `packages/lang-core/src/prompt/generator.ts` (defaults: `DEFAULT_DEVICES`, `DEFAULT_ROOMS`, `DEFAULT_OWNERS`, `DEFAULT_TAGS`). `OpenNestClient.buildPrompt()` wraps it.
@@ -355,9 +355,9 @@ packages/
       parser/
         parser.ts        # parseHomeDSL() + ParseError
       prompt/
-        generator.ts     # generateHomeAgentPrompt()
+        generator.ts     # OpenNestPrompt
         defaults.ts      # DEFAULT_DEVICES, DEFAULT_ROOMS
-        types.ts         # PromptConfig, DeviceDefinition, etc.
+        types.ts         # PromptOptions, DeviceDefinition, RoomDefinition, OwnerDefinition, TagDefinition, ...
     scripts/
       build-prompt.js    # Generates example-prompt.md
     example-prompt.md    # Generated output
@@ -379,7 +379,7 @@ packages/
         types.ts         # UserInteraction, UserResponse, InteractionHandler, PendingInteraction
         registry.ts      # Handler registry + createInteraction()/processInteractionResponse()
         device-selection.ts # deviceSelectionHandler
-        confirmation.ts  # ConfirmationHandler
+        confirmation.ts  # confirmationHandler
         action-parameter.ts # actionParameterHandler (missing required action parameters)
         ask.ts           # createAsk() / AskStore — middleware questions (text_input, number_input, choice)
         input-answer.ts  # checkInputAnswer() — validates ask() answers
