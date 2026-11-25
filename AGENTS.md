@@ -124,7 +124,7 @@ Key flags:
 - **playground has no tests.**
 - `sdk` is covered by `client.test.ts` (end-to-end via `MockDriver`).
 - `vm-opentelemetry` has its own tests (`normalizer.test.ts`, `OpenTelemetryTraceSink.test.ts`).
-- `vm` tests create devices inline with `MockDriver` + `seed()`. No external fixture files are required at runtime. An `__fixtures__/inventory.yaml` exists for reference (7 sample devices).
+- `vm` tests create devices inline with `MockDriver` + `seed()`. No external fixture files are required at runtime. `packages/vm/__fixtures__/inventory.yaml` is a sample inventory (7 devices, English rooms) used e.g. by the MCP README to run the server; the vm tests don't need it.
 - `devices` tests use temporary YAML files in `/tmp/` for registry tests. `homeassistant.test.ts` uses `vi.stubGlobal("fetch", ...)` to mock HTTP calls.
 
 ## Architecture notes
@@ -446,6 +446,10 @@ examples/
     lib/vm/              # VM adapter + device fixtures
     hooks/               # use-vm() React context + reducer
 ```
+
+## Language
+
+Everything tracked in the repo is in English: code, comments, identifiers, test data and fixtures (rooms, device ids and names), example UI text and messages, docs. Don't create French fixtures or text; use the default English rooms from `packages/lang-core/src/prompt/defaults.ts` (`living_room`, `bedroom`, `kitchen`, `office`, `bathroom`, `entrance`).
 
 ## Linting & formatting
 
