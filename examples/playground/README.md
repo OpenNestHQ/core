@@ -8,7 +8,7 @@ Interactive TUI REPL for testing HomeDSL with 14 mock devices across 3 rooms (`l
 pnpm run start    # from the repo root; builds, then launches the REPL
 ```
 
-The playground loads a `.env` file from its working directory at startup (`process.loadEnvFile()`; with `pnpm run start` that is `examples/playground/`) and exits with an `ENOENT` error if there is none, so create one first, even an empty one (see [NL Mode](#nl-mode) for its content).
+If a `.env` file exists in its working directory (with `pnpm run start` that is `examples/playground/`), the playground loads it at startup. It is optional: without it the HomeDSL mode works as usual, and only [NL Mode](#nl-mode) needs configuration.
 
 ## Modes
 
