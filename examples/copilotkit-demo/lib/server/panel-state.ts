@@ -265,6 +265,32 @@ function runningIndex(state: DemoState): number | null {
   return null
 }
 
+function withoutWrite(statement: PanelStatement): PanelStatement {
+  const copy = { ...statement }
+  delete copy.lastWrite
+  return copy
+}
+
+function rawValue(value: Value): unknown {
+  return value.kind === 'power' ? value.value === 'on' : value.value
+}
+
+function setDeviceState(
+  state: DemoState,
+  deviceId: string,
+  property: string,
+  value: unknown,
+): DemoState {
+  return {
+    ...state,
+    devices: state.devices.map(d =>
+      d.id === deviceId
+        ? { ...d, state: { ...d.state, [property]: value } }
+        : d,
+    ),
+  }
+}
+
 const STATEMENT_END: Record<string, StatementStatus> = {
   success: 'success',
   failed: 'error',
@@ -350,11 +376,14 @@ export function applyVmEvent(state: DemoState, event: VMEvent): DemoState {
       const index = runningIndex(state)
       if (index === null) return state
       const device = state.devices.find(d => d.id === event.deviceId)
-      return updateStatement(state, index, s =>
-        s.devices.some(d => d.id === event.deviceId)
-          ? s
+      return updateStatement(state, index, s => {
+        const rest = withoutWrite(s)
+        const next: PanelStatement = s.devices.some(
+          d => d.id === event.deviceId,
+        )
+          ? rest
           : {
-              ...s,
+              ...rest,
               devices: [
                 ...s.devices,
                 {
@@ -363,37 +392,31 @@ export function applyVmEvent(state: DemoState, event: VMEvent): DemoState {
                   icon: device?.icon ?? '⚙',
                 },
               ],
-            },
-      )
+            }
+        if (event.property !== undefined && event.value !== undefined) {
+          next.lastWrite = {
+            deviceId: event.deviceId,
+            property: event.property,
+            value: rawValue(event.value),
+          }
+        }
+        return next
+      })
     }
     case 'action:end': {
-      if (
-        event.status !== 'success' ||
-        event.property === undefined ||
-        event.value === undefined
-      ) {
-        return state
-      }
       const index = runningIndex(state)
+      if (index === null) return state
       const statement = state.statements.find(s => s.index === index)
-      const deviceId = statement?.devices[statement.devices.length - 1]?.id
-      if (deviceId === undefined) return state
-      const { property, value } = event
-      return {
-        ...state,
-        devices: state.devices.map(d =>
-          d.id === deviceId
-            ? {
-                ...d,
-                state: {
-                  ...d.state,
-                  [property]:
-                    value.kind === 'power' ? value.value === 'on' : value.value,
-                },
-              }
-            : d,
-        ),
-      }
+      const write = statement?.lastWrite
+      if (write === undefined) return state
+      const cleared = updateStatement(state, index, withoutWrite)
+      if (event.status !== 'success') return cleared
+      return setDeviceState(
+        cleared,
+        write.deviceId,
+        write.property,
+        write.value,
+      )
     }
     default:
       return state
@@ -436,12 +459,26 @@ export function applyRunResult(
     }
     return next
   })
-  return {
+  let next: DemoState = {
     ...state,
     program: state.program === null ? null : { ...state.program, programId },
     statements,
+    // The caller sets a new question when the run paused again.
+    pending: null,
     suggestions: result.status === 'success' ? (result.suggestions ?? []) : [],
   }
+  // Changes are the VM's record of what was written: authoritative.
+  for (const entry of result.executed) {
+    for (const change of entry.changes) {
+      next = setDeviceState(
+        next,
+        change.deviceId,
+        change.property,
+        change.newValue,
+      )
+    }
+  }
+  return next
 }
 
 function toTraceNode(node: ExecutionNode): TraceNode {

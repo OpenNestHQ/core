@@ -2,6 +2,8 @@ import path from 'node:path'
 import { DeviceRegistry } from '@opennest/devices'
 import { DefaultVMEventBus, OpenNestClient } from '@opennest/sdk'
 import type { Device } from '@opennest/sdk'
+import type { DefaultExecutionTracer } from '@opennest/vm'
+import type { DemoState, ProgramOrigin } from '../shared/state'
 import { demoMiddleware } from './demo-middleware'
 
 /** One simulated house: its own devices, VM session and event bus. */
@@ -13,6 +15,21 @@ export interface House {
   /** Passed to the client as `eventBus`; the agent subscribes per run. */
   events: DefaultVMEventBus
   lastUsed: number
+  /** Panel state sent to the UI; built on the thread's first run. */
+  panel: DemoState | null
+  /** The VM question the thread is waiting on, if any. */
+  openInterrupt: OpenInterrupt | null
+  /** Trace of the current program, kept across resumes. */
+  tracer: DefaultExecutionTracer | null
+}
+
+export interface OpenInterrupt {
+  id: string
+  origin: ProgramOrigin
+  /** The `run_homedsl` call that paused (chat origin only). */
+  toolCall?: { id: string; dsl: string }
+  /** Tool calls left in a chat turn: how many attempts remain. */
+  attemptsLeft: number
 }
 
 export interface CreateHouseOptions {
@@ -40,6 +57,9 @@ export async function createHouse(
     devices: registry.getDevices(),
     events,
     lastUsed: 0,
+    panel: null,
+    openInterrupt: null,
+    tracer: null,
   }
 }
 

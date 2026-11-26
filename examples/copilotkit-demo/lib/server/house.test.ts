@@ -23,6 +23,9 @@ function fakeHouse(threadId: string): House {
     devices: [],
     events: {} as House['events'],
     lastUsed: 0,
+    panel: null,
+    openInterrupt: null,
+    tracer: null,
   }
 }
 

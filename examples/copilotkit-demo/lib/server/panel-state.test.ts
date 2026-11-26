@@ -107,16 +107,15 @@ describe('panel state', () => {
     const events: VMEvent[] = [
       at('program:begin'),
       at('statement:begin', { index: 0, statementKind: 'assignment' }),
+      // As emitted by the VM: the write is on begin, end only has a status.
       at('action:begin', {
         actionKind: 'set_property',
         deviceId: 'light_living_room_1',
         deviceName: 'Living Room Ceiling Light',
-      }),
-      at('action:end', {
-        status: 'success',
         property: 'brightness',
         value: { kind: 'number', value: 30 },
       }),
+      at('action:end', { status: 'success' }),
       { ...at('statement:end', { status: 'success' }), timestamp: 1250 },
     ]
     for (const event of events) state = applyVmEvent(state, event)
@@ -131,6 +130,66 @@ describe('panel state', () => {
       },
     ])
     expect(state.devices[0]?.state['brightness']).toBe(30)
+  })
+
+  it('does not apply a write that failed', () => {
+    let state = beginProgram(
+      initialState(devices, true),
+      parse('light[living_room].brightness = 30'),
+      'x',
+      'chat',
+    )
+    state = applyVmEvent(
+      state,
+      at('statement:begin', { index: 0, statementKind: 'assignment' }),
+    )
+    state = applyVmEvent(
+      state,
+      at('action:begin', {
+        actionKind: 'set_property',
+        deviceId: 'light_living_room_1',
+        deviceName: 'Living Room Ceiling Light',
+        property: 'brightness',
+        value: { kind: 'number', value: 30 },
+      }),
+    )
+    state = applyVmEvent(state, at('action:end', { status: 'failed' }))
+    expect(state.devices[0]?.state['brightness']).toBe(80)
+  })
+
+  it('a finished run clears the open question and applies changes', () => {
+    const start = {
+      ...initialState(devices, true),
+      pending: {
+        interruptId: 'x',
+        interaction: { id: 'x', type: 'confirmation' as const, message: 'ok?' },
+      },
+    }
+    const state = applyRunResult(
+      start,
+      {
+        status: 'success',
+        interaction: null,
+        errors: [],
+        executed: [
+          {
+            statement: parse('light[living_room].power = on').statements[0]!,
+            resolvedDevices: [],
+            changes: [
+              {
+                deviceId: 'light_living_room_1',
+                property: 'power',
+                oldValue: false,
+                newValue: true,
+              },
+            ],
+          },
+        ],
+      },
+      'p1',
+    )
+    expect(state.pending).toBeNull()
+    expect(state.devices[0]?.state['power']).toBe(true)
   })
 
   it('records middleware decisions on the running statement', () => {

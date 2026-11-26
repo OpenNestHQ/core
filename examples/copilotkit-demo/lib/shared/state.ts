@@ -42,6 +42,8 @@ export interface PanelStatement {
   reason?: string
   startedAt?: number
   durationMs?: number
+  /** Internal: the write in flight, applied to `devices` once it succeeds. */
+  lastWrite?: { deviceId: string; property: string; value: unknown }
 }
 
 export interface TraceNode {
