@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import '@copilotkit/react-core/v2/styles.css'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -13,7 +14,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <body className="h-full">{children}</body>
     </html>
   )
