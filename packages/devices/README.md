@@ -119,6 +119,8 @@ sent is never aborted — the signal is only checked *before* sending.
 | `MockDriver` | In-memory driver for testing. Properties stored in a `Map`. Supports `seed(id, props)`. |
 | `HADriver` | Home Assistant driver. Declarative binding strategies executed over the HA REST API and websocket — see [Home Assistant driver](#home-assistant-driver). |
 
+`MockDriver` is also exported from the `@opennest/devices/drivers/mock` subpath, which browser bundles can import without pulling in Node built-ins.
+
 ## Home Assistant driver
 
 The HA driver turns each OpenNest property and action into declarative

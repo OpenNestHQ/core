@@ -19,6 +19,7 @@
     "test": "pnpm -r run test",
     "test:coverage": "vitest run --coverage --config vitest.coverage.config.ts",
     "test:scripts": "vitest run --dir scripts",
+    "release:check:manifests": "node scripts/check-manifests.mjs",
     "start": "pnpm --filter @opennest/playground run start",
     "lint": "pnpm exec eslint \"examples/\" \"packages/\" \"scripts/\"",
     "format": "pnpm exec prettier --write \"(examples|packages)/**/*.+(js|ts|json|tsx)\" \"scripts/**/*.mjs\"",

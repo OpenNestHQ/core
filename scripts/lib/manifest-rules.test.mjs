@@ -77,13 +77,14 @@ describe('checkManifest', () => {
   })
 
   it.each([
-    ['is missing', undefined],
+    ['is missing', { provenance: true }],
     ['is not public', { access: 'restricted', provenance: true }],
-  ])('reports an error when publishConfig.access %s', (_label, value) => {
-    const errors = checkManifest(manifest({ publishConfig: value }), DIR)
-
-    expect(errors.join('\n')).toContain('publishConfig.access')
-  })
+  ])(
+    'reports an error when publishConfig.access %s',
+    (_label, publishConfig) => {
+      expectSingleError({ publishConfig }, 'publishConfig.access')
+    },
+  )
 
   it.each([
     ['is missing', { access: 'public' }],

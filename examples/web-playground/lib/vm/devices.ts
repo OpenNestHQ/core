@@ -1,4 +1,4 @@
-import { MockDriver } from '@opennest/devices/dist/drivers/mock.js'
+import { MockDriver } from '@opennest/devices/drivers/mock'
 import type { Device } from '@opennest/sdk'
 
 export interface PlaygroundFixture {

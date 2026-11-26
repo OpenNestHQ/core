@@ -1,15 +1,43 @@
 {
   "name": "@opennest/sdk",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "OpenNest SDK — deterministic execution facade over the HomeDSL parser, device registry, and VM",
+  "keywords": [
+    "opennest",
+    "homedsl",
+    "smart-home",
+    "sdk"
+  ],
+  "homepage": "https://github.com/OpenNestHQ/core/tree/main/packages/sdk#readme",
+  "bugs": {
+    "url": "https://github.com/OpenNestHQ/core/issues"
+  },
   "license": "ISC",
   "author": "Zepoze",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OpenNestHQ/core.git"
+    "url": "git+https://github.com/OpenNestHQ/core.git",
+    "directory": "packages/sdk"
   },
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "test": "vitest run",
     "build": "tsc"
