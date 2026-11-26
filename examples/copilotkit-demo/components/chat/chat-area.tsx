@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CopilotChat } from '@copilotkit/react-core/v2'
+import { CopilotChat, useAgent } from '@copilotkit/react-core/v2'
 import { useThread } from '../thread/thread-context'
 import { useMode } from '../mode/mode-context'
 import { VmInterrupts } from '../interrupts/vm-interrupt'
@@ -11,6 +11,7 @@ import { DslInput } from './dsl-input'
 export function ChatArea() {
   const { threadId } = useThread()
   const { mode } = useMode()
+  const { agent } = useAgent()
   const state = useDemoState()
   const [dslMode, setDslMode] = useState(false)
   const questionOpen = state?.pending != null
@@ -38,6 +39,17 @@ export function ChatArea() {
           key={threadId}
           threadId={threadId}
           className="h-full"
+          // CopilotChat does not show RUN_ERROR in the transcript: add it as
+          // a local assistant line so the audience sees what went wrong.
+          onError={event => {
+            if (!('code' in event)) return // the DOM onError of the wrapper
+            const { error } = event
+            agent.addMessage({
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: `⚠️ ${error.message}`,
+            })
+          }}
           labels={{
             chatInputPlaceholder: questionOpen
               ? 'Answer the question above to continue'

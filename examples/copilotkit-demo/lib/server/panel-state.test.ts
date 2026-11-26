@@ -6,6 +6,7 @@ import {
   applyRunResult,
   applyVmEvent,
   beginProgram,
+  cancelProgram,
   initialState,
   summarizeProgram,
 } from './panel-state'
@@ -216,6 +217,84 @@ describe('panel state', () => {
       at('middleware:end', { status: 'waiting', decision: 'paused' }),
     )
     expect(state.statements[0]?.middleware).toEqual(['confirmation → paused'])
+  })
+
+  it('a blocked statement is blocked with the plain middleware reason', () => {
+    let state = beginProgram(
+      initialState(devices, true),
+      parse('door[entrance].unlock()'),
+      'x',
+      'chat',
+    )
+    const events: VMEvent[] = [
+      at('statement:begin', { index: 0, statementKind: 'action' }),
+      at('middleware:begin', {
+        name: 'doorPin',
+        actionKind: 'invoke_action',
+        deviceId: 'door_entrance',
+      }),
+      at('middleware:end', {
+        status: 'success',
+        decision: 'blocked',
+        reason: 'wrong PIN',
+      }),
+      at('statement:end', {
+        status: 'failed',
+        errors: [{ message: 'Blocked by middleware "doorPin": wrong PIN' }],
+      }),
+    ]
+    for (const event of events) state = applyVmEvent(state, event)
+    expect(state.statements[0]?.status).toBe('blocked')
+    expect(state.statements[0]?.reason).toBe('wrong PIN')
+  })
+
+  it('cancelProgram marks unfinished statements skipped', () => {
+    let state = beginProgram(
+      initialState(devices, true),
+      parse('tv[living_room].power = on\ndoor[entrance].unlock()'),
+      'x',
+      'chat',
+    )
+    state = applyVmEvent(
+      state,
+      at('statement:begin', { index: 0, statementKind: 'assignment' }),
+    )
+    state = applyVmEvent(state, at('statement:end', { status: 'waiting' }))
+    state = cancelProgram(state)
+    expect(state.statements.map(s => s.status)).toEqual(['skipped', 'skipped'])
+    expect(state.pending).toBeNull()
+  })
+
+  it('aligns run results from the program start in the session history', () => {
+    const state = beginProgram(
+      initialState(devices, true),
+      parse('light[living_room].power = on'),
+      'x',
+      'chat',
+    )
+    const entry = (deviceId: string, matched: number) => ({
+      statement: parse('light[living_room].power = on').statements[0]!,
+      resolvedDevices: [],
+      changes: [],
+      filter: { candidates: 2, matched, excluded: [] },
+      outcomes: [
+        {
+          deviceId,
+          execution: { status: 'accepted' as const },
+          verification: { status: 'confirmed' as const },
+        },
+      ],
+    })
+    const result: RunResult = {
+      status: 'awaiting_interaction',
+      interaction: { id: 'i', type: 'confirmation', message: 'ok?' },
+      errors: [],
+      // One entry from an earlier program, none yet from this one.
+      executed: [entry('light_bedroom', 1)],
+    }
+    const next = applyRunResult(state, result, 'p2', 1)
+    expect(next.statements[0]?.outcomes).toBeUndefined()
+    expect(next.statements[0]?.resolution).toBeUndefined()
   })
 
   it('adds follow-up steps that are not in the program', () => {

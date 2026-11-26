@@ -19,6 +19,7 @@ import {
   applyRunResult,
   applyVmEvent,
   beginProgram,
+  cancelProgram,
   initialState,
   readDevices,
   withTrace,
@@ -175,6 +176,7 @@ export class OpenNestAgent extends AbstractAgent {
         suggestions: [],
       })
       house.tracer = new DefaultExecutionTracer()
+      house.historyStart = house.client.getSession().history.length
       const executed = await this.execute(ctx, () =>
         house.client.answerSuggestion(suggestionId, response),
       )
@@ -225,7 +227,28 @@ export class OpenNestAgent extends AbstractAgent {
     let executed: Executed
     if (entry.status === 'cancelled') {
       house.openInterrupt = null
-      executed = await this.execute(ctx, () => house.client.cancel())
+      await this.execute(ctx, () => house.client.cancel())
+      this.setPanel(ctx, cancelProgram(house.panel!))
+      this.flushDelta(ctx)
+      if (open.origin !== 'chat' || open.toolCall === undefined) {
+        this.say(ctx, 'Cancelled.')
+        return this.finish(ctx)
+      }
+      const content = JSON.stringify({
+        status: 'cancelled',
+        message:
+          'The user cancelled the question; the rest of the program did not run.',
+      })
+      this.emitToolResult(ctx, open.toolCall.id, content)
+      return this.chat(
+        ctx,
+        [
+          ...toLlmMessages(ctx.input.messages),
+          { role: 'assistant', toolCall: open.toolCall },
+          { role: 'tool', toolCallId: open.toolCall.id, content },
+        ],
+        open.attemptsLeft,
+      )
     } else {
       const mapped = toResumeAnswer(interaction, entry.payload)
       if (!mapped.ok) return this.interrupt(ctx, interaction, mapped.message)
@@ -371,6 +394,7 @@ export class OpenNestAgent extends AbstractAgent {
     origin: ProgramOrigin,
   ): void {
     ctx.house.tracer = new DefaultExecutionTracer()
+    ctx.house.historyStart = ctx.house.client.getSession().history.length
     this.setPanel(ctx, beginProgram(ctx.house.panel!, program, dsl, origin))
     this.flushDelta(ctx)
   }
@@ -397,6 +421,7 @@ export class OpenNestAgent extends AbstractAgent {
       house.panel!,
       result,
       house.client.getSession().programId,
+      house.historyStart,
     )
     if (tracer !== null) panel = withTrace(panel, tracer.getTrace())
     this.setPanel(ctx, panel)

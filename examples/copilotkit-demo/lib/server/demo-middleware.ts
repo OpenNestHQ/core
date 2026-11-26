@@ -23,6 +23,14 @@ export const confirmThermostat: Middleware = createConfirmationMiddleware({
       action.property === 'temperature'
     )
   },
+  // Plain words: the default message shows type and room ids.
+  message(action) {
+    const value =
+      action.kind === 'set_property' && action.value.kind === 'number'
+        ? `${action.value.value}°`
+        : 'this value'
+    return `Set the ${action.device.name} to ${value}?`
+  },
 })
 
 /**

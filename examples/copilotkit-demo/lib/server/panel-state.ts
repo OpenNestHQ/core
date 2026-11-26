@@ -331,15 +331,22 @@ export function applyVmEvent(state: DemoState, event: VMEvent): DemoState {
       const index = runningIndex(state)
       if (index === null) return state
       return updateStatement(state, index, s => {
+        const blocked =
+          event.status === 'failed' &&
+          s.middleware.some(m => / → block(ed)?$/.test(m))
         const next: PanelStatement = {
           ...s,
-          status: STATEMENT_END[event.status] ?? 'error',
+          status: blocked
+            ? 'blocked'
+            : (STATEMENT_END[event.status] ?? 'error'),
         }
         if (s.startedAt !== undefined && event.status !== 'waiting') {
           next.durationMs = event.timestamp - s.startedAt
         }
+        // Keep the middleware's plain reason ("wrong PIN") over the VM's
+        // technical wrapper ("Blocked by middleware ...").
         const first = event.errors?.[0]
-        if (first !== undefined) next.reason = first.message
+        if (first !== undefined) next.reason ??= first.message
         return next
       })
     }
@@ -428,12 +435,14 @@ export function applyRunResult(
   state: DemoState,
   result: RunResult,
   programId: string,
+  historyStart = 0,
 ): DemoState {
-  // `executed` is the session history: the last entries are this run's.
-  const offset = Math.max(0, result.executed.length - state.statements.length)
+  // `executed` is the whole session history: this program's entries start
+  // at `historyStart` (the history length when the program began).
+  const entries = result.executed.slice(historyStart)
   const statements = state.statements.map((s, i): PanelStatement => {
     let next = s
-    const entry = result.executed[offset + i]
+    const entry = entries[i]
     if (entry !== undefined) {
       next = { ...next }
       if (entry.filter !== undefined) {
@@ -468,7 +477,7 @@ export function applyRunResult(
     suggestions: result.status === 'success' ? (result.suggestions ?? []) : [],
   }
   // Changes are the VM's record of what was written: authoritative.
-  for (const entry of result.executed) {
+  for (const entry of entries) {
     for (const change of entry.changes) {
       next = setDeviceState(
         next,
@@ -479,6 +488,20 @@ export function applyRunResult(
     }
   }
   return next
+}
+
+/** The user cancelled the open question: nothing else of the program runs. */
+export function cancelProgram(state: DemoState): DemoState {
+  return {
+    ...state,
+    statements: state.statements.map(s =>
+      s.status === 'pending' || s.status === 'running' || s.status === 'waiting'
+        ? withoutWrite({ ...s, status: 'skipped' })
+        : s,
+    ),
+    pending: null,
+    suggestions: [],
+  }
 }
 
 function toTraceNode(node: ExecutionNode): TraceNode {

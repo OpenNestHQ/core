@@ -26,6 +26,7 @@ function fakeHouse(threadId: string): House {
     panel: null,
     openInterrupt: null,
     tracer: null,
+    historyStart: 0,
   }
 }
 

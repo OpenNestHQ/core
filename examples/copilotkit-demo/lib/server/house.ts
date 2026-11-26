@@ -21,6 +21,8 @@ export interface House {
   openInterrupt: OpenInterrupt | null
   /** Trace of the current program, kept across resumes. */
   tracer: DefaultExecutionTracer | null
+  /** Session history length when the current program started. */
+  historyStart: number
 }
 
 export interface OpenInterrupt {
@@ -60,6 +62,7 @@ export async function createHouse(
     panel: null,
     openInterrupt: null,
     tracer: null,
+    historyStart: 0,
   }
 }
 

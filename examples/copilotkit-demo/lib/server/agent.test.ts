@@ -260,6 +260,85 @@ describe('OpenNestAgent', () => {
     expect(replayState(again).pending?.error).toBe(second.metadata?.error)
   })
 
+  it('cancelling a question skips the rest and says so', async () => {
+    const agent = new OpenNestAgent({ houses: testStore(), llm: fakeLlm([]) })
+    const paused = await collect(
+      agent,
+      input('cancel', {
+        forwardedProps: { dsl: 'tv[living_room].power = on' },
+      }),
+    )
+    const id = (last(paused) as Finished).outcome!.interrupts![0]!.id
+    const events = await collect(
+      agent,
+      input('cancel', { resume: [{ interruptId: id, status: 'cancelled' }] }),
+    )
+    const text = ofType<BaseEvent & { delta: string }>(
+      events,
+      EventType.TEXT_MESSAGE_CONTENT,
+    )
+    expect(text.map(t => t.delta).join('')).toBe('Cancelled.')
+    const state = replayState(events)
+    expect(state.statements.map(s => s.status)).toEqual(['skipped'])
+    expect(state.pending).toBeNull()
+    expect(device(state, 'tv_living_room')['power']).toBe(false)
+  })
+
+  it('tells the model a cancelled chat run was cancelled', async () => {
+    const llm = fakeLlm([
+      call('tv[living_room].power = on', 'tc-c'),
+      say('OK, cancelled.'),
+    ])
+    const agent = new OpenNestAgent({ houses: testStore(), llm })
+    const paused = await collect(agent, input('cancel-chat'))
+    const id = (last(paused) as Finished).outcome!.interrupts![0]!.id
+    const events = await collect(
+      agent,
+      input('cancel-chat', {
+        resume: [{ interruptId: id, status: 'cancelled' }],
+      }),
+    )
+    const result = ofType<BaseEvent & { content: string }>(
+      events,
+      EventType.TOOL_CALL_RESULT,
+    )[0]!
+    expect(JSON.parse(result.content).status).toBe('cancelled')
+    expect((last(events) as Finished).outcome?.type).toBe('success')
+  })
+
+  it('a second program that pauses shows none of the first one', async () => {
+    const agent = new OpenNestAgent({ houses: testStore(), llm: fakeLlm([]) })
+    await collect(
+      agent,
+      input('history', {
+        forwardedProps: { dsl: 'light[bedroom].power = on' },
+      }),
+    )
+    const paused = await collect(
+      agent,
+      input('history', {
+        forwardedProps: { dsl: 'tv[living_room].power = on' },
+      }),
+    )
+    const state = replayState(paused)
+    expect(state.statements).toHaveLength(1)
+    expect(state.statements[0]?.outcomes).toBeUndefined()
+    expect(state.statements[0]?.resolution).toBeUndefined()
+  })
+
+  it('asks for confirmation in plain words', async () => {
+    const agent = new OpenNestAgent({ houses: testStore(), llm: fakeLlm([]) })
+    const paused = await collect(
+      agent,
+      input('confirm', {
+        forwardedProps: { dsl: 'thermostat[living_room].temperature = 20' },
+      }),
+    )
+    const interrupt = (last(paused) as Finished).outcome!.interrupts![0]!
+    expect(interrupt.reason).toBe('confirmation')
+    expect(interrupt.metadata?.interaction.message).not.toMatch(/_/)
+  })
+
   it('retries after a parse error and stops after 5 attempts', async () => {
     const llm = fakeLlm(Array.from({ length: 6 }, () => call('not dsl !!')))
     const agent = new OpenNestAgent({ houses: testStore(), llm })

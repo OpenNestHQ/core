@@ -7,6 +7,7 @@ import type { UserInteraction } from '@opennest/sdk'
 import { REASONS } from '@/lib/shared/interrupts'
 import type { InterruptMetadata, ResumePayload } from '@/lib/shared/interrupts'
 import { useMode } from '../mode/mode-context'
+import { useDemoState } from '@/lib/client/use-demo-state'
 
 const KNOWN_REASONS = new Set<string>(Object.values(REASONS))
 
@@ -26,7 +27,12 @@ export function VmInterrupts() {
 function QuestionCard({ interrupt, resolve, cancel }: InterruptRenderProps) {
   const { mode } = useMode()
   const [sending, setSending] = useState(false)
-  if (interrupt === null) return <></>
+  const state = useDemoState()
+  // useInterrupt keeps its element across a thread switch: only show the
+  // question the current conversation's server state is waiting on.
+  if (interrupt === null || state?.pending?.interruptId !== interrupt.id) {
+    return <></>
+  }
 
   const metadata = interrupt.metadata as unknown as
     Partial<InterruptMetadata> | undefined
