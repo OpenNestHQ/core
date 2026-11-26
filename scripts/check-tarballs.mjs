@@ -51,19 +51,28 @@ function check(title, items, findProblems) {
   console.log(`ok - ${title}`)
 }
 
-/** Runs a command to completion; throws with its output if it fails. */
+/**
+ * Runs a command to completion; if it fails, throws with its output and the
+ * command line (as `error.command`).
+ */
 function run(command, args, options) {
-  return execFileSync(command, args, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 300_000,
-    ...options,
-  })
+  try {
+    return execFileSync(command, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 300_000,
+      ...options,
+    })
+  } catch (error) {
+    error.command = [command, ...args].join(' ')
+    throw error
+  }
 }
 
-/** Why a command failed (e.g. `ETIMEDOUT`), followed by what it printed. */
+/** Which command failed and why (e.g. `ETIMEDOUT`), then what it printed. */
 function describeFailure(error) {
-  const reason = error.code ?? error.signal ?? `exit code ${error.status}`
+  const cause = error.code ?? error.signal ?? `exit code ${error.status}`
+  const reason = `\`${error.command}\` failed with ${cause}`
   const output = `${error.stdout ?? ''}${error.stderr ?? ''}`.trim()
   return output ? `${reason}\n${output}` : reason
 }
