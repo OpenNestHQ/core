@@ -22,6 +22,8 @@ export function DemoApp({ llmConfigured }: { llmConfigured: boolean }) {
   return (
     <CopilotKitProvider
       runtimeUrl="/api/copilotkit"
+      // The dev inspector button covers the Basic | Advanced switch.
+      enableInspector={false}
       renderCustomMessages={customRenderers}
     >
       <ModeProvider>
