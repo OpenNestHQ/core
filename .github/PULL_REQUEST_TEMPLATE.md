@@ -19,3 +19,4 @@ Closes #
 - [ ] `pnpm run format:check` passes
 - [ ] Tests pass (`pnpm run test`)
 - [ ] I have updated the relevant documentation
+- [ ] A changeset was added (`pnpm changeset`) or none is needed
