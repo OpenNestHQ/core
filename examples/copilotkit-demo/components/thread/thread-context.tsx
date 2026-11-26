@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useState } from 'react'
+import { newId } from '@/lib/shared/id'
 
 interface ThreadValue {
   /** One thread = one conversation = one simulated house on the server. */
@@ -11,12 +12,12 @@ interface ThreadValue {
 const ThreadContext = createContext<ThreadValue | null>(null)
 
 export function ThreadProvider({ children }: { children: React.ReactNode }) {
-  const [threadId, setThreadId] = useState(() => crypto.randomUUID())
+  const [threadId, setThreadId] = useState(() => newId())
   return (
     <ThreadContext.Provider
       value={{
         threadId,
-        newConversation: () => setThreadId(crypto.randomUUID()),
+        newConversation: () => setThreadId(newId()),
       }}
     >
       {children}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { newId } from '@/lib/shared/id'
 import { useAgent, useCopilotKit } from '@copilotkit/react-core/v2'
 
 /**
@@ -16,7 +17,7 @@ export function DslInput({ disabled }: { disabled: boolean }) {
     const source = dsl.trim()
     if (source === '' || disabled || agent.isRunning) return
     agent.addMessage({
-      id: crypto.randomUUID(),
+      id: newId(),
       role: 'user',
       content: source,
     })

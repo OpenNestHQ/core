@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { newId } from '@/lib/shared/id'
 import { CopilotChat, useAgent } from '@copilotkit/react-core/v2'
 import { useThread } from '../thread/thread-context'
 import { useMode } from '../mode/mode-context'
@@ -45,7 +46,7 @@ export function ChatArea() {
             if (!('code' in event)) return // the DOM onError of the wrapper
             const { error } = event
             agent.addMessage({
-              id: crypto.randomUUID(),
+              id: newId(),
               role: 'assistant',
               content: `⚠️ ${error.message}`,
             })
