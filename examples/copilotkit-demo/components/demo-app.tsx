@@ -1,7 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { CopilotKit } from '@copilotkit/react-core/v2'
+// `CopilotKit` from /v2 is the v1 compatibility wrapper: it replaces
+// `renderCustomMessages` with its own renderer, which would hide our
+// suggestion cards. Use the v2 provider directly.
+import { CopilotKitProvider } from '@copilotkit/react-core/v2'
 import { ModeProvider } from './mode/mode-context'
 import { ThreadProvider } from './thread/thread-context'
 import { Header } from './layout/header'
@@ -17,7 +20,7 @@ const customRenderers = [suggestionRenderer]
 export function DemoApp({ llmConfigured }: { llmConfigured: boolean }) {
   const [devicesOpen, setDevicesOpen] = useState(false)
   return (
-    <CopilotKit
+    <CopilotKitProvider
       runtimeUrl="/api/copilotkit"
       renderCustomMessages={customRenderers}
     >
@@ -37,6 +40,6 @@ export function DemoApp({ llmConfigured }: { llmConfigured: boolean }) {
           <DevicesDialog open={devicesOpen} onOpenChange={setDevicesOpen} />
         </ThreadProvider>
       </ModeProvider>
-    </CopilotKit>
+    </CopilotKitProvider>
   )
 }
