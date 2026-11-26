@@ -98,7 +98,7 @@ The `effect` dependency (pinned `~4.1.5`, because the HA client's sync-send inva
 
 ## TypeScript config
 
-All packages share the same strict tsconfig:
+All packages under `packages/` share the same strict tsconfig:
 
 ```json
 {
@@ -115,7 +115,7 @@ All packages share the same strict tsconfig:
     "skipLibCheck": true,
     "sourceMap": true,
     "declaration": true,
-    "declarationMap": true,
+    "inlineSources": true,
     "outDir": "./dist",
     "rootDir": "./src"
   }
@@ -127,6 +127,7 @@ Key flags:
 - `noUncheckedIndexedAccess: true` → all index accesses return `| undefined`.
 - `exactOptionalPropertyTypes: true` → `undefined` is not assignable to optional properties.
 - `moduleDetection: "force"` → every `.ts` file is treated as a module (no global scripts).
+- `inlineSources: true`, no `declarationMap` → `src/` is not published, so source maps embed the sources and no declaration maps (which can only point at files) are emitted.
 
 ## Testing
 
