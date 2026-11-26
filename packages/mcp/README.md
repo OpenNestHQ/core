@@ -4,15 +4,22 @@ A stdio [MCP](https://modelcontextprotocol.io) server that exposes the OpenNest 
 
 ## Installation
 
-> **Not yet published.** Publishing to a package registry is out of scope for now, so `npx @opennest/mcp` does not work until the package is released. Until then, build it from this monorepo (see [Development](#development)) and run `node packages/mcp/dist/cli.js`.
+Requires Node.js >= 24.
 
-Once published, run it with:
+Run it without installing, pointing it at your device inventory:
 
 ```bash
-npx @opennest/mcp
+OPENNEST_YAML=/absolute/path/to/opennest.yaml npx @opennest/mcp
 ```
 
-Requires Node.js >= 24.
+Or install it globally, which provides the `opennest-mcp` command:
+
+```bash
+npm install -g @opennest/mcp
+OPENNEST_YAML=/absolute/path/to/opennest.yaml opennest-mcp
+```
+
+To run it from source, see [Development](#development).
 
 TypeScript consumers also need `@types/node`: the type declarations of the upstream `@modelcontextprotocol/server` package reference Node globals.
 
@@ -194,8 +201,8 @@ From the monorepo root:
 
 ```bash
 pnpm install
-pnpm --filter @opennest/mcp run build   # compile to dist/
-pnpm --filter @opennest/mcp run test    # vitest
+pnpm --filter "@opennest/mcp..." run build   # compile the server and its dependencies
+pnpm --filter @opennest/mcp run test         # vitest
 
 OPENNEST_YAML=packages/vm/__fixtures__/inventory.yaml node packages/mcp/dist/cli.js
 ```

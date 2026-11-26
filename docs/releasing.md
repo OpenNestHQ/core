@@ -108,9 +108,6 @@ trusted publisher can be configured for it.
 - [ ] A granular npm access token, stored as the `NPM_TOKEN` Actions secret:
       packages and scopes limited to `@opennest`, **Read and write (publish and
       stage)**, not "stage only", **Bypass 2FA** enabled, short expiry.
-- [ ] The "Not yet published" note in
-      [`packages/mcp/README.md`](../packages/mcp/README.md) is removed: the
-      README is published with the package.
 - [ ] `.changeset/initial-release.md` is still pending and the six versions are
       `0.0.0`.
 
