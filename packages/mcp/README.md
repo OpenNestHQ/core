@@ -14,6 +14,8 @@ npx @opennest/mcp
 
 Requires Node.js >= 24.
 
+TypeScript consumers also need `@types/node`: the type declarations of the upstream `@modelcontextprotocol/server` package reference Node globals.
+
 ### Client configuration
 
 Typical MCP client entry:
