@@ -1,0 +1,105 @@
+name: Release
+
+# Every push to main either opens/updates the "version packages" pull request
+# (pending changesets) or publishes the versions that are not on npm yet.
+on:
+  push:
+    branches: [main]
+
+# Never cancel a release halfway: a later push waits for the running one.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      # npm provenance now, Trusted Publishing (OIDC) later.
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Changelogs link each changeset to the commit that added it.
+          fetch-depth: 0
+          # Nothing pushes with the git CLI (the changesets action uses the
+          # GitHub API), so don't leave a token behind in .git/config.
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+          # Writes the .npmrc that reads NODE_AUTH_TOKEN. Remove this line
+          # together with NODE_AUTH_TOKEN when switching to Trusted Publishing:
+          # without a token it falls back to a dummy one, which turns an OIDC
+          # failure into a misleading 404 from the registry.
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Format check
+        run: pnpm run format:check
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Test
+        run: pnpm run test
+
+      - name: Test release scripts
+        run: pnpm run test:scripts
+
+      - name: Release check
+        run: pnpm run release:check
+
+      # Created by the OpenNest GitHub App so that the version pull request
+      # triggers CI, which pull requests opened with GITHUB_TOKEN don't. No
+      # fallback: the release fails if the token cannot be created.
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ secrets.OPENNEST_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.OPENNEST_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      # `changeset publish` runs `pnpm publish` in each package, which replaces
+      # the `workspace:` ranges with real versions.
+      - name: Version pull request or publish
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        with:
+          # The action only reads its token from this input.
+          github-token: ${{ steps.app-token.outputs.token }}
+          version-script: pnpm run version-packages
+          publish-script: pnpm run release
+          pr-title: 'chore(release): version packages'
+          commit-message: 'chore(release): version packages'
+        env:
+          # For @changesets/changelog-github. Must equal `github-token`.
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Temporary, for the first publication: a package must exist on npm
+          # before a trusted publisher can be configured for it. Once all of
+          # them have one (workflow file `release.yml`, `npm publish` allowed),
+          # remove this line and `registry-url` above, then delete the
+          # NPM_TOKEN secret. pnpm already prefers OIDC over this token
+          # whenever the exchange succeeds.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # pnpm 11 reads neither NPM_CONFIG_* variables nor
+          # `publishConfig.provenance`: PNPM_CONFIG_PROVENANCE is the one that
+          # signs the packages. NPM_CONFIG_PROVENANCE only matters to npm.
+          NPM_CONFIG_PROVENANCE: true
+          PNPM_CONFIG_PROVENANCE: true
