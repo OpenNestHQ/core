@@ -81,7 +81,9 @@ done
 ### When something goes wrong
 
 **A publish failed partway.** Versions already on npm are skipped by the next
-publish. How to run it depends on where the cause is:
+publish. Until it is resolved, merge nothing else into `main`: any push to
+`main` can publish the missing packages from newer code than the rest of that
+version. How to run the next publish depends on where the cause is:
 
 - **Outside the repository** (`NPM_TOKEN`, npm settings, GitHub App
   permissions, registry or GitHub outage): fix it, then re-run the failed
@@ -89,8 +91,9 @@ publish. How to run it depends on where the cause is:
 - **In the repository** (workflow file, manifests, code): a re-run uses the old
   commit and the old workflow file, so the fix has to reach `main`.
   - Branch from `main` and open the pull request against `main`: `develop` may
-    carry pending changesets. Add no changeset to it, except in the last case
-    below.
+    carry pending changesets. Add no changeset to it, unless the missing packages
+    depend on a fix to already-published packages (see "The fix touches published
+    packages" below).
   - **`main` holds no pending changeset** (`.changeset/` has no `.md` file
     besides `README.md`): merging the fix publishes the missing versions.
   - **`main` already holds pending changesets:** merging the fix opens or updates
