@@ -21,12 +21,17 @@
     "test:scripts": "vitest run --dir scripts",
     "release:check": "pnpm run build && node scripts/check-manifests.mjs && node scripts/check-tarballs.mjs",
     "release:check:manifests": "node scripts/check-manifests.mjs",
+    "changeset": "changeset",
+    "version-packages": "changeset version && pnpm install --lockfile-only",
+    "release": "pnpm run build && changeset publish",
     "start": "pnpm --filter @opennest/playground run start",
     "lint": "pnpm exec eslint \"examples/\" \"packages/\" \"scripts/\"",
     "format": "pnpm exec prettier --write \"(examples|packages)/**/*.+(js|ts|json|tsx)\" \"scripts/**/*.mjs\"",
     "format:check": "pnpm exec prettier --check \"(examples|packages)/**/*.+(js|ts|json|tsx)\" \"scripts/**/*.mjs\""
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.3",
     "@eslint/js": "^10.0.1",
     "@vitest/coverage-v8": "4.1.10",
     "eslint": "^10.8.1",
