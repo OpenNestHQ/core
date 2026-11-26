@@ -487,7 +487,7 @@ Full procedure and first-publication runbook: [`docs/releasing.md`](docs/releasi
 - Add a changeset (`pnpm changeset`) when changing a published package. The 6 packages are a `fixed` group sharing one version; `examples/*` are ignored. In `0.x`: `minor` = breaking change or feature, `patch` = fix, never `major`.
 - `pnpm run release:check` builds, then runs `scripts/check-manifests.mjs` and `scripts/check-tarballs.mjs`. `release:check:manifests` runs the first one alone; `test:scripts` tests the rules in `scripts/lib/`.
 - A new published package must be added to `PUBLISHED_PACKAGES` (`scripts/lib/manifest-rules.mjs`) and to the `fixed` group in `.changeset/config.json`.
-- `version-packages` and `release` are run by CI; `pnpm run release` publishes to npm.
+- `version-packages` and `release` are run by CI; `pnpm run release` builds `packages/*` only (not the examples), then publishes to npm.
 
 ## Generated files (do not edit)
 

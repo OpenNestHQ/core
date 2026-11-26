@@ -23,7 +23,7 @@
     "release:check:manifests": "node scripts/check-manifests.mjs",
     "changeset": "changeset",
     "version-packages": "changeset version && pnpm install --lockfile-only",
-    "release": "pnpm run build && changeset publish",
+    "release": "pnpm --filter \"./packages/*\" run build && changeset publish",
     "start": "pnpm --filter @opennest/playground run start",
     "lint": "pnpm exec eslint \"examples/\" \"packages/\" \"scripts/\"",
     "format": "pnpm exec prettier --write \"(examples|packages)/**/*.+(js|ts|json|tsx)\" \"scripts/**/*.mjs\"",

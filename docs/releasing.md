@@ -225,7 +225,8 @@ Rulesets, create a branch ruleset targeting `main`:
 
 The `release` job runs dependency code while `id-token: write` is available:
 dependency install scripts (those allowed in
-[`pnpm-workspace.yaml`](../pnpm-workspace.yaml)) and the build of every
-workspace package, examples included. Until the switch to Trusted Publishing,
-that build also runs in the step that holds `NODE_AUTH_TOKEN`. The other checks
-run in the `verify` job, which has no publishing permission and no secret.
+[`pnpm-workspace.yaml`](../pnpm-workspace.yaml)), the build of the six published
+packages (`examples/*` are not built there) and Changesets itself. Until the
+switch to Trusted Publishing, that build and Changesets also run in the step that
+holds `NODE_AUTH_TOKEN`. The checks run in the `verify` job, which has no
+publishing permission and no secret.

@@ -107,8 +107,10 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      # `changeset publish` runs `pnpm publish` in each package, which replaces
-      # the `workspace:` ranges with real versions.
+      # `pnpm run release` builds `packages/*` only (this step can publish, so it
+      # runs as little code as possible), then `changeset publish` runs
+      # `pnpm publish` in each package, which replaces the `workspace:` ranges
+      # with real versions.
       - name: Version pull request or publish
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
