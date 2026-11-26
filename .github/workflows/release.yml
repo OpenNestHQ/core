@@ -120,14 +120,16 @@ jobs:
           pr-title: 'chore(release): version packages'
           commit-message: 'chore(release): version packages'
         env:
-          # Temporary, for the first publication: a package must already exist
-          # on npm before a trusted publisher can be configured for it
-          # (https://docs.npmjs.com/cli/v11/commands/npm-trust#prerequisites).
-          # To switch, follow docs/releasing.md: it removes this line and
-          # `registry-url` above, configures the publishers (workflow file
-          # `release.yml`, `npm publish` allowed), releases, then deletes the
-          # NPM_TOKEN secret. pnpm already prefers OIDC over this token
-          # whenever the exchange succeeds.
+          # Temporary, for the first publication: the npm CLI docs state that a
+          # package must already exist on npm to configure its trusted
+          # publisher with `npm trust`
+          # (https://docs.npmjs.com/cli/v11/commands/npm-trust#prerequisites);
+          # the npmjs.com form is expected to require the same. To switch, follow
+          # docs/releasing.md: it removes this line and `registry-url` above,
+          # configures the publishers (workflow file `release.yml`,
+          # `npm publish` allowed), releases, then deletes the NPM_TOKEN secret.
+          # pnpm already prefers OIDC over this token whenever the exchange
+          # succeeds.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           # PNPM_CONFIG_PROVENANCE is what makes pnpm 11 sign the packages: it
           # ignores `publishConfig.provenance`. NPM_CONFIG_PROVENANCE is kept

@@ -89,15 +89,22 @@ publish. How to run it depends on where the cause is:
 - **In the repository** (workflow file, manifests, code): a re-run uses the old
   commit and the old workflow file, so the fix has to reach `main`.
   - Branch from `main` and open the pull request against `main`: `develop` may
-    carry pending changesets.
-  - The push must carry **no changeset**, and `main` must hold no other pending
-    one (`.changeset/` has no `.md` file besides `README.md`). Otherwise
-    `release.yml` opens a version pull request instead of publishing, and
-    merging it skips the missing versions. If `main` already has some, remove
-    them in the same pull request and add them back on `develop` after the
-    back-merge.
-  - The push then publishes the missing versions. Finish with the pull request
-    `main` → `develop`.
+    carry pending changesets. Add no changeset to it, except in the last case
+    below.
+  - **`main` holds no pending changeset** (`.changeset/` has no `.md` file
+    besides `README.md`): merging the fix publishes the missing versions.
+  - **`main` already holds pending changesets:** merging the fix opens or updates
+    the version pull request instead. Merge that one too: the `fixed` group
+    releases the next version of all six from one commit. Here, skipping the
+    missing versions is intended: the partial version stays incomplete (use
+    `npm deprecate` on its published packages if needed). Do not delete
+    changesets to force a publish: their code stays on `main`, and the missing
+    packages would be built from newer code than the others of the same version.
+  - **The fix touches published packages:** they are not republished. Add a
+    changeset on `develop` so that the fix ships in the next release. If the
+    missing packages depend on that fix, put the changeset in the fix pull
+    request instead and release the next version of all six, as above.
+  - Finish with the pull request `main` → `develop`.
 
 **A release run was superseded.** The concurrency group of `release.yml` keeps a
 single pending run, so a newer push to `main` can replace it. The replaced run
@@ -105,15 +112,17 @@ shows as **cancelled** in the Actions tab. If it belonged to a merged version
 pull request and the newer push carries new changesets, that version is not
 published: re-run the cancelled run.
 
-In every case, check [all six packages](#check-what-was-published) on npm before
-merging any further version pull request. Neither recovery has been exercised
-yet.
+Check [all six packages](#check-what-was-published) on npm before merging any
+further version pull request: merging it skips a missing version, which is only
+acceptable when you release the next version on purpose, as described above.
+None of these recoveries has been exercised yet.
 
 ## First publication
 
-The first release uses a temporary token: a package must already exist on npm
-before a trusted publisher can be configured for it (see the
-[`npm trust` prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust#prerequisites)).
+The first release uses a temporary token. The npm CLI docs state that a package
+must already exist on npm to configure its trusted publisher with `npm trust`
+([prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust#prerequisites));
+the npmjs.com form is expected to require the same (verify on npmjs.com).
 
 > **Deadline:** npm has announced that granular tokens will lose
 > [direct publishing in January 2027](https://docs.npmjs.com/about-access-tokens).
