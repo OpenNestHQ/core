@@ -10,11 +10,17 @@ import { ChatArea } from './chat/chat-area'
 import { LlmBanner } from './chat/llm-banner'
 import { ActionsPanel } from './panel/actions-panel'
 import { DevicesDialog } from './panel/devices-dialog'
+import { suggestionRenderer } from './suggestions/suggestion-card'
+
+const customRenderers = [suggestionRenderer]
 
 export function DemoApp({ llmConfigured }: { llmConfigured: boolean }) {
   const [devicesOpen, setDevicesOpen] = useState(false)
   return (
-    <CopilotKit runtimeUrl="/api/copilotkit">
+    <CopilotKit
+      runtimeUrl="/api/copilotkit"
+      renderCustomMessages={customRenderers}
+    >
       <ModeProvider>
         <ThreadProvider>
           <div className="flex h-screen">

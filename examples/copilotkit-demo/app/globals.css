@@ -54,3 +54,8 @@ body {
   pointer-events: none;
   opacity: 0.5;
 }
+
+/* Direct HomeDSL input replaces the chat input (Advanced mode). */
+[data-dsl-input='true'] textarea:not(.font-mono) {
+  display: none;
+}
