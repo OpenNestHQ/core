@@ -2,6 +2,7 @@
 
 import { CopilotChat } from '@copilotkit/react-core/v2'
 import { useThread } from '../thread/thread-context'
+import { VmInterrupts } from '../interrupts/vm-interrupt'
 import { useDemoState } from '@/lib/client/use-demo-state'
 
 export function ChatArea() {
@@ -14,6 +15,7 @@ export function ChatArea() {
       className="relative flex min-h-0 flex-1 flex-col"
       data-question-open={questionOpen}
     >
+      <VmInterrupts />
       <CopilotChat
         key={threadId}
         threadId={threadId}

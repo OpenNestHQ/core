@@ -47,3 +47,10 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #52525b;
 }
+
+/* While the VM waits for an answer, the chat input is locked: the agent
+   would reject a new message (interrupt_pending). */
+[data-question-open='true'] textarea {
+  pointer-events: none;
+  opacity: 0.5;
+}
