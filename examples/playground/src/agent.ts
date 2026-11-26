@@ -9,13 +9,35 @@ function getModelId(): string {
   return process.env['OPENNEST_MODEL'] ?? 'openai/gpt-4o-mini'
 }
 
-function createModel(modelId: string, apiKey: string, baseURL?: string) {
+export interface NlConfig {
+  apiKey?: string
+  baseURL?: string
+}
+
+/**
+ * NL mode needs either an API key (OpenAI) or a base URL (an
+ * OpenAI-compatible provider, e.g. a local server that needs no key).
+ * Returns null when neither is set.
+ */
+export function getNlConfig(): NlConfig | null {
+  const apiKey = process.env['OPENAI_API_KEY'] || undefined
+  const baseURL = process.env['OPENAI_BASE_URL'] || undefined
+  if (!apiKey && !baseURL) return null
+  return {
+    ...(apiKey ? { apiKey } : {}),
+    ...(baseURL ? { baseURL } : {}),
+  }
+}
+
+function createModel(modelId: string, config: NlConfig) {
   const parts = modelId.split('/')
   const modelName = parts.length > 1 ? parts[1]! : modelId
 
   const openai = createOpenAI({
-    apiKey,
-    ...(baseURL ? { baseURL } : {}),
+    // @ai-sdk/openai refuses to run without a key; keyless
+    // OpenAI-compatible servers ignore this placeholder.
+    apiKey: config.apiKey ?? 'no-key',
+    ...(config.baseURL ? { baseURL: config.baseURL } : {}),
   })
 
   return openai(modelName)
@@ -41,16 +63,15 @@ export async function translateNlToDsl(
 ): Promise<NlTranslateResult> {
   const systemPrompt = createPlaygroundSystemPrompt(client)
   const modelId = getModelId()
-  const apiKey = process.env['OPENAI_API_KEY']
-  const baseURL = process.env['OPENAI_BASE_URL']
+  const config = getNlConfig()
 
-  if (!apiKey) {
+  if (!config) {
     throw new Error(
-      'OPENAI_API_KEY is not set. Create a .env file with OPENAI_API_KEY=your-key',
+      'NL mode is not configured. Set OPENAI_API_KEY, or OPENAI_BASE_URL for an OpenAI-compatible provider, in a .env file',
     )
   }
 
-  const model = createModel(modelId, apiKey, baseURL)
+  const model = createModel(modelId, config)
 
   const messages: ModelMessage[] = [
     { role: 'system', content: systemPrompt },

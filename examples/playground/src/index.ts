@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { OpenNestClient, createConfirmationMiddleware } from '@opennest/sdk'
 import type { PlannedAction, Middleware } from '@opennest/sdk'
 import { createPlaygroundRegistry } from './devices.js'
@@ -6,7 +7,9 @@ import { startRepl } from './repl.js'
 import { initTelemetry } from './telemetry.js'
 
 async function main(): Promise<void> {
-  process.loadEnvFile()
+  if (existsSync('.env')) {
+    process.loadEnvFile()
+  }
 
   const telemetry = initTelemetry()
   const registry = createPlaygroundRegistry()
