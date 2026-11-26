@@ -13,14 +13,14 @@ No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm w
 | Package | npm name | Role | Depends on |
 |---|---|---|---|
 | `packages/lang-core` | `@opennest/lang-core` | Parser (HomeDSL → AST), prompt generator, AST builders | *none* |
-| `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers | *none* (only `js-yaml` + `effect`) |
+| `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers | `lang-core` (types only) (+ `js-yaml`, `effect`) |
 | `packages/vm` | `@opennest/vm` | interpreter: `executeCommand()`, resolution, middleware, interactions, validation, tracing, verification; also `@opennest/vm/effect` | `lang-core`, `devices` (+ `effect`) |
-| `packages/vm-opentelemetry` | `@opennest/vm-opentelemetry` | OpenTelemetry trace sink for the VM `ExecutionTrace` | `@opentelemetry/api` (dev: `vm`, types only) |
+| `packages/vm-opentelemetry` | `@opennest/vm-opentelemetry` | OpenTelemetry trace sink for the VM `ExecutionTrace` | `@opentelemetry/api` (peer: `vm`, types only) |
 | `packages/sdk` | `@opennest/sdk` | Deterministic execution facade (`OpenNestClient`) over parser + devices + VM | `lang-core`, `devices`, `vm` |
 | `packages/mcp` | `@opennest/mcp` | Stdio MCP server exposing the runtime (HomeDSL execution, interactions, suggestions, session) to AI agents | `sdk`, `vm`, `devices` |
 | `examples/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `sdk` |
 
-Cross-package deps use `"workspace:*"` in package.json, resolved by pnpm.
+Cross-package deps use `"workspace:*"` in package.json (`"workspace:^"` for peer dependencies), resolved by pnpm.
 
 ## Commands
 
@@ -44,6 +44,10 @@ pnpm --filter @opennest/vm run test
 # Test all packages with coverage (what CI runs; config: vitest.coverage.config.ts)
 pnpm run test:coverage
 
+# Check that the packages can be released: build, manifests, tarball contents,
+# then install the tarballs outside the repo and use them (needs the npm registry)
+pnpm run release:check
+
 # Regenerate packages/lang-core/example-prompt.md
 pnpm run build:prompt
 
@@ -66,12 +70,13 @@ You can also run commands per-package with `cd` and `pnpm run <script>` as usual
 
 pnpm handles topological ordering automatically. The dependency graph is:
 
-1. `devices` and `lang-core` — no cross-package deps, build independently (parallel-safe).
-2. `vm` — depends on both `devices` + `lang-core`.
-3. `sdk` — depends on `lang-core` + `devices` + `vm`.
-4. `mcp` — depends on `sdk` + `vm` + `devices`; nothing depends on it.
-5. `examples/playground` (TUI) and `examples/web-playground` — depend on `sdk`.
-6. `lang-core`'s `build:prompt` requires `dist/` to exist, so `build` must run first.
+1. `lang-core` — no cross-package deps.
+2. `devices` — depends on `lang-core` (types only).
+3. `vm` — depends on both `devices` + `lang-core`.
+4. `sdk` — depends on `lang-core` + `devices` + `vm`.
+5. `mcp` — depends on `sdk` + `vm` + `devices`; nothing depends on it.
+6. `examples/playground` (TUI) and `examples/web-playground` — depend on `sdk`.
+7. `lang-core`'s `build:prompt` requires `dist/` to exist, so `build` must run first.
 
 ## Module system
 
