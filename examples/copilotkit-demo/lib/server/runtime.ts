@@ -24,10 +24,6 @@ function createHandler() {
   return createCopilotRuntimeHandler({ runtime, basePath: '/api/copilotkit' })
 }
 
-// One runtime per process (Next may re-evaluate route modules in dev).
-const globalForRuntime = globalThis as unknown as {
-  opennestCopilotHandler?: ReturnType<typeof createHandler>
-}
-
-export const copilotHandler = (globalForRuntime.opennestCopilotHandler ??=
-  createHandler())
+// Not cached on globalThis: in dev, an edit re-evaluates this module and
+// must pick up the new agent code. Houses live in ./house (module state).
+export const copilotHandler = createHandler()
