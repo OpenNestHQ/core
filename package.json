@@ -18,10 +18,11 @@
     "build:prompt": "pnpm --filter @opennest/lang-core run build:prompt",
     "test": "pnpm -r run test",
     "test:coverage": "vitest run --coverage --config vitest.coverage.config.ts",
+    "test:scripts": "vitest run --dir scripts",
     "start": "pnpm --filter @opennest/playground run start",
-    "lint": "pnpm exec eslint \"examples/\" \"packages/\"",
-    "format": "pnpm exec prettier --write \"(examples|packages)/**/*.+(js|ts|json|tsx)\"",
-    "format:check": "pnpm exec prettier --check \"(examples|packages)/**/*.+(js|ts|json|tsx)\""
+    "lint": "pnpm exec eslint \"examples/\" \"packages/\" \"scripts/\"",
+    "format": "pnpm exec prettier --write \"(examples|packages)/**/*.+(js|ts|json|tsx)\" \"scripts/**/*.mjs\"",
+    "format:check": "pnpm exec prettier --check \"(examples|packages)/**/*.+(js|ts|json|tsx)\" \"scripts/**/*.mjs\""
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
