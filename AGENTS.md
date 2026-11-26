@@ -19,6 +19,7 @@ No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm w
 | `packages/sdk` | `@opennest/sdk` | Deterministic execution facade (`OpenNestClient`) over parser + devices + VM | `lang-core`, `devices`, `vm` |
 | `packages/mcp` | `@opennest/mcp` | Stdio MCP server exposing the runtime (HomeDSL execution, interactions, suggestions, session) to AI agents | `sdk`, `vm`, `devices` |
 | `examples/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `sdk` |
+| `examples/copilotkit-demo` | `@opennest/copilotkit-demo` (private, never published) | Live demo: CopilotKit chat + server-side AG-UI agent driving the VM, live actions panel | `sdk`, `devices`, `vm` |
 
 Cross-package runtime and peer deps use `"workspace:^"` in package.json (devDependencies may use `"workspace:*"`), resolved by pnpm and published as `^x.y.z`.
 
@@ -81,7 +82,7 @@ pnpm handles topological ordering automatically. The dependency graph is:
 3. `vm` — depends on both `devices` + `lang-core`.
 4. `sdk` — depends on `lang-core` + `devices` + `vm`.
 5. `mcp` — depends on `sdk` + `vm` + `devices`; nothing depends on it.
-6. `examples/playground` (TUI) and `examples/web-playground` — depend on `sdk`.
+6. `examples/playground` (TUI), `examples/web-playground` and `examples/copilotkit-demo` — depend on `sdk` (the CopilotKit demo also on `devices` + `vm`).
 7. `lang-core`'s `build:prompt` requires `dist/` to exist, so `build` must run first.
 
 ## Module system
@@ -135,7 +136,7 @@ Key flags:
 - Test files sit alongside source: `src/**/*.test.ts`.
 - Run all tests: `pnpm run test` (from the package directory).
 - Run a single file: `pnpm exec vitest run path/to/file.test.ts` (from the package directory).
-- **playground has no tests.**
+- **playground has no tests.** `copilotkit-demo` tests its server side only (`lib/server/*.test.ts`, mocked LLM).
 - `sdk` is covered by `client.test.ts` (end-to-end via `MockDriver`).
 - `vm-opentelemetry` has its own tests (`normalizer.test.ts`, `OpenTelemetryTraceSink.test.ts`).
 - `vm` tests create devices inline with `MockDriver` + `seed()`. No external fixture files are required at runtime. `packages/vm/__fixtures__/inventory.yaml` is a sample inventory (7 devices, English rooms) used e.g. by the MCP README to run the server; the vm tests don't need it.
@@ -465,6 +466,11 @@ examples/
   web-playground/
     lib/vm/              # VM adapter + device fixtures
     hooks/               # use-vm() React context + reducer
+  copilotkit-demo/
+    app/api/copilotkit/  # CopilotRuntime route hosting the OpenNest AG-UI agent
+    lib/server/          # OpenNestAgent, per-thread HouseStore, panel state, interrupt mapping, LLM port
+    lib/shared/          # DemoState + interrupt types shared with the UI
+    components/          # chat, VM actions panel, interrupt + suggestion cards, Basic | Advanced switch
 ```
 
 ## Language

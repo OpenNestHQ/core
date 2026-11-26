@@ -25,7 +25,7 @@ Natural Language → HomeAgent (LLM) → HomeDSL → VM (executeCommand) → Dev
 | [mcp](./packages/mcp/README.md) | `@opennest/mcp` | Stdio MCP server exposing the runtime to AI agents |
 | [playground](./examples/playground/README.md) | `@opennest/playground` | Interactive TUI REPL with 14 mock devices + NL→DSL agent |
 
-A Next.js demo UI lives in [examples/web-playground](./examples/web-playground/README.md).
+A Next.js demo UI lives in [examples/web-playground](./examples/web-playground/README.md). A live chat demo built on CopilotKit + AG-UI lives in [examples/copilotkit-demo](./examples/copilotkit-demo/README.md).
 
 ---
 

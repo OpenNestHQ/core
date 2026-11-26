@@ -1,0 +1,411 @@
+drivers:
+  mock:
+    latency: 200
+
+rooms:
+  - living_room
+  - bedroom
+  - kitchen
+  - office
+  - bathroom
+  - entrance
+
+definitions:
+  devices:
+    tv:
+      description: Television set — for watching content, streaming, and multimedia
+      properties:
+        power:
+          type: boolean
+          description: Turn the TV on or off
+        volume:
+          type: number
+          range: [0, 100]
+          description: Sound level, from 0 (mute) to 100 (max)
+        source:
+          type: string
+          values: [hdmi1, hdmi2, tv, netflix]
+          description: Input source to display
+        channel:
+          type: number
+          description: TV channel number
+      actions:
+        play:
+          description: Start or resume playback
+        pause:
+          description: Pause playback
+    light:
+      description: Ceiling or wall light — main room illumination
+      properties:
+        power:
+          type: boolean
+          description: Turn the light on or off
+        brightness:
+          type: number
+          range: [0, 100]
+          description: Brightness level, from 0 (off) to 100 (full)
+        color:
+          type: string
+          description: Light color (e.g. warm_white, yellow)
+        mode:
+          type: string
+          description: Lighting mode (e.g. normal, reading)
+    speaker:
+      description: Music speaker — for audio playback and media control
+      properties:
+        power:
+          type: boolean
+          description: Turn the speaker on or off
+        volume:
+          type: number
+          range: [0, 100]
+          description: Playback volume, from 0 (mute) to 100 (max)
+      actions:
+        play:
+          description: Start or resume playback
+        pause:
+          description: Pause playback
+        next:
+          description: Skip to the next track
+        announce:
+          description: Speak a message aloud
+          parameters:
+            - name: message
+              type: string
+              required: true
+              description: Text to speak
+            - name: volume
+              type: number
+              description: Announcement volume
+    thermostat:
+      description: Room thermostat — controls heating/cooling temperature
+      properties:
+        temperature:
+          type: number
+          description: Target temperature in degrees Celsius
+    fan:
+      description: Ventilation fan — for air circulation and cooling
+      properties:
+        power:
+          type: boolean
+          description: Turn the fan on or off
+        speed:
+          type: number
+          range: [0, 3]
+          description: Fan speed, from 0 (off) to 3 (max)
+    camera:
+      description: Security camera — captures snapshots
+      actions:
+        snapshot:
+          description: Capture a snapshot image
+          parameters:
+            - name: count
+              type: number
+              description: Number of snapshots to capture
+    vacuum:
+      description: Robot vacuum cleaner — autonomous floor cleaning
+      actions:
+        start:
+          description: Start a cleaning session
+          parameters:
+            - name: mode
+              type: enum
+              values: [silent, normal, turbo]
+              description: Cleaning intensity
+        stop:
+          description: Stop the current cleaning session
+    door:
+      description: Smart door — controls lock/unlock state
+      properties:
+        state:
+          type: string
+          description: Current lock state (locked or unlocked)
+      actions:
+        lock:
+          description: Lock the door
+        unlock:
+          description: Unlock the door
+    switch:
+      description: Generic on/off switch — for simple power control
+      properties:
+        power:
+          type: boolean
+          description: Turn the switch on or off
+  owners:
+    Alice:
+      name: Alice
+      description: "Alice's personal devices"
+    Bob:
+      name: Bob
+      description: "Bob's personal devices"
+    kids:
+      name: Kids
+      description: "Devices in the children's rooms"
+    everybody:
+      name: everybody
+      description: "Shared family devices (default)"
+  tags:
+    main:
+      description: "Main/default device in a room"
+    audio:
+      description: "Devices with audio capabilities"
+    video:
+      description: "Devices with video/display capabilities"
+    security:
+      description: "Security-related devices"
+
+devices:
+  - id: tv_living_room
+    type: tv
+    room: living_room
+    name: Living Room TV
+    driver: mock
+    owners: [Alice]
+    tags: [video]
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+      source:
+        type: string
+      channel:
+        type: number
+    actions:
+      - play
+      - pause
+    init:
+      power: false
+      volume: 15
+      source: hdmi1
+      channel: 1
+
+  - id: tv_living_room_2
+    type: tv
+    room: living_room
+    name: Living Room TV 2
+    driver: mock
+    owners: [Bob]
+    tags: [video]
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+      source:
+        type: string
+      channel:
+        type: number
+    actions:
+      - play
+      - pause
+    init:
+      power: false
+      volume: 20
+      source: netflix
+      channel: 42
+
+  - id: tv_bedroom
+    type: tv
+    room: bedroom
+    name: Bedroom TV
+    driver: mock
+    owners: [kids]
+    tags: [video]
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+      source:
+        type: string
+      channel:
+        type: number
+    actions:
+      - play
+      - pause
+    init:
+      power: false
+      volume: 10
+      source: tv
+      channel: 7
+
+  - id: light_living_room_1
+    type: light
+    room: living_room
+    name: Living Room Ceiling Light
+    driver: mock
+    tags: [main]
+    properties:
+      power:
+        type: boolean
+      brightness:
+        type: number
+      color:
+        type: string
+      mode:
+        type: string
+    actions: []
+    init:
+      power: false
+      brightness: 80
+      color: warm_white
+      mode: normal
+
+  - id: light_living_room_2
+    type: light
+    room: living_room
+    name: Living Room Lamp
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      brightness:
+        type: number
+      color:
+        type: string
+      mode:
+        type: string
+    actions: []
+    init:
+      power: true
+      brightness: 40
+      color: yellow
+      mode: reading
+
+  - id: light_bedroom
+    type: light
+    room: bedroom
+    name: Bedroom Ceiling Light
+    driver: mock
+    owners: [kids]
+    properties:
+      power:
+        type: boolean
+      brightness:
+        type: number
+      color:
+        type: string
+      mode:
+        type: string
+    actions: []
+    init:
+      power: false
+      brightness: 100
+      color: white
+      mode: normal
+
+  - id: thermostat_living_room
+    type: thermostat
+    room: living_room
+    name: Living Room Thermostat
+    driver: mock
+    properties:
+      temperature:
+        type: number
+    actions: []
+    init:
+      temperature: 21
+
+  - id: speaker_living_room
+    type: speaker
+    room: living_room
+    name: Living Room Speaker
+    driver: mock
+    tags: [audio, main]
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+    actions:
+      - play
+      - pause
+      - next
+      - announce
+    init:
+      power: false
+      volume: 30
+
+  - id: speaker_bedroom
+    type: speaker
+    room: bedroom
+    name: Bedroom Speaker
+    driver: mock
+    tags: [audio]
+    properties:
+      power:
+        type: boolean
+      volume:
+        type: number
+    actions:
+      - play
+      - pause
+      - announce
+    init:
+      power: false
+      volume: 20
+
+  - id: vacuum_living_room
+    type: vacuum
+    room: living_room
+    name: Living Room Vacuum
+    driver: mock
+    properties: {}
+    actions:
+      - start
+      - stop
+    init: {}
+
+  - id: camera_entrance
+    type: camera
+    room: entrance
+    name: Entrance Camera
+    driver: mock
+    tags: [security]
+    properties: {}
+    actions:
+      - snapshot
+    init: {}
+
+  - id: door_entrance
+    type: door
+    room: entrance
+    name: Entrance Door
+    driver: mock
+    tags: [security]
+    properties:
+      state:
+        type: string
+    actions:
+      - lock
+      - unlock
+    init:
+      state: unlocked
+
+  - id: fan_bedroom
+    type: fan
+    room: bedroom
+    name: Bedroom Fan
+    driver: mock
+    properties:
+      power:
+        type: boolean
+      speed:
+        type: number
+    actions: []
+    init:
+      power: false
+      speed: 1
+
+  - id: switch_entrance
+    type: switch
+    room: entrance
+    name: Entrance Switch
+    driver: mock
+    properties:
+      power:
+        type: boolean
+    actions: []
+    init:
+      power: false
