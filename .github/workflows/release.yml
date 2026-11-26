@@ -11,38 +11,31 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+# Nothing by default: each job asks for what it needs.
+permissions: {}
+
 jobs:
-  release:
+  # Runs the repository's checks, and so a lot of dependency code, without any
+  # publishing permission or secret.
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     permissions:
-      contents: write
-      pull-requests: write
-      # npm provenance now, Trusted Publishing (OIDC) later.
-      id-token: write
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          # Changelogs link each changeset to the commit that added it.
-          fetch-depth: 0
-          # Nothing pushes with the git CLI (the changesets action uses the
-          # GitHub API), so don't leave a token behind in .git/config.
           persist-credentials: false
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: '.nvmrc'
           cache: pnpm
-          # Writes the .npmrc that reads NODE_AUTH_TOKEN. Remove this line
-          # together with NODE_AUTH_TOKEN when switching to Trusted Publishing:
-          # without a token it falls back to a dummy one, which turns an OIDC
-          # failure into a misleading 404 from the registry.
-          registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -65,6 +58,42 @@ jobs:
       - name: Release check
         run: pnpm run release:check
 
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # GitHub writes (branch, pull request, tags, releases) use the App token.
+      contents: read
+      # npm provenance now, Trusted Publishing (OIDC) later.
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Changelogs link each changeset to the commit that added it.
+          fetch-depth: 0
+          # Nothing pushes with the git CLI (the changesets action uses the
+          # GitHub API), so don't leave a token behind in .git/config.
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      # No dependency cache: nothing saved by another job gets published.
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: '.nvmrc'
+          # Writes the .npmrc that reads NODE_AUTH_TOKEN. Remove this line
+          # together with NODE_AUTH_TOKEN when switching to Trusted Publishing:
+          # without a token it falls back to a dummy one, which turns an OIDC
+          # failure into a misleading error from the registry.
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       # Created by the OpenNest GitHub App so that the version pull request
       # triggers CI, which pull requests opened with GITHUB_TOKEN don't. No
       # fallback: the release fails if the token cannot be created.
@@ -82,15 +111,14 @@ jobs:
       - name: Version pull request or publish
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
-          # The action only reads its token from this input.
+          # The action only reads its token from this input, and passes it on
+          # to both scripts as GITHUB_TOKEN (used by the changelog generator).
           github-token: ${{ steps.app-token.outputs.token }}
           version-script: pnpm run version-packages
           publish-script: pnpm run release
           pr-title: 'chore(release): version packages'
           commit-message: 'chore(release): version packages'
         env:
-          # For @changesets/changelog-github. Must equal `github-token`.
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           # Temporary, for the first publication: a package must exist on npm
           # before a trusted publisher can be configured for it. Once all of
           # them have one (workflow file `release.yml`, `npm publish` allowed),
@@ -98,8 +126,8 @@ jobs:
           # NPM_TOKEN secret. pnpm already prefers OIDC over this token
           # whenever the exchange succeeds.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # pnpm 11 reads neither NPM_CONFIG_* variables nor
-          # `publishConfig.provenance`: PNPM_CONFIG_PROVENANCE is the one that
-          # signs the packages. NPM_CONFIG_PROVENANCE only matters to npm.
+          # PNPM_CONFIG_PROVENANCE is what makes pnpm 11 sign the packages: it
+          # ignores `publishConfig.provenance`. NPM_CONFIG_PROVENANCE is kept
+          # as planned for npm, but is inert under pnpm 11.
           NPM_CONFIG_PROVENANCE: true
           PNPM_CONFIG_PROVENANCE: true
