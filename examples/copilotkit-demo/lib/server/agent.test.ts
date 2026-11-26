@@ -26,12 +26,17 @@ type Turn = LlmChunk[] | (() => never)
 /** Scripted model: each call to `turn` plays the next scripted turn. */
 function fakeLlm(turns: Turn[]): LlmPort & {
   calls: LlmMessage[][]
+  /** Whether `run_homedsl` was offered, per call. */
+  toolsOffered: boolean[]
 } {
   const calls: LlmMessage[][] = []
+  const toolsOffered: boolean[] = []
   return {
     calls,
-    async *turn({ messages }) {
+    toolsOffered,
+    async *turn({ messages, tools }) {
       calls.push(messages)
+      toolsOffered.push(tools !== false)
       const turn = turns[calls.length - 1] ?? [
         { type: 'text', delta: 'Done.' } as const,
       ]
@@ -354,15 +359,19 @@ describe('OpenNestAgent', () => {
     expect((last(events) as Finished).outcome?.type).toBe('success')
   })
 
-  it('answers a suggestion without calling the LLM', async () => {
-    const houses = testStore()
-    const llm = fakeLlm([call('light[bedroom].power = on'), say('On.')])
-    const agent = new OpenNestAgent({ houses, llm })
-    const first = await collect(agent, input('sugg'))
-    const suggestion = replayState(first).suggestions[0]!
-    const events = await collect(
+  /** Runs `light[bedroom].power = on` then answers the ambiance suggestion. */
+  async function answerAmbiance(
+    agent: OpenNestAgent,
+    thread: string,
+  ): Promise<BaseEvent[]> {
+    const first = await collect(
       agent,
-      input('sugg', {
+      input(thread, { forwardedProps: { dsl: 'light[bedroom].power = on' } }),
+    )
+    const suggestion = replayState(first).suggestions[0]!
+    return collect(
+      agent,
+      input(thread, {
         forwardedProps: {
           answerSuggestion: {
             suggestionId: suggestion.id,
@@ -371,11 +380,63 @@ describe('OpenNestAgent', () => {
         },
       }),
     )
+  }
+
+  const textOf = (events: BaseEvent[]) =>
+    ofType<BaseEvent & { delta: string }>(
+      events,
+      EventType.TEXT_MESSAGE_CONTENT,
+    )
+      .map(t => t.delta)
+      .join('')
+
+  it('runs a suggestion answer on the VM, then one model turn to report it', async () => {
+    const llm = fakeLlm([say('Cinema mode is on in the bedroom.')])
+    const agent = new OpenNestAgent({ houses: testStore(), llm })
+    const events = await answerAmbiance(agent, 'sugg')
     expect((last(events) as Finished).outcome?.type).toBe('success')
-    expect(llm.calls).toHaveLength(2)
     const state = replayState(events)
     expect(device(state, 'light_bedroom')['brightness']).toBe(20)
     expect(state.program?.origin).toBe('suggestion')
+    // One turn, without the tool, told what was asked, answered and done.
+    expect(llm.calls).toHaveLength(1)
+    expect(llm.toolsOffered).toEqual([false])
+    const context = JSON.stringify(llm.calls[0]!.at(-1))
+    expect(context).toContain('Which ambiance for these lights?')
+    expect(context).toContain('Cinema (dim, warm white)')
+    expect(context).toContain('success')
+    expect(textOf(events)).toBe('Cinema mode is on in the bedroom.')
+    expect(ofType(events, EventType.TOOL_CALL_START)).toHaveLength(0)
+  })
+
+  it('ignores a tool call in the suggestion report turn', async () => {
+    const llm = fakeLlm([
+      [{ type: 'tool_call', id: 'tc-x', dsl: 'tv[bedroom].power = on' }],
+    ])
+    const agent = new OpenNestAgent({ houses: testStore(), llm })
+    const events = await answerAmbiance(agent, 'sugg-tool')
+    expect(ofType(events, EventType.TOOL_CALL_START)).toHaveLength(0)
+    expect(textOf(events)).toBe('Done.')
+    expect(device(replayState(events), 'tv_bedroom')['power']).toBe(false)
+  })
+
+  it('falls back to a fixed reply when the model fails on a suggestion', async () => {
+    const llm = fakeLlm([
+      () => {
+        throw new Error('provider down')
+      },
+    ])
+    const agent = new OpenNestAgent({ houses: testStore(), llm })
+    const events = await answerAmbiance(agent, 'sugg-fail')
+    expect((last(events) as Finished).outcome?.type).toBe('success')
+    expect(textOf(events)).toBe('Done.')
+  })
+
+  it('answers a suggestion with a fixed reply when no model is configured', async () => {
+    const agent = new OpenNestAgent({ houses: testStore(), llm: null })
+    const events = await answerAmbiance(agent, 'sugg-nollm')
+    expect((last(events) as Finished).outcome?.type).toBe('success')
+    expect(textOf(events)).toBe('Done.')
   })
 
   it('dismisses a suggestion', async () => {

@@ -7,11 +7,12 @@ import type {
   Program,
   RunResult,
   SuggestionResponse,
+  SuggestionSummary,
   UserInteraction,
 } from '@opennest/sdk'
 import { DefaultExecutionTracer } from '@opennest/vm'
 import type { DemoState, ProgramOrigin } from '../shared/state'
-import type { House, HouseStore } from './house'
+import type { House, HouseStore, SuggestionReport } from './house'
 import { toInterrupt, toResumeAnswer } from './interrupt-mapping'
 import { toLlmMessages } from './llm'
 import type { LlmMessage, LlmPort } from './llm'
@@ -175,12 +176,16 @@ export class OpenNestAgent extends AbstractAgent {
         pending: null,
         suggestions: [],
       })
+      const report = describeAnswer(
+        house.client.getSuggestions().find(s => s.id === suggestionId),
+        response,
+      )
       house.tracer = new DefaultExecutionTracer()
       house.historyStart = house.client.getSession().history.length
       const executed = await this.execute(ctx, () =>
         house.client.answerSuggestion(suggestionId, response),
       )
-      return this.afterDeterministic(ctx, executed, 'suggestion')
+      return this.afterDeterministic(ctx, executed, 'suggestion', report)
     }
     if (props != null && typeof props['dsl'] === 'string') {
       return this.runDirectDsl(ctx, props['dsl'])
@@ -275,7 +280,12 @@ export class OpenNestAgent extends AbstractAgent {
         house.openInterrupt = { ...open, id: executed.interaction.id }
         return this.interrupt(ctx, executed.interaction)
       }
-      return this.afterDeterministic(ctx, executed, open.origin)
+      return this.afterDeterministic(
+        ctx,
+        executed,
+        open.origin,
+        open.suggestion,
+      )
     }
 
     const toolCall = open.toolCall
@@ -432,24 +442,73 @@ export class OpenNestAgent extends AbstractAgent {
     return { kind: 'done', result }
   }
 
-  /** Ends a run without the model: a short fixed reply. */
-  private afterDeterministic(
+  /**
+   * Ends a run the model did not start (direct DSL, suggestion answer). A
+   * suggestion answer gets one model turn to report it; anything else, or a
+   * missing/failing model, gets a short fixed reply.
+   */
+  private async afterDeterministic(
     ctx: RunContext,
     executed: Executed,
     origin: ProgramOrigin,
-  ): void {
+    report?: SuggestionReport,
+  ): Promise<void> {
     if (executed.kind === 'paused') {
       ctx.house.openInterrupt = {
         id: executed.interaction.id,
         origin,
         attemptsLeft: 0,
+        ...(report !== undefined ? { suggestion: report } : {}),
       }
       return this.interrupt(ctx, executed.interaction)
     }
     const { result } = executed
-    const first = result.errors[0]
-    this.say(ctx, first === undefined ? 'Done.' : `Not done: ${first.message}`)
+    const reported =
+      report !== undefined && (await this.reportSuggestion(ctx, result, report))
+    if (!reported) {
+      const first = result.errors[0]
+      this.say(
+        ctx,
+        first === undefined ? 'Done.' : `Not done: ${first.message}`,
+      )
+    }
     return this.finish(ctx)
+  }
+
+  /**
+   * One model turn, without the tool, to tell the user what the suggestion
+   * answer did. False when there is no model, it failed or said nothing.
+   */
+  private async reportSuggestion(
+    ctx: RunContext,
+    result: RunResult,
+    report: SuggestionReport,
+  ): Promise<boolean> {
+    const { llm } = this.deps
+    if (llm === null) return false
+    const messages: LlmMessage[] = [
+      ...toLlmMessages(ctx.input.messages),
+      {
+        role: 'user',
+        content: [
+          `[Follow-up suggestion answered] The system suggested: "${report.question}". The user picked: "${report.answer}".`,
+          `Execution result: ${this.toolResult(ctx, result)}`,
+          'In one or two short sentences, tell the user what was done, or why it was not. Do not ask anything else.',
+        ].join('\n'),
+      },
+    ]
+    try {
+      const { messageId } = await this.streamTurn(
+        ctx,
+        llm,
+        buildSystemPrompt(ctx.house.client),
+        messages,
+        false,
+      )
+      return messageId !== null
+    } catch {
+      return false
+    }
   }
 
   /** Compact JSON the model reads as the tool result. */
@@ -474,6 +533,7 @@ export class OpenNestAgent extends AbstractAgent {
     llm: LlmPort,
     system: string,
     messages: LlmMessage[],
+    tools = true,
   ): Promise<{
     messageId: string | null
     calls: { id: string; dsl: string }[]
@@ -485,6 +545,7 @@ export class OpenNestAgent extends AbstractAgent {
         system,
         messages,
         signal: ctx.signal,
+        tools,
       })) {
         if (chunk.type === 'text') {
           if (messageId === null) {
@@ -500,7 +561,8 @@ export class OpenNestAgent extends AbstractAgent {
             messageId,
             delta: chunk.delta,
           })
-        } else {
+        } else if (tools) {
+          // Without tools, a stray tool call is ignored, never run.
           calls.push({ id: chunk.id, dsl: chunk.dsl })
         }
       }
@@ -623,4 +685,26 @@ export class OpenNestAgent extends AbstractAgent {
     ctx.lastDeltaAt = Date.now()
     if (delta.length > 0) ctx.emit({ type: EventType.STATE_DELTA, delta })
   }
+}
+
+/** The suggestion's question and the label of the picked answer. */
+function describeAnswer(
+  suggestion: SuggestionSummary | undefined,
+  response: SuggestionResponse,
+): SuggestionReport | undefined {
+  if (suggestion === undefined) return undefined
+  const { question } = suggestion
+  let answer: string
+  if (response.type === 'choice') {
+    answer =
+      question.type === 'choice'
+        ? (question.options.find(o => o.value === response.value)?.label ??
+          response.value)
+        : response.value
+  } else if (response.type === 'text_input') {
+    answer = response.text
+  } else {
+    answer = String(response.value)
+  }
+  return { question: question.message, answer }
 }

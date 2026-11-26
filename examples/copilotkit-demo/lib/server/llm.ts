@@ -20,6 +20,8 @@ export interface LlmPort {
     system: string
     messages: LlmMessage[]
     signal: AbortSignal
+    /** Offer `run_homedsl` (default true). False: the model can only talk. */
+    tools?: boolean
   }): AsyncIterable<LlmChunk>
 }
 
@@ -164,12 +166,12 @@ export function createAiSdkLlm(config: LlmConfig): LlmPort {
   }
 
   return {
-    async *turn({ system, messages, signal }) {
+    async *turn({ system, messages, signal, tools: offerTools = true }) {
       const result = streamText({
         model,
         system,
         messages: toModelMessages(messages),
-        tools,
+        ...(offerTools ? { tools } : {}),
         abortSignal: signal,
       })
       for await (const part of result.fullStream) {

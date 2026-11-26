@@ -10,7 +10,8 @@ live**:
   missing action parameters) are answered with **buttons in the chat**, and the
   same program resumes, without going back through the language model;
 - follow-up **suggestions** after a successful run are buttons under the
-  agent's reply;
+  agent's reply; the answer runs on the VM directly, then the agent says in a
+  sentence what was done;
 - a **Basic | Advanced** switch: plain sentences for an audience, or the
   runtime details (HomeDSL, resolution, middleware, verification, trace).
 
@@ -105,7 +106,7 @@ back as the same interrupt with `error` set.
 | Shape | Effect |
 |---|---|
 | `{ dsl }` | Run HomeDSL directly, no model |
-| `{ answerSuggestion: { suggestionId, response } }` | Answer a follow-up suggestion, no model |
+| `{ answerSuggestion: { suggestionId, response } }` | Answer a follow-up suggestion: the VM runs it without the model, then one model turn (no tools) reports what was done; fixed reply without a model |
 | `{ dismissSuggestion: { suggestionId } }` | Drop a suggestion |
 
 `RUN_ERROR.code`: `interrupt_pending`, `unknown_interrupt`,

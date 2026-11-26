@@ -32,6 +32,14 @@ export interface OpenInterrupt {
   toolCall?: { id: string; dsl: string }
   /** Tool calls left in a chat turn: how many attempts remain. */
   attemptsLeft: number
+  /** What was answered, when the paused run is a suggestion follow-up. */
+  suggestion?: SuggestionReport
+}
+
+/** A suggestion answer, as told to the model once the follow-up ran. */
+export interface SuggestionReport {
+  question: string
+  answer: string
 }
 
 export interface CreateHouseOptions {
