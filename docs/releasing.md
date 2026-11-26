@@ -52,7 +52,7 @@ Do not pick `major`: it moves all six packages to `1.0.0`.
 requires a `GITHUB_TOKEN` (`read:user` and `repo:status`), used by
 `@changesets/changelog-github`.
 
-## Releasing
+## Release procedure
 
 Merge the release and back-merge pull requests with a **merge commit**, not a
 squash, so that both branches keep a shared history.
@@ -80,19 +80,40 @@ done
 
 ### When something goes wrong
 
-- **A publish failed partway:** fix the cause, then re-run the failed workflow
-  run. Versions already on npm are skipped.
-- **A release run was superseded.** The concurrency group of `release.yml`
-  keeps a single pending run, so a newer push to `main` can replace it. If the
-  replaced run belonged to a merged version pull request and the newer push
-  carries new changesets, that version is never published. Always check npm
-  after a release; if a version is missing, re-run its workflow run before
-  merging the next version pull request.
+**A publish failed partway.** Versions already on npm are skipped by the next
+publish. How to run it depends on where the cause is:
+
+- **Outside the repository** (`NPM_TOKEN`, npm settings, GitHub App
+  permissions, registry or GitHub outage): fix it, then re-run the failed
+  workflow run.
+- **In the repository** (workflow file, manifests, code): a re-run uses the old
+  commit and the old workflow file, so the fix has to reach `main`.
+  - Branch from `main` and open the pull request against `main`: `develop` may
+    carry pending changesets.
+  - The push must carry **no changeset**, and `main` must hold no other pending
+    one (`.changeset/` has no `.md` file besides `README.md`). Otherwise
+    `release.yml` opens a version pull request instead of publishing, and
+    merging it skips the missing versions. If `main` already has some, remove
+    them in the same pull request and add them back on `develop` after the
+    back-merge.
+  - The push then publishes the missing versions. Finish with the pull request
+    `main` → `develop`.
+
+**A release run was superseded.** The concurrency group of `release.yml` keeps a
+single pending run, so a newer push to `main` can replace it. The replaced run
+shows as **cancelled** in the Actions tab. If it belonged to a merged version
+pull request and the newer push carries new changesets, that version is not
+published: re-run the cancelled run.
+
+In every case, check [all six packages](#check-what-was-published) on npm before
+merging any further version pull request. Neither recovery has been exercised
+yet.
 
 ## First publication
 
-The first release uses a temporary token: a package must exist on npm before a
-trusted publisher can be configured for it.
+The first release uses a temporary token: a package must already exist on npm
+before a trusted publisher can be configured for it (see the
+[`npm trust` prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust#prerequisites)).
 
 > **Deadline:** npm has announced that granular tokens will lose
 > [direct publishing in January 2027](https://docs.npmjs.com/about-access-tokens).
@@ -113,9 +134,9 @@ trusted publisher can be configured for it.
 
 ### Publish
 
-1. [ ] Follow [Releasing](#releasing). At step 3, the six packages must be at
-       `0.1.0` and CI must run on the version pull request (this shows the App
-       token works).
+1. [ ] Follow the [release procedure](#release-procedure). At step 3, the six
+       packages must be at `0.1.0` and CI must run on the version pull request
+       (this shows the App token works).
 2. [ ] After publication, [check](#check-what-was-published) that the six
        packages exist on npm.
 3. [ ] [Switch to Trusted Publishing](#switch-to-trusted-publishing).
@@ -132,9 +153,25 @@ later is needed; the npm CLI version does not matter), Node 24,
 repository.
 
 > A new trusted publisher **expires unless a publish succeeds within 2 days**.
-> Configure it only when you can release right away.
+> Prepare the workflow change first, and configure the publishers only when you
+> can release right away.
 
-1. [ ] On npmjs.com, for **each of the six packages**, open Settings → Trusted
+1. [ ] In a pull request to `develop`, edit the `release` job of
+       [`release.yml`](../.github/workflows/release.yml), add a `patch`
+       changeset, and merge it:
+   - remove `registry-url` and its comment from the "Set up Node.js" step;
+   - remove `NODE_AUTH_TOKEN` and its comment from the "Version pull request or
+     publish" step;
+   - keep `id-token: write` and `PNPM_CONFIG_PROVENANCE`
+     (`NPM_CONFIG_PROVENANCE` has no effect with pnpm 11 and may go).
+
+   Remove **both** `registry-url` and `NODE_AUTH_TOKEN`. If both stay, a failed
+   OIDC exchange only logs `Skipped OIDC: ...` and publishes with the token,
+   which proves nothing. If only `registry-url` stays, `actions/setup-node`
+   exports a placeholder `NODE_AUTH_TOKEN`, which pnpm uses only if OIDC fails:
+   the registry error is then misleading.
+
+2. [ ] On npmjs.com, for **each of the six packages**, open Settings → Trusted
        publishing and add a GitHub Actions publisher:
 
    | Field                | Value                                        |
@@ -148,29 +185,18 @@ repository.
    npm does not validate these values when saving, and a publisher cannot be
    edited: delete it and create it again.
 
-2. [ ] In a pull request to `develop`, edit the `release` job of
-       [`release.yml`](../.github/workflows/release.yml):
-   - remove `registry-url` and its comment from the "Set up Node.js" step;
-   - remove `NODE_AUTH_TOKEN` and its comment from the changesets step;
-   - keep `id-token: write` and `PNPM_CONFIG_PROVENANCE`
-     (`NPM_CONFIG_PROVENANCE` has no effect with pnpm 11 and may go).
-
-   Remove **both** lines. If both stay, a failed OIDC exchange only logs
-   `Skipped OIDC: ...` and publishes with the token, which proves nothing. If
-   only `registry-url` stays, pnpm falls back to a placeholder token and the
-   registry error is misleading.
-
-3. [ ] Add a `patch` changeset in the same pull request, then follow
-       [Releasing](#releasing) within the 2 days. One changeset releases all
-       six, so every publisher gets exercised.
+3. [ ] Right away, follow the [release procedure](#release-procedure). The
+       `patch` changeset releases all six, so every publisher gets exercised.
 4. [ ] Check that all six were published, with provenance.
 5. [ ] Delete the `NPM_TOKEN` secret and revoke the token on npm.
 6. [ ] Recommended, per package: Settings → Publishing access → "Require
        two-factor authentication and disallow tokens".
 
-If the publish fails, fix the publisher on npmjs.com and re-run the workflow
-run. Falling back to the token means restoring the two lines through `main`, and
-only works while npm accepts direct publishing with it.
+If the publish fails because of a publisher, fix it on npmjs.com (delete and
+create it again) and re-run the workflow run. Falling back to the token means
+restoring the two lines on `main` as a
+[repository fix](#when-something-goes-wrong), and only works while npm accepts
+direct publishing with it.
 
 Reference: [npm trusted publishing](https://docs.npmjs.com/trusted-publishers).
 
@@ -182,7 +208,9 @@ Rulesets, create a branch ruleset targeting `main`:
 - [ ] Require a pull request before merging, with **0** required approvals.
 - [ ] Require status checks to pass: `ci` (the job of
       [`ci.yml`](../.github/workflows/ci.yml)).
-- [ ] Add the OpenNest GitHub App to the bypass list.
+- [ ] Add the OpenNest GitHub App to the bypass list. **Verify whether this is
+      needed:** `release.yml` pushes the version branch and tags, not `main`,
+      and a bypass widens what the App can do.
 
 ## Accepted residual risk
 

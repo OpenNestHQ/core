@@ -87,8 +87,9 @@ jobs:
           node-version-file: '.nvmrc'
           # Writes the .npmrc that reads NODE_AUTH_TOKEN. Remove this line
           # together with NODE_AUTH_TOKEN when switching to Trusted Publishing:
-          # without a token it falls back to a dummy one, which turns an OIDC
-          # failure into a misleading error from the registry.
+          # with this line and no token, setup-node exports a dummy
+          # NODE_AUTH_TOKEN, which pnpm uses if the OIDC exchange fails, and the
+          # registry error is then misleading.
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
@@ -119,10 +120,12 @@ jobs:
           pr-title: 'chore(release): version packages'
           commit-message: 'chore(release): version packages'
         env:
-          # Temporary, for the first publication: a package must exist on npm
-          # before a trusted publisher can be configured for it. Once all of
-          # them have one (workflow file `release.yml`, `npm publish` allowed),
-          # remove this line and `registry-url` above, then delete the
+          # Temporary, for the first publication: a package must already exist
+          # on npm before a trusted publisher can be configured for it
+          # (https://docs.npmjs.com/cli/v11/commands/npm-trust#prerequisites).
+          # To switch, follow docs/releasing.md: it removes this line and
+          # `registry-url` above, configures the publishers (workflow file
+          # `release.yml`, `npm publish` allowed), releases, then deletes the
           # NPM_TOKEN secret. pnpm already prefers OIDC over this token
           # whenever the exchange succeeds.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
