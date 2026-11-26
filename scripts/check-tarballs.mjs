@@ -61,14 +61,20 @@ function run(command, args, options) {
   })
 }
 
+/** Why a command failed (e.g. `ETIMEDOUT`), followed by what it printed. */
+function describeFailure(error) {
+  const reason = error.code ?? error.signal ?? `exit code ${error.status}`
+  const output = `${error.stdout ?? ''}${error.stderr ?? ''}`.trim()
+  return output ? `${reason}\n${output}` : reason
+}
+
 /** Like `run`, but returns the failure as a list of problems. */
 function attempt(label, command, args, options) {
   try {
     run(command, args, options)
     return []
   } catch (error) {
-    const output = `${error.stdout ?? ''}${error.stderr ?? ''}`.trim()
-    return [`${label}: ${output || error.message}`]
+    return [`${label}: ${describeFailure(error)}`]
   }
 }
 
@@ -214,10 +220,12 @@ function binProblems({ label, cwd }) {
       cwd,
       env: { ...process.env, OPENNEST_YAML: join(cwd, 'missing.yaml') },
       timeout: 30_000,
+      // A server trapping SIGTERM must not outlive the timeout.
+      killSignal: 'SIGKILL',
     })
   } catch (error) {
     if (error.status === 1 && error.stderr.includes(expected)) return []
-    return [`${label}: opennest-mcp: ${error.stderr || error.message}`]
+    return [`${label}: opennest-mcp: ${describeFailure(error)}`]
   }
   return [`${label}: opennest-mcp exited with 0 without an inventory file`]
 }
