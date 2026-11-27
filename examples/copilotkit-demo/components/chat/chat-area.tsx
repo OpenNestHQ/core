@@ -2,13 +2,29 @@
 
 import { useState } from 'react'
 import { newId } from '@/lib/shared/id'
-import { CopilotChat, useAgent } from '@copilotkit/react-core/v2'
+import {
+  CopilotChat,
+  CopilotChatInput,
+  useAgent,
+} from '@copilotkit/react-core/v2'
+import type { CopilotChatInputProps } from '@copilotkit/react-core/v2'
+import { MobileStatus } from '../panel/mobile-status'
 import { useThread } from '../thread/thread-context'
 import { useMode } from '../mode/mode-context'
 import { VmInterrupts } from '../interrupts/vm-interrupt'
 import { useDemoState } from '@/lib/client/use-demo-state'
 import { DslInput } from './dsl-input'
 import { useIsMobile } from '@/lib/client/use-is-mobile'
+
+/** The chat input, with the phone status bar right above it. */
+function InputWithStatus(props: CopilotChatInputProps) {
+  return (
+    <>
+      <MobileStatus />
+      <CopilotChatInput {...props} />
+    </>
+  )
+}
 
 export function ChatArea() {
   const { threadId } = useThread()
@@ -43,6 +59,7 @@ export function ChatArea() {
           key={threadId}
           threadId={threadId}
           className="h-full"
+          input={InputWithStatus}
           // CopilotChat does not show RUN_ERROR in the transcript: add it as
           // a local assistant line so the audience sees what went wrong.
           onError={event => {

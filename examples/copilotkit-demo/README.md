@@ -16,7 +16,11 @@ live**:
   (`✓ Which TV? → Living Room TV`), as an AG-UI activity message that never
   goes back to the model; PINs are masked;
 - a **Basic | Advanced** switch: plain sentences for an audience, or the
-  runtime details (HomeDSL, resolution, middleware, verification, trace).
+  runtime details (HomeDSL, resolution, middleware, verification, trace);
+- on a **phone** (below 768 px) it reads like a classic chat: the sidebar
+  becomes a ☰ menu, everything is Basic, and a status bar above the input
+  (`⏳ 1 of 3 done · 1 waiting for you`) opens the panel as a bottom sheet
+  when tapped. The sheet never opens by itself.
 
 Each conversation gets its own simulated house. This example is private: it is
 never published to npm.
