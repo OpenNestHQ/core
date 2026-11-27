@@ -1,6 +1,7 @@
 {
   "name": "@opennest/playground",
   "version": "1.0.0",
+  "private": true,
   "description": "Interactive TUI playground to showcase the OpenNest VM with HomeDSL",
   "license": "ISC",
   "author": "Zepoze",

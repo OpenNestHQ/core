@@ -20,6 +20,14 @@ OpenTelemetryTraceSink
 OpenTelemetry Spans → OTLP Exporter → Jaeger / Tempo
 ```
 
+## Install
+
+```bash
+npm install @opennest/vm-opentelemetry @opennest/vm @opentelemetry/api
+```
+
+`@opennest/vm` is a peer dependency: your application provides it. `@opentelemetry/api` is a regular dependency of this package; install it too when your code imports it, as below. The usage example also needs `@opentelemetry/sdk-node` and `@opentelemetry/exporter-trace-otlp-http`.
+
 ## Usage
 
 ```ts

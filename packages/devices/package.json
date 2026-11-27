@@ -1,25 +1,58 @@
 {
   "name": "@opennest/devices",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "Device registry, driver interface, and mock implementation for OpenNest Devices",
+  "keywords": [
+    "opennest",
+    "homedsl",
+    "smart-home",
+    "device-registry",
+    "home-assistant"
+  ],
+  "homepage": "https://github.com/OpenNestHQ/core/tree/main/packages/devices#readme",
+  "bugs": {
+    "url": "https://github.com/OpenNestHQ/core/issues"
+  },
   "license": "ISC",
   "author": "Zepoze",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OpenNestHQ/core.git"
+    "url": "git+https://github.com/OpenNestHQ/core.git",
+    "directory": "packages/devices"
   },
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./drivers/mock": {
+      "types": "./dist/drivers/mock.d.ts",
+      "default": "./dist/drivers/mock.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "test": "vitest run",
     "build": "tsc"
   },
   "dependencies": {
+    "@opennest/lang-core": "workspace:*",
     "effect": "~4.1.5",
     "js-yaml": "^4.1.0"
   },
   "devDependencies": {
-    "@opennest/lang-core": "workspace:*",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^26.1.0",
     "typescript": "^6.0.3",

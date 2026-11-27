@@ -1,12 +1,25 @@
 {
   "name": "@opennest/mcp",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "OpenNest MCP server — stdio access to the HomeDSL runtime for AI agents",
+  "keywords": [
+    "opennest",
+    "homedsl",
+    "smart-home",
+    "mcp",
+    "model-context-protocol",
+    "ai-agents"
+  ],
+  "homepage": "https://github.com/OpenNestHQ/core/tree/main/packages/mcp#readme",
+  "bugs": {
+    "url": "https://github.com/OpenNestHQ/core/issues"
+  },
   "license": "ISC",
   "author": "Zepoze",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OpenNestHQ/core.git"
+    "url": "git+https://github.com/OpenNestHQ/core.git",
+    "directory": "packages/mcp"
   },
   "type": "module",
   "bin": {
@@ -24,6 +37,10 @@
   ],
   "engines": {
     "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "tsc",

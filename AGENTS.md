@@ -13,14 +13,14 @@ No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm w
 | Package | npm name | Role | Depends on |
 |---|---|---|---|
 | `packages/lang-core` | `@opennest/lang-core` | Parser (HomeDSL → AST), prompt generator, AST builders | *none* |
-| `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers | *none* (only `js-yaml` + `effect`) |
+| `packages/devices` | `@opennest/devices` | Device registry, `DeviceDriver` interface, mock + HA drivers | `lang-core` (types only) (+ `js-yaml`, `effect`) |
 | `packages/vm` | `@opennest/vm` | interpreter: `executeCommand()`, resolution, middleware, interactions, validation, tracing, verification; also `@opennest/vm/effect` | `lang-core`, `devices` (+ `effect`) |
-| `packages/vm-opentelemetry` | `@opennest/vm-opentelemetry` | OpenTelemetry trace sink for the VM `ExecutionTrace` | `@opentelemetry/api` (dev: `vm`, types only) |
+| `packages/vm-opentelemetry` | `@opennest/vm-opentelemetry` | OpenTelemetry trace sink for the VM `ExecutionTrace` | `@opentelemetry/api` (peer: `vm`, types only) |
 | `packages/sdk` | `@opennest/sdk` | Deterministic execution facade (`OpenNestClient`) over parser + devices + VM | `lang-core`, `devices`, `vm` |
 | `packages/mcp` | `@opennest/mcp` | Stdio MCP server exposing the runtime (HomeDSL execution, interactions, suggestions, session) to AI agents | `sdk`, `vm`, `devices` |
 | `examples/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `sdk` |
 
-Cross-package deps use `"workspace:*"` in package.json, resolved by pnpm.
+Cross-package deps use `"workspace:*"` in package.json (`"workspace:^"` for peer dependencies), resolved by pnpm.
 
 ## Commands
 
@@ -44,13 +44,23 @@ pnpm --filter @opennest/vm run test
 # Test all packages with coverage (what CI runs; config: vitest.coverage.config.ts)
 pnpm run test:coverage
 
+# Test the release scripts (scripts/ is not covered by `pnpm run test`)
+pnpm run test:scripts
+
+# Check that the packages can be released: build, manifests, tarball contents,
+# then install the tarballs outside the repo and use them (needs the npm registry)
+pnpm run release:check
+
+# Describe a change for the next release (see "Release")
+pnpm changeset
+
 # Regenerate packages/lang-core/example-prompt.md
 pnpm run build:prompt
 
 # Run playground REPL
 pnpm run start
 
-# Lint (ESLint) — examples/ + packages/
+# Lint (ESLint) — examples/ + packages/ + scripts/
 pnpm run lint
 
 # Format (Prettier, write)
@@ -66,12 +76,13 @@ You can also run commands per-package with `cd` and `pnpm run <script>` as usual
 
 pnpm handles topological ordering automatically. The dependency graph is:
 
-1. `devices` and `lang-core` — no cross-package deps, build independently (parallel-safe).
-2. `vm` — depends on both `devices` + `lang-core`.
-3. `sdk` — depends on `lang-core` + `devices` + `vm`.
-4. `mcp` — depends on `sdk` + `vm` + `devices`; nothing depends on it.
-5. `examples/playground` (TUI) and `examples/web-playground` — depend on `sdk`.
-6. `lang-core`'s `build:prompt` requires `dist/` to exist, so `build` must run first.
+1. `lang-core` — no cross-package deps.
+2. `devices` — depends on `lang-core` (types only).
+3. `vm` — depends on both `devices` + `lang-core`.
+4. `sdk` — depends on `lang-core` + `devices` + `vm`.
+5. `mcp` — depends on `sdk` + `vm` + `devices`; nothing depends on it.
+6. `examples/playground` (TUI) and `examples/web-playground` — depend on `sdk`.
+7. `lang-core`'s `build:prompt` requires `dist/` to exist, so `build` must run first.
 
 ## Module system
 
@@ -81,11 +92,13 @@ All packages are **ESM-only** (`"type": "module"`) using **nodenext** module res
 
 Use `import type { ... }` for type-only imports — required by `verbatimModuleSyntax: true`.
 
-`@opennest/vm` has two entry points (`exports` in its package.json): `@opennest/vm` (Promise API) and `@opennest/vm/effect` (Effect API, see "Effect core"). The `effect` dependency (pinned `~4.1.5`, because the HA client's sync-send invariant relies on 4.1.5 internals) exists in `packages/devices` and `packages/vm` **only** — `lang-core`, `sdk`, `mcp` and `examples/*` must not depend on it.
+Every published package declares `exports` in its package.json, which blocks deep `dist/` imports: only the listed entry points can be imported. Most packages only expose their root. `@opennest/vm` has two entry points: `@opennest/vm` (Promise API) and `@opennest/vm/effect` (Effect API, see "Effect core"). `@opennest/devices` has two as well: `@opennest/devices` and `@opennest/devices/drivers/mock` (`MockDriver` alone, without Node built-ins, used by the web playground).
+
+The `effect` dependency (pinned `~4.1.5`, because the HA client's sync-send invariant relies on 4.1.5 internals) exists in `packages/devices` and `packages/vm` **only** — `lang-core`, `sdk`, `mcp` and `examples/*` must not depend on it.
 
 ## TypeScript config
 
-All packages share the same strict tsconfig:
+All packages under `packages/` share the same strict tsconfig:
 
 ```json
 {
@@ -102,7 +115,7 @@ All packages share the same strict tsconfig:
     "skipLibCheck": true,
     "sourceMap": true,
     "declaration": true,
-    "declarationMap": true,
+    "inlineSources": true,
     "outDir": "./dist",
     "rootDir": "./src"
   }
@@ -114,6 +127,7 @@ Key flags:
 - `noUncheckedIndexedAccess: true` → all index accesses return `| undefined`.
 - `exactOptionalPropertyTypes: true` → `undefined` is not assignable to optional properties.
 - `moduleDetection: "force"` → every `.ts` file is treated as a module (no global scripts).
+- `inlineSources: true`, no `declarationMap` → `src/` is not published, so source maps embed the sources and no declaration maps (which can only point at files) are emitted.
 
 ## Testing
 
@@ -331,6 +345,12 @@ Defined in `packages/lang-core/src/prompt/defaults.ts`:
 
 ```
 vitest.coverage.config.ts  # Root vitest config used by `pnpm run test:coverage` (and CI)
+.changeset/              # Changesets config + pending changesets
+scripts/                 # Release checks (see "Release")
+  check-manifests.mjs    # Are the 6 package.json files publishable?
+  check-tarballs.mjs     # Packs, inspects, installs and uses the tarballs
+  lib/
+    manifest-rules.mjs   # PUBLISHED_PACKAGES + manifest rules (+ manifest-rules.test.mjs)
 packages/
   devices/
     src/
@@ -455,8 +475,20 @@ Everything tracked in the repo is in English: code, comments, identifiers, test 
 
 - **ESLint** — flat config at repo root `eslint.config.js`: `@eslint/js` recommended + `typescript-eslint` recommended + `eslint-config-prettier` (disables style rules that conflict with Prettier). ESLint covers correctness only; formatting is Prettier's job.
 - **Prettier** — config at `.prettierrc.json`: `semi: false`, `singleQuote: true`, `arrowParens: avoid`. Write code matching this style (no semicolons, single quotes) so `format` doesn't churn.
-- `lint` targets `examples/` + `packages/`; `format`/`format:check` target `(examples|packages)/**/*.+(js|ts|json|tsx)`.
-- CI (`.github/workflows/ci.yml`) runs on PRs and pushes to `main`/`develop`: install, lint, format check, build, tests with coverage (`pnpm run test:coverage`), a coverage report (PR comment when the OpenNest GitHub App is configured, Job Summary otherwise) and a check that the generated prompt is up to date. There are no pre-commit hooks — run `pnpm run lint` and `pnpm run format:check` locally.
+- `lint` targets `examples/` + `packages/` + `scripts/`; `format`/`format:check` target `(examples|packages)/**/*.+(js|ts|json|tsx)` and `scripts/**/*.mjs`.
+- CI (`.github/workflows/ci.yml`) runs on PRs and pushes to `main`/`develop`: install, lint, format check, build, tests with coverage (`pnpm run test:coverage`), the release script tests (`pnpm run test:scripts`), `pnpm run release:check`, a `Changeset status` step on PRs (non-blocking), a coverage report (PR comment when the OpenNest GitHub App is configured, Job Summary otherwise) and a check that the generated prompt is up to date.
+- `.github/workflows/release.yml` runs on pushes to `main` (see "Release"). In both workflows, actions are pinned by full commit SHA with a version comment.
+- There are no pre-commit hooks — run `pnpm run lint` and `pnpm run format:check` locally.
+
+## Release
+
+Full procedure and first-publication runbook: [`docs/releasing.md`](docs/releasing.md).
+
+- Flow: feature branch → PR with a changeset → `develop` → PR → `main`. On pushes to `main`, `release.yml` runs a `verify` job, then a `release` job that opens or updates the "chore(release): version packages" PR, or publishes once it is merged. A PR `main` → `develop` then brings back versions and changelogs.
+- Add a changeset (`pnpm changeset`) when changing a published package. The 6 packages are a `fixed` group sharing one version; `examples/*` are ignored. In `0.x`: `minor` = breaking change or feature, `patch` = fix, never `major`.
+- `pnpm run release:check` builds, then runs `scripts/check-manifests.mjs` and `scripts/check-tarballs.mjs`. `release:check:manifests` runs the first one alone; `test:scripts` tests the rules in `scripts/lib/`.
+- A new published package must be added to `PUBLISHED_PACKAGES` (`scripts/lib/manifest-rules.mjs`) and to the `fixed` group in `.changeset/config.json`.
+- `version-packages` and `release` are run by CI; `pnpm run release` builds `packages/*` only (not the examples), then publishes to npm.
 
 ## Generated files (do not edit)
 

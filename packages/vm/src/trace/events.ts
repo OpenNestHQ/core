@@ -1,4 +1,4 @@
-import type { Value } from '@opennest/lang-core/dist/ast/index.js'
+import type { Value } from '@opennest/lang-core'
 import type { VMError } from '../types.js'
 
 export interface ProgramBeginEvent {
