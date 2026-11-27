@@ -34,7 +34,7 @@ export function DemoApp({ llmConfigured }: { llmConfigured: boolean }) {
           <div className="flex h-screen">
             <Sidebar onOpenDevices={() => setDevicesOpen(true)} />
             <div className="flex min-w-0 flex-1 flex-col">
-              <Header />
+              <Header onOpenDevices={() => setDevicesOpen(true)} />
               {!llmConfigured && <LlmBanner />}
               <div className="flex min-h-0 flex-1">
                 <ChatArea />

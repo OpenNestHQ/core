@@ -5,7 +5,7 @@ import { useThread } from '../thread/thread-context'
 export function Sidebar({ onOpenDevices }: { onOpenDevices?: () => void }) {
   const { newConversation } = useThread()
   return (
-    <aside className="flex w-48 shrink-0 flex-col gap-1 bg-black/40 p-3 text-xs">
+    <aside className="hidden w-48 shrink-0 md:flex flex-col gap-1 bg-black/40 p-3 text-xs">
       <button
         onClick={newConversation}
         className="rounded-md border border-border px-2 py-1.5 text-left hover:bg-muted"

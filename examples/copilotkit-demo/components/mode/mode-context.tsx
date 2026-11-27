@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState } from 'react'
+import { useIsMobile } from '@/lib/client/use-is-mobile'
 
 export type DisplayMode = 'basic' | 'advanced'
 
@@ -26,8 +27,12 @@ export function ModeProvider({ children }: { children: React.ReactNode }) {
     window.localStorage.setItem(STORAGE_KEY, next)
   }
 
+  // A phone always shows Basic; the saved (desktop) choice is left untouched.
+  const isMobile = useIsMobile()
+  const effective: DisplayMode = isMobile ? 'basic' : mode
+
   return (
-    <ModeContext.Provider value={{ mode, setMode }}>
+    <ModeContext.Provider value={{ mode: effective, setMode }}>
       {children}
     </ModeContext.Provider>
   )

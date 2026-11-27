@@ -8,15 +8,18 @@ import { useMode } from '../mode/mode-context'
 import { VmInterrupts } from '../interrupts/vm-interrupt'
 import { useDemoState } from '@/lib/client/use-demo-state'
 import { DslInput } from './dsl-input'
+import { useIsMobile } from '@/lib/client/use-is-mobile'
 
 export function ChatArea() {
   const { threadId } = useThread()
   const { mode } = useMode()
+  const isMobile = useIsMobile()
   const { agent } = useAgent()
   const state = useDemoState()
   const [dslMode, setDslMode] = useState(false)
   const questionOpen = state?.pending != null
-  const usingDsl = mode === 'advanced' && dslMode
+  // No HomeDSL input on a phone (forced Basic already implies it).
+  const usingDsl = !isMobile && mode === 'advanced' && dslMode
 
   return (
     <div
@@ -25,7 +28,7 @@ export function ChatArea() {
       data-dsl-input={usingDsl}
     >
       <VmInterrupts />
-      {mode === 'advanced' && (
+      {!isMobile && mode === 'advanced' && (
         <label className="absolute right-4 top-2 z-10 flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <input
             type="checkbox"
