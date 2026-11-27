@@ -1,6 +1,6 @@
 {
   "name": "@opennest/vm",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "OpenNest VM (interpreter) — device resolution, ambiguity handling, state management, and execution engine for HomeDSL",
   "keywords": [
     "opennest",

@@ -1,6 +1,6 @@
 {
   "name": "@opennest/devices",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Device registry, driver interface, and mock implementation for OpenNest Devices",
   "keywords": [
     "opennest",
