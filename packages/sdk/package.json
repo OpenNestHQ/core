@@ -1,6 +1,6 @@
 {
   "name": "@opennest/sdk",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "OpenNest SDK — deterministic execution facade over the HomeDSL parser, device registry, and VM",
   "keywords": [
     "opennest",

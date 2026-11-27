@@ -1,6 +1,6 @@
 {
   "name": "@opennest/lang-core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Framework-agnostic core for OpenNest Lang: parser, prompt generation, validation, and type definitions",
   "keywords": [
     "opennest",

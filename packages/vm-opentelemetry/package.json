@@ -1,6 +1,6 @@
 {
   "name": "@opennest/vm-opentelemetry",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "OpenTelemetry trace sink for OpenNest VM — exports execution traces as OTel spans",
   "keywords": [
     "opennest",
