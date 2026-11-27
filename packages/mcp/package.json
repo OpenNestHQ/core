@@ -48,9 +48,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
-    "@opennest/devices": "workspace:*",
-    "@opennest/sdk": "workspace:*",
-    "@opennest/vm": "workspace:*",
+    "@opennest/devices": "workspace:^",
+    "@opennest/sdk": "workspace:^",
+    "@opennest/vm": "workspace:^",
     "zod": "^4.6.2"
   },
   "devDependencies": {

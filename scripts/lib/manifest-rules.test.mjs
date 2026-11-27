@@ -130,6 +130,36 @@ describe('checkManifest', () => {
     expectSingleError(overrides, field)
   })
 
+  it.each(['dependencies', 'peerDependencies'])(
+    'accepts internal %s declared with workspace:^',
+    field => {
+      const input = manifest({
+        [field]: { '@opennest/lang-core': 'workspace:^' },
+      })
+      expect(checkManifest(input, DIR)).toEqual([])
+    },
+  )
+
+  it.each([
+    ['dependencies', 'workspace:*'],
+    ['dependencies', 'workspace:~'],
+    ['dependencies', '^0.1.0'],
+    ['peerDependencies', 'workspace:*'],
+  ])('reports an error when an internal %s range is %s', (field, range) => {
+    expectSingleError(
+      { [field]: { '@opennest/lang-core': range, zod: '^4.0.0' } },
+      `${field}.@opennest/lang-core`,
+    )
+  })
+
+  it('ignores internal devDependencies and external dependencies', () => {
+    const input = manifest({
+      dependencies: { zod: '^4.0.0' },
+      devDependencies: { '@opennest/lang-core': 'workspace:*' },
+    })
+    expect(checkManifest(input, DIR)).toEqual([])
+  })
+
   it('reports an error when the package is private', () => {
     expectSingleError({ private: true }, 'private')
   })
