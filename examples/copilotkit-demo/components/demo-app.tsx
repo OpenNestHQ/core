@@ -31,7 +31,8 @@ export function DemoApp({ llmConfigured }: { llmConfigured: boolean }) {
     >
       <ModeProvider>
         <ThreadProvider>
-          <div className="flex h-screen">
+          {/* dvh: a phone browser toolbar must not hide the input. */}
+          <div className="flex h-dvh">
             <Sidebar onOpenDevices={() => setDevicesOpen(true)} />
             <div className="flex min-w-0 flex-1 flex-col">
               <Header onOpenDevices={() => setDevicesOpen(true)} />

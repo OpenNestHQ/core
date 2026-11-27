@@ -18,9 +18,18 @@ import { useIsMobile } from '@/lib/client/use-is-mobile'
 
 /** The chat input, with the phone status bar right above it. */
 function InputWithStatus(props: CopilotChatInputProps) {
+  const kh = props.keyboardHeight ?? 0
   return (
     <>
-      <MobileStatus />
+      {/* The input moves itself above a phone's virtual keyboard: follow it. */}
+      <div
+        style={{
+          transform: kh > 0 ? `translateY(-${kh}px)` : undefined,
+          transition: 'transform 0.2s ease-out',
+        }}
+      >
+        <MobileStatus />
+      </div>
       <CopilotChatInput {...props} />
     </>
   )
