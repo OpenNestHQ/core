@@ -41,10 +41,10 @@ the packages that depend on them when needed (see below).
 
 While a package is in `0.x`:
 
-| Bump    | Use for                          |
-| ------- | -------------------------------- |
-| `minor` | a breaking change or new feature |
-| `patch` | a fix, with no API change        |
+| Bump    | Use for                                |
+| ------- | -------------------------------------- |
+| `minor` | a breaking change                      |
+| `patch` | a fix or a backward-compatible feature |
 
 Do not pick `major`: it moves the package to `1.0.0`.
 
@@ -59,6 +59,11 @@ published as caret ranges, such as `"@opennest/lang-core": "^0.1.0"`, which in
 | -------------------- | ------------------------------------------------------------------------------- |
 | `patch` on a package | that package only; its dependents receive it through their range                |
 | `minor` on a package | that package, plus a `patch` of every package depending on it, with a new range |
+
+Keep `minor` for breaking changes: a compatible feature released as `minor`
+would force a pointless release of every dependent. A dependent that starts
+using a new feature has its own changeset, and its published range then requires
+the version that provides it.
 
 So a `patch` must never break the API: users of the dependents get it without a
 new release of those dependents. Dependencies run `lang-core` → `devices` →
