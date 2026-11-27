@@ -35,18 +35,34 @@ commit the generated file in `.changeset/`. Changes limited to `examples/*`,
 tests, CI or docs need none. The `Changeset status` CI step is only a reminder
 and never fails the job.
 
-The six packages form a `fixed` group
-([config](../.changeset/config.json)): a changeset on any of them releases all
-six with the same version number.
+Each package has its own version number, changelog and git tag (for example
+`@opennest/mcp@0.1.1`). A changeset only releases the packages it lists, plus
+the packages that depend on them when needed (see below).
 
-While the version is `0.x`:
+While a package is in `0.x`:
 
 | Bump    | Use for                          |
 | ------- | -------------------------------- |
 | `minor` | a breaking change or new feature |
-| `patch` | a fix                            |
+| `patch` | a fix, with no API change        |
 
-Do not pick `major`: it moves all six packages to `1.0.0`.
+Do not pick `major`: it moves the package to `1.0.0`.
+
+### Dependencies between packages
+
+Internal runtime dependencies (`dependencies` and `peerDependencies`) are
+declared as `workspace:^`, enforced by `release:check:manifests`. They are
+published as caret ranges, such as `"@opennest/lang-core": "^0.1.0"`, which in
+`0.x` accepts `0.1.x` but not `0.2.0`. As a result:
+
+| Change               | What gets released                                                              |
+| -------------------- | ------------------------------------------------------------------------------- |
+| `patch` on a package | that package only; its dependents receive it through their range                |
+| `minor` on a package | that package, plus a `patch` of every package depending on it, with a new range |
+
+So a `patch` must never break the API: users of the dependents get it without a
+new release of those dependents. Dependencies run `lang-core` → `devices` →
+`vm` → `sdk` → `mcp`, and `vm` → `vm-opentelemetry` (peer dependency).
 
 `pnpm run version-packages` is normally run by CI only. Running it locally
 requires a `GITHUB_TOKEN` (`read:user` and `repo:status`), used by
@@ -74,39 +90,36 @@ for p in lang-core devices vm vm-opentelemetry sdk mcp; do
 done
 ```
 
-- [ ] All six show the new version.
+- [ ] Every package listed in the version pull request shows its new version.
 - [ ] Their npm pages show provenance.
 - [ ] Git tags and GitHub Releases exist.
 
 ### When something goes wrong
 
-**A publish failed partway.** Versions already on npm are skipped by the next
-publish. Until it is resolved, merge nothing else into `main`: any push to
-`main` can publish the missing packages from newer code than the rest of that
-version. How to run the next publish depends on where the cause is:
+**A publish failed partway.** Every publish run publishes each package whose
+current version is not on npm yet, and skips the others. Published packages may
+depend on a missing version (`^X`), so installing them fails until it exists:
+fix this first, and until it is resolved, merge nothing else into `main`. How
+to run the next publish depends on where the cause is:
 
 - **Outside the repository** (`NPM_TOKEN`, npm settings, GitHub App
   permissions, registry or GitHub outage): fix it, then re-run the failed
   workflow run.
 - **In the repository** (workflow file, manifests, code): a re-run uses the old
-  commit and the old workflow file, so the fix has to reach `main`.
-  - Branch from `main` and open the pull request against `main`: `develop` may
-    carry pending changesets. Add no changeset to it, unless the missing packages
-    depend on a fix to already-published packages (see "The fix touches published
-    packages" below).
-  - **`main` holds no pending changeset** (`.changeset/` has no `.md` file
-    besides `README.md`): merging the fix publishes the missing versions.
-  - **`main` already holds pending changesets:** merging the fix opens or updates
-    the version pull request instead. Merge that one too: the `fixed` group
-    releases the next version of all six from one commit. Here, skipping the
-    missing versions is intended: the partial version stays incomplete (use
-    `npm deprecate` on its published packages if needed). Do not delete
-    changesets to force a publish: their code stays on `main`, and the missing
-    packages would be built from newer code than the others of the same version.
-  - **The fix touches published packages:** they are not republished. Add a
-    changeset on `develop` so that the fix ships in the next release. If the
-    missing packages depend on that fix, put the changeset in the fix pull
-    request instead and release the next version of all six, as above.
+  commit and the old workflow file, so the fix has to reach `main`. Branch from
+  `main` and open the pull request against `main` (`develop` may carry pending
+  changesets).
+  - **The fix does not touch a missing package's code:** add no changeset.
+    Merging publishes the missing versions if `main` holds no pending changeset
+    (`.changeset/` has no `.md` file besides `README.md`). Otherwise it opens or
+    updates the version pull request, and merging that one publishes the
+    missing versions along with the new ones.
+  - **The fix touches a missing package's code:** add a `patch` changeset for
+    it. Its next patch is published instead and the missing version is never
+    released; published dependents pointing to `^X` accept that patch.
+  - **The fix touches an already-published package:** it is not republished.
+    Add a changeset for it, in the fix pull request if the missing packages
+    need the fix, on `develop` otherwise.
   - Finish with the pull request `main` → `develop`.
 
 **A release run was superseded.** The concurrency group of `release.yml` keeps a
@@ -115,10 +128,9 @@ shows as **cancelled** in the Actions tab. If it belonged to a merged version
 pull request and the newer push carries new changesets, that version is not
 published: re-run the cancelled run.
 
-Check [all six packages](#check-what-was-published) on npm before merging any
-further version pull request: merging it skips a missing version, which is only
-acceptable when you release the next version on purpose, as described above.
-None of these recoveries has been exercised yet.
+Check [the published versions](#check-what-was-published) on npm before merging
+any further version pull request. None of these recoveries has been exercised
+yet.
 
 ## First publication
 
@@ -169,8 +181,9 @@ repository.
 > can release right away.
 
 1. [ ] In a pull request to `develop`, edit the `release` job of
-       [`release.yml`](../.github/workflows/release.yml), add a `patch`
-       changeset, and merge it:
+       [`release.yml`](../.github/workflows/release.yml), add one `patch`
+       changeset listing **all six** packages (so every publisher gets
+       exercised), and merge it:
    - remove `registry-url` and its comment from the "Set up Node.js" step;
    - remove `NODE_AUTH_TOKEN` and its comment from the "Version pull request or
      publish" step;
@@ -199,6 +212,7 @@ repository.
 
 3. [ ] Right away, follow the [release procedure](#release-procedure). The
        `patch` changeset releases all six, so every publisher gets exercised.
+       A package left out would keep a publisher that expires unused.
 4. [ ] Check that all six were published, with provenance.
 5. [ ] Delete the `NPM_TOKEN` secret and revoke the token on npm.
 6. [ ] Recommended, per package: Settings → Publishing access → "Require

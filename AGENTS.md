@@ -20,7 +20,7 @@ No root `src/` — all code lives in `packages/`. Monorepo managed with **pnpm w
 | `packages/mcp` | `@opennest/mcp` | Stdio MCP server exposing the runtime (HomeDSL execution, interactions, suggestions, session) to AI agents | `sdk`, `vm`, `devices` |
 | `examples/playground` | `@opennest/playground` | Interactive TUI/REPL demo with 14 mock devices | `sdk` |
 
-Cross-package deps use `"workspace:*"` in package.json (`"workspace:^"` for peer dependencies), resolved by pnpm.
+Cross-package runtime and peer deps use `"workspace:^"` in package.json (devDependencies may use `"workspace:*"`), resolved by pnpm and published as `^x.y.z`.
 
 ## Commands
 
@@ -485,9 +485,9 @@ Everything tracked in the repo is in English: code, comments, identifiers, test 
 Full procedure and first-publication runbook: [`docs/releasing.md`](docs/releasing.md).
 
 - Flow: feature branch → PR with a changeset → `develop` → PR → `main`. On pushes to `main`, `release.yml` runs a `verify` job, then a `release` job that opens or updates the "chore(release): version packages" PR, or publishes once it is merged. A PR `main` → `develop` then brings back versions and changelogs.
-- Add a changeset (`pnpm changeset`) when changing a published package. The 6 packages are a `fixed` group sharing one version; `examples/*` are ignored. In `0.x`: `minor` = breaking change or feature, `patch` = fix, never `major`.
+- Add a changeset (`pnpm changeset`) when changing a published package. Each package is versioned independently (own version, changelog and tag); `examples/*` are ignored. In `0.x`: `minor` = breaking change or feature, `patch` = fix with no API change, never `major`. Internal `dependencies`/`peerDependencies` must use `workspace:^` (published as `^x.y.z`, checked by `release:check:manifests`): a `patch` releases only its package, a `minor` also releases a `patch` of its dependents. devDependencies may stay `workspace:*`.
 - `pnpm run release:check` builds, then runs `scripts/check-manifests.mjs` and `scripts/check-tarballs.mjs`. `release:check:manifests` runs the first one alone; `test:scripts` tests the rules in `scripts/lib/`.
-- A new published package must be added to `PUBLISHED_PACKAGES` (`scripts/lib/manifest-rules.mjs`) and to the `fixed` group in `.changeset/config.json`.
+- A new published package must be added to `PUBLISHED_PACKAGES` (`scripts/lib/manifest-rules.mjs`).
 - `version-packages` and `release` are run by CI; `pnpm run release` builds `packages/*` only (not the examples), then publishes to npm.
 
 ## Generated files (do not edit)
