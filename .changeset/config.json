@@ -6,5 +6,9 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@opennest/playground", "@opennest/web-playground"]
+  "ignore": [
+    "@opennest/playground",
+    "@opennest/web-playground",
+    "@opennest/copilotkit-demo"
+  ]
 }
