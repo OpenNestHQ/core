@@ -1,4 +1,4 @@
-import type { Value } from '@opennest/lang-core/dist/ast/index.js'
+import type { Value } from '@opennest/lang-core'
 import type { VMError } from '../types.js'
 
 export interface ProgramBeginEvent {
@@ -9,7 +9,8 @@ export interface ProgramBeginEvent {
 export interface ProgramEndEvent {
   kind: 'program:end'
   timestamp: number
-  status: 'success' | 'failed' | 'waiting'
+  /** `interrupted` only on a run stopped through `@opennest/vm/effect`. */
+  status: 'success' | 'failed' | 'waiting' | 'interrupted'
   errorCount?: number
 }
 
@@ -23,7 +24,7 @@ export interface StatementBeginEvent {
 export interface StatementEndEvent {
   kind: 'statement:end'
   timestamp: number
-  status: 'success' | 'failed' | 'waiting'
+  status: 'success' | 'failed' | 'waiting' | 'interrupted'
   resolvedDeviceCount?: number
   changeCount?: number
   errors?: VMError[]
@@ -80,7 +81,8 @@ export interface ActionBeginEvent {
 export interface ActionEndEvent {
   kind: 'action:end'
   timestamp: number
-  status: 'success' | 'failed'
+  /** `interrupted`: a stop kept the action from being sent. */
+  status: 'success' | 'failed' | 'interrupted'
   error?: string
   property?: string
   value?: Value

@@ -63,7 +63,12 @@ export class OpenTelemetryTraceSink {
             span.setStatus({ code: SpanStatusCode.OK })
             break
           case 'failed':
-            span.setStatus({ code: SpanStatusCode.ERROR })
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              ...(event.message !== undefined
+                ? { message: event.message }
+                : {}),
+            })
             break
           case 'cancelled':
             span.setStatus({ code: SpanStatusCode.UNSET })

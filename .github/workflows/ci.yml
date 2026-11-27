@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 
 permissions:
@@ -16,15 +16,23 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Secrets can't be read in step `if:` conditions; expose presence here.
+      # The client id is a public GitHub App identifier, stored as a secret only
+      # for convenience; the private key is the sensitive value.
+      BOT_CLIENT_ID: ${{ secrets.OPENNEST_BOT_CLIENT_ID }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # `changeset status` compares the branch with the PR base branch.
+          fetch-depth: 0
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: '.nvmrc'
           cache: pnpm
@@ -41,5 +49,62 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      - name: Test
-        run: pnpm run test
+      - name: Test (with coverage)
+        run: pnpm run test:coverage
+
+      - name: Test release scripts
+        run: pnpm run test:scripts
+
+      # Builds again, then checks the manifests and installs the packed
+      # tarballs in throwaway projects. After the tests: it needs the npm
+      # registry, and a network failure must not hide their results.
+      - name: Release check
+        run: pnpm run release:check
+
+      # A reminder only: not every pull request needs a changeset.
+      - name: Changeset status
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        continue-on-error: true
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: pnpm changeset status --since="origin/$BASE_REF"
+
+      # Coverage reporting is best-effort: it never fails the job.
+      # The PR comment is posted by the OpenNest GitHub App, only for PRs from
+      # this repository when the App secrets are configured; otherwise the
+      # report goes to the Job Summary only.
+      - name: Create GitHub App token
+        id: app-token
+        if: >-
+          always() &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          env.BOT_CLIENT_ID != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ secrets.OPENNEST_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.OPENNEST_BOT_PRIVATE_KEY }}
+          permission-pull-requests: write
+
+      - name: Coverage report
+        if: always()
+        continue-on-error: true
+        uses: davelosert/vitest-coverage-report-action@74c2d9210b4fc44c84d8213f61d7ec99837b7aa0 # v2.13.2
+        with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          comment-on: ${{ steps.app-token.outputs.token && 'pr' || 'none' }}
+          vite-config-path: vitest.coverage.config.ts
+          # Changed-files mode needs the PR number, which the action only
+          # resolves when commenting; without a token, list all files instead.
+          file-coverage-mode: ${{ steps.app-token.outputs.token && 'changes' || 'all' }}
+
+      - name: Check generated prompt is up to date
+        run: |
+          pnpm run build:prompt
+          if [ -n "$(git status --porcelain -- packages/lang-core/)" ]; then
+            git status --porcelain -- packages/lang-core/
+            git diff -- packages/lang-core/
+            echo "::error::Generated prompt is stale — run 'pnpm run build:prompt' and commit the result"
+            exit 1
+          fi

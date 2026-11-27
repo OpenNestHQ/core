@@ -47,6 +47,26 @@ export const respondResponseSchema = z.discriminatedUnion('type', [
 
 export const respondInputSchema = z.object({ response: respondResponseSchema })
 
+export const suggestionAnswerSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('text_input'),
+    text: z.string().describe('The free-form text typed by the user.'),
+  }),
+  z.object({
+    type: z.literal('number_input'),
+    value: z.number().describe('The number chosen by the user.'),
+  }),
+  z.object({
+    type: z.literal('choice'),
+    value: z.string().describe('The `choices[].id` of the chosen option.'),
+  }),
+])
+
+export const answerSuggestionInputSchema = z.object({
+  suggestionId: z.string().describe('The `id` of the suggestion to answer.'),
+  answer: suggestionAnswerSchema,
+})
+
 export const emptyInputSchema = z.object({})
 
 export type RunDslInput = { dsl: string; dryRun?: boolean }
@@ -58,5 +78,15 @@ export type RespondAnswer =
   | { type: 'number_input'; value: number }
   | { type: 'choice'; value: string }
   | { type: 'action_parameter'; values: Record<string, string> }
+
+export type SuggestionAnswerInput =
+  | { type: 'text_input'; text: string }
+  | { type: 'number_input'; value: number }
+  | { type: 'choice'; value: string }
+
+export type AnswerSuggestionInput = {
+  suggestionId: string
+  answer: SuggestionAnswerInput
+}
 
 export type RespondInput = { response: RespondAnswer }

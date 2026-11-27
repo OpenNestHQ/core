@@ -408,6 +408,65 @@ describe('HAWebSocketClient', () => {
     })
   })
 
+  describe('callService abort signal', () => {
+    it('rejects a queued callService when its signal aborts', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const client = new HAWebSocketClient({ url: URL, token: TOKEN })
+      const controller = new AbortController()
+      const result = client.callService(
+        'light',
+        'turn_on',
+        {},
+        { signal: controller.signal },
+      )
+      const expectation = expect(result).rejects.toThrow(
+        'HA websocket command aborted',
+      )
+      controller.abort()
+      await expectation
+
+      client.start()
+      const ws = MockWebSocket.last()
+      ws.serverOpen()
+      ws.serverMessage({ type: 'auth_required' })
+      ws.serverMessage({ type: 'auth_ok' })
+      await Promise.resolve()
+
+      expect(ws.sent.some(raw => raw.includes('call_service'))).toBe(false)
+      await client.close()
+    })
+
+    it('stops waiting for an in-flight command when its signal aborts', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const { client, ws } = await connectClient()
+      const controller = new AbortController()
+
+      const result = client.callService(
+        'light',
+        'turn_on',
+        {},
+        { signal: controller.signal },
+      )
+      expect(ws.lastSent()).toMatchObject({ id: 1, type: 'call_service' })
+
+      const expectation = expect(result).rejects.toThrow(
+        'HA websocket command aborted',
+      )
+      controller.abort()
+      await expectation
+
+      expect(() =>
+        ws.serverMessage({
+          id: 1,
+          type: 'result',
+          success: true,
+          result: null,
+        }),
+      ).not.toThrow()
+      await client.close()
+    })
+  })
+
   describe('subscriptions', () => {
     it('should ack the subscribe command and keep forwarding events', async () => {
       vi.stubGlobal('WebSocket', MockWebSocket)
@@ -797,6 +856,95 @@ describe('HAWebSocketClient', () => {
           client.callService('switch', 'turn_on', {}),
         ).rejects.toThrow(/Invalid access token/)
         await expect(client.whenReady()).rejects.toThrow(/Invalid access token/)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('reconnect delays follow base*2^n capped at max', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const client = new HAWebSocketClient({
+          url: URL,
+          token: TOKEN,
+          reconnectBaseMs: 100,
+          reconnectMaxMs: 300,
+        })
+        client.start()
+
+        for (const [index, delay] of [100, 200, 300, 300].entries()) {
+          MockWebSocket.last().serverError()
+          await vi.advanceTimersByTimeAsync(delay - 1)
+          expect(MockWebSocket.instances).toHaveLength(index + 1)
+          await vi.advanceTimersByTimeAsync(1)
+          expect(MockWebSocket.instances).toHaveLength(index + 2)
+        }
+        await client.close()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
+
+  describe('lifecycle', () => {
+    it('keeps working when an onReady callback throws', async () => {
+      vi.stubGlobal('WebSocket', MockWebSocket)
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const client = new HAWebSocketClient({ url: URL, token: TOKEN })
+        const calls: string[] = []
+        client.onReady(() => {
+          calls.push('throwing')
+          throw new Error('callback failed')
+        })
+        client.onReady(() => {
+          calls.push('later')
+        })
+        const ready = client.whenReady()
+        const queued = client.callService('switch', 'turn_on', {})
+        client.start()
+
+        const ws = MockWebSocket.last()
+        ws.serverOpen()
+        ws.serverMessage({ type: 'auth_required' })
+        ws.serverMessage({ type: 'auth_ok' })
+
+        await expect(ready).resolves.toBeUndefined()
+        expect(calls).toEqual(['throwing', 'later'])
+        expect(client.isReady()).toBe(true)
+        expect(ws.lastSent()).toMatchObject({ id: 1, type: 'call_service' })
+        ws.serverMessage({ id: 1, type: 'result', success: true, result: 'ok' })
+        await expect(queued).resolves.toBe('ok')
+        expect(warn).toHaveBeenCalled()
+        await client.close()
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    it('close() leaves no pending timer', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.stubGlobal('WebSocket', MockWebSocket)
+        const { client, ws } = await connectClient()
+
+        const subscribed = client.subscribe(
+          { type: 'subscribe_entities' },
+          () => {},
+        )
+        ws.serverMessage({ id: 1, type: 'result', success: true, result: null })
+        await subscribed
+        const unacked = client.subscribe({ type: 'subscribe_events' }, () => {})
+        const inFlight = client.callService('switch', 'turn_on', {})
+        const expectations = [
+          expect(unacked).rejects.toThrow(/closed/),
+          expect(inFlight).rejects.toThrow(/closed/),
+        ]
+
+        await client.close()
+        await Promise.all(expectations)
+        expect(vi.getTimerCount()).toBe(0)
       } finally {
         vi.useRealTimers()
       }

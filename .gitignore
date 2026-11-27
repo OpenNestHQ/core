@@ -5,4 +5,5 @@ dist
 .vscode
 .opencode
 .worktrees/
-.superpowers/
+*.tsbuildinfo
+coverage/

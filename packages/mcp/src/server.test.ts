@@ -8,7 +8,7 @@ import type { RunResult, Session } from '@opennest/sdk'
 import { createOpenNestServer } from './server.js'
 import type { OpenNestServerOptions } from './server.js'
 
-const REFERENCE = '# Référence HomeDSL\n@all(light[salon])'
+const REFERENCE = '# HomeDSL reference\n@all(light[living_room])'
 
 const OK: RunResult = {
   status: 'success',
@@ -27,6 +27,9 @@ function stubClient(
     resumePending: async () => OK,
     getPendingInteraction: () => null,
     cancel: async () => OK,
+    getSuggestions: () => [],
+    answerSuggestion: async () => OK,
+    dismissSuggestion: () => false,
     getSession: () =>
       ({
         programId: 'p',
@@ -48,7 +51,9 @@ function stubClient(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Rpc = any
 
-const DEVICES = [{ id: 'tv_salon', type: 'tv', room: 'salon', name: 'TV' }]
+const DEVICES = [
+  { id: 'tv_living_room', type: 'tv', room: 'living_room', name: 'TV' },
+]
 
 // Minimal JSON-RPC client: the library is server-only.
 async function connect(options: OpenNestServerOptions) {
@@ -90,12 +95,13 @@ async function connect(options: OpenNestServerOptions) {
 const tick = () => new Promise(resolve => setTimeout(resolve, 20))
 
 describe('createOpenNestServer', () => {
-  it('lists exactly the four tools with input schemas and annotations', async () => {
+  it('lists exactly the five tools with input schemas and annotations', async () => {
     const c = await connect({ client: stubClient(), devices: DEVICES })
     const { result } = await c.request('tools/list')
     expect(result.tools.map((t: Rpc) => t.name)).toEqual([
       'run_dsl',
       'respond',
+      'answer_suggestion',
       'cancel',
       'get_session',
     ])
@@ -142,11 +148,11 @@ describe('createOpenNestServer', () => {
     const calls = [
       await c.request('tools/call', {
         name: 'run_dsl',
-        arguments: { dsl: 'light[salon].power = on' },
+        arguments: { dsl: 'light[living_room].power = on' },
       }),
       await c.request('tools/call', {
         name: 'run_dsl',
-        arguments: { dsl: 'light[salon].power = on', dryRun: true },
+        arguments: { dsl: 'light[living_room].power = on', dryRun: true },
       }),
       await c.request('tools/call', { name: 'get_session', arguments: {} }),
       await c.request('tools/call', {

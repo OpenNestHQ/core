@@ -214,7 +214,7 @@ Bare keywords, lowercase, unquoted. Used for power properties.
 There is no true/false — use on/off.
 
 ## String
-"bonjour"
+"hello"
 
 Double-quoted text. Single quotes are not supported.
 Used for string properties (e.g. color, mode) and string action args.
@@ -234,7 +234,7 @@ A bare word (letters, digits, underscore). Used unquoted for enum values
 
 ## Action arguments
 Same value syntax:
-speaker.announce(message="bonjour", volume=80)
+speaker.announce(message="hello", volume=80)
 vacuum.start(mode=silent, room=living_room)
 
 # SYNTAX
@@ -318,18 +318,18 @@ camera.snapshot()
 
 Actions accept named arguments (name=value) and whole-bundle references:
 
-speaker.announce(message="bonjour", volume=80)
+speaker.announce(message="hello", volume=80)
 vacuum.start(mode=silent)
 
 ## Named-argument bundles (?arg)
 Arguments can be grouped in a reusable bundle:
 
-?greeting = { message="bonjour", volume=80 }
+?greeting = { message="hello", volume=80 }
 speaker.announce(?greeting)
 
 or built field-by-field:
 
-?greeting.message = "bonjour"
+?greeting.message = "hello"
 speaker.announce(?greeting)
 
 A bundle is referenced whole via `?name` inside the parentheses.

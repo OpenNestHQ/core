@@ -8,14 +8,14 @@ drivers:
     latency: 0
 
 rooms:
-  - salon
-  - chambre
+  - living_room
+  - bedroom
 
 devices:
-  - id: tv_salon
+  - id: tv_living_room
     type: tv
-    room: salon
-    name: Salon TV
+    room: living_room
+    name: Living Room TV
     driver: mock
     properties:
       power:
@@ -26,10 +26,10 @@ devices:
       - play
       - pause
 
-  - id: light_chambre
+  - id: light_bedroom
     type: light
-    room: chambre
-    name: Chambre Light
+    room: bedroom
+    name: Bedroom Light
     driver: mock
     properties:
       power:
@@ -61,19 +61,19 @@ describe('DeviceRegistry', () => {
     it('should populate device id, type, room, name', () => {
       const path = writeTempYaml(TEST_YAML)
       const registry = DeviceRegistry.fromYaml(path)
-      const tv = registry.getDevice('tv_salon')!
+      const tv = registry.getDevice('tv_living_room')!
 
-      expect(tv.id).toBe('tv_salon')
+      expect(tv.id).toBe('tv_living_room')
       expect(tv.type).toBe('tv')
-      expect(tv.room).toBe('salon')
-      expect(tv.name).toBe('Salon TV')
+      expect(tv.room).toBe('living_room')
+      expect(tv.name).toBe('Living Room TV')
       cleanup(path)
     })
 
     it('should attach a driver to each device', () => {
       const path = writeTempYaml(TEST_YAML)
       const registry = DeviceRegistry.fromYaml(path)
-      const tv = registry.getDevice('tv_salon')!
+      const tv = registry.getDevice('tv_living_room')!
 
       expect(tv.driver).toBeDefined()
       expect(tv.driver.name).toBe('mock')
@@ -83,7 +83,7 @@ describe('DeviceRegistry', () => {
     it('should store driverConfig with properties and actions', () => {
       const path = writeTempYaml(TEST_YAML)
       const registry = DeviceRegistry.fromYaml(path)
-      const tv = registry.getDevice('tv_salon')!
+      const tv = registry.getDevice('tv_living_room')!
       const config = tv.driverConfig as Record<string, unknown>
 
       expect(config['properties']).toBeDefined()
@@ -126,7 +126,7 @@ devices:
     it('should allow setting and getting properties through the driver', async () => {
       const path = writeTempYaml(TEST_YAML)
       const registry = DeviceRegistry.fromYaml(path)
-      const tv = registry.getDevice('tv_salon')!
+      const tv = registry.getDevice('tv_living_room')!
 
       await tv.driver.setProperty(tv.id, 'power', true, tv.driverConfig)
       const value = await tv.driver.getProperty(tv.id, 'power', tv.driverConfig)
@@ -143,7 +143,7 @@ rooms: []
 devices:
   - id: tv1
     type: tv
-    room: salon
+    room: living_room
     name: TV One
     driver: mock
     properties:
@@ -172,7 +172,7 @@ devices:
     it('should allow executing actions through the driver', async () => {
       const path = writeTempYaml(TEST_YAML)
       const registry = DeviceRegistry.fromYaml(path)
-      const tv = registry.getDevice('tv_salon')!
+      const tv = registry.getDevice('tv_living_room')!
 
       await expect(
         tv.driver.executeAction(tv.id, 'play', {}, tv.driverConfig),
@@ -225,7 +225,7 @@ devices:
     it('should clear mock driver state on close', async () => {
       const path = writeTempYaml(TEST_YAML)
       const registry = DeviceRegistry.fromYaml(path)
-      const tv = registry.getDevice('tv_salon')!
+      const tv = registry.getDevice('tv_living_room')!
 
       await tv.driver.setProperty(tv.id, 'power', true, tv.driverConfig)
       await registry.close()
@@ -245,7 +245,7 @@ drivers:
     token: test-token
 
 rooms:
-  - salon
+  - living_room
 `
 
     it('should throw at load on an invalid new format binding', () => {
@@ -253,13 +253,13 @@ rooms:
 devices:
   - id: ha_switch
     type: switch
-    room: salon
+    room: living_room
     name: HA Switch
     driver: homeassistant
     properties:
       power:
         type: boolean
-        entity: switch.salon
+        entity: switch.living_room
         get:
           kind: levitate
     actions: []
@@ -276,13 +276,13 @@ devices:
 devices:
   - id: ha_thermostat
     type: thermostat
-    room: salon
+    room: living_room
     name: HA Thermostat
     driver: homeassistant
     properties:
       power:
         type: boolean
-        entity: switch.salon
+        entity: switch.living_room
     actions:
       boost:
         kind: script
@@ -305,13 +305,13 @@ devices:
 devices:
   - id: ha_switch
     type: switch
-    room: salon
+    room: living_room
     name: HA Switch
     driver: homeassistant
     properties:
       power:
         type: boolean
-        entity: switch.salon
+        entity: switch.living_room
         get:
           kind: state
         set:
@@ -343,13 +343,13 @@ devices:
 devices:
   - id: ha_switch
     type: switch
-    room: salon
+    room: living_room
     name: HA Switch
     driver: homeassistant
     properties:
       power:
         type: boolean
-        entity: switch.salon
+        entity: switch.living_room
         set_service: bad_format_no_dot
     actions:
       play:

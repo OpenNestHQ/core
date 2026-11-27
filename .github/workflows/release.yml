@@ -1,0 +1,140 @@
+name: Release
+
+# Every push to main either opens/updates the "version packages" pull request
+# (pending changesets) or publishes the versions that are not on npm yet.
+on:
+  push:
+    branches: [main]
+
+# Never cancel a release halfway: a later push waits for the running one.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# Nothing by default: each job asks for what it needs.
+permissions: {}
+
+jobs:
+  # Runs the repository's checks, and so a lot of dependency code, without any
+  # publishing permission or secret.
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Format check
+        run: pnpm run format:check
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Test
+        run: pnpm run test
+
+      - name: Test release scripts
+        run: pnpm run test:scripts
+
+      - name: Release check
+        run: pnpm run release:check
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # GitHub writes (branch, pull request, tags, releases) use the App token.
+      contents: read
+      # npm provenance now, Trusted Publishing (OIDC) later.
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Changelogs link each changeset to the commit that added it.
+          fetch-depth: 0
+          # Nothing pushes with the git CLI (the changesets action uses the
+          # GitHub API), so don't leave a token behind in .git/config.
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      # No dependency cache: nothing saved by another job gets published.
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: '.nvmrc'
+          # Writes the .npmrc that reads NODE_AUTH_TOKEN. Remove this line
+          # together with NODE_AUTH_TOKEN when switching to Trusted Publishing:
+          # with this line and no token, setup-node exports a dummy
+          # NODE_AUTH_TOKEN, which pnpm uses if the OIDC exchange fails, and the
+          # registry error is then misleading.
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Created by the OpenNest GitHub App so that the version pull request
+      # triggers CI, which pull requests opened with GITHUB_TOKEN don't. No
+      # fallback: the release fails if the token cannot be created.
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ secrets.OPENNEST_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.OPENNEST_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      # `pnpm run release` builds `packages/*` only (this step can publish, so it
+      # runs as little code as possible), then `changeset publish` runs
+      # `pnpm publish` in each package, which replaces the `workspace:` ranges
+      # with real versions.
+      - name: Version pull request or publish
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        with:
+          # The action only reads its token from this input, and passes it on
+          # to both scripts as GITHUB_TOKEN (used by the changelog generator).
+          github-token: ${{ steps.app-token.outputs.token }}
+          version-script: pnpm run version-packages
+          publish-script: pnpm run release
+          pr-title: 'chore(release): version packages'
+          commit-message: 'chore(release): version packages'
+        env:
+          # Temporary, for the first publication: the npm CLI docs state that a
+          # package must already exist on npm to configure its trusted
+          # publisher with `npm trust`
+          # (https://docs.npmjs.com/cli/v11/commands/npm-trust#prerequisites);
+          # the npmjs.com form is expected to require the same. To switch, follow
+          # docs/releasing.md: it removes this line and `registry-url` above,
+          # configures the publishers (workflow file `release.yml`,
+          # `npm publish` allowed), releases, then deletes the NPM_TOKEN secret.
+          # pnpm already prefers OIDC over this token whenever the exchange
+          # succeeds.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # PNPM_CONFIG_PROVENANCE is what makes pnpm 11 sign the packages: it
+          # ignores `publishConfig.provenance`. NPM_CONFIG_PROVENANCE is kept
+          # as planned for npm, but is inert under pnpm 11.
+          NPM_CONFIG_PROVENANCE: true
+          PNPM_CONFIG_PROVENANCE: true

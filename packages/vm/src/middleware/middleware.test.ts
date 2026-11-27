@@ -2,8 +2,13 @@ import { describe, it, expect, vi } from 'vitest'
 import { parseHomeDSL } from '@opennest/lang-core'
 import { MockDriver } from '@opennest/devices'
 import { executeCommand, createSession } from '../index.js'
-import { runMiddlewarePipeline } from '../middleware/pipeline.js'
+import { Cause, Effect, Exit, Option } from 'effect'
+import {
+  runMiddlewarePipeline,
+  runMiddlewarePipelineEffect,
+} from '../middleware/pipeline.js'
 import { noopMiddleware } from '../middleware/noop.js'
+import { block, skip, pause } from '../middleware/outcomes.js'
 import {
   BlockSignal,
   SkipSignal,
@@ -33,19 +38,31 @@ function makeDevice(
 
 async function devices(): Promise<Device[]> {
   return [
-    makeDevice('tv_salon', 'tv', 'salon', 'Salon TV', {
+    makeDevice('tv_living_room', 'tv', 'living_room', 'Living Room TV', {
       power: false,
       volume: 15,
     }),
-    makeDevice('tv_chambre', 'tv', 'chambre', 'Chambre TV', {
+    makeDevice('tv_bedroom', 'tv', 'bedroom', 'Bedroom TV', {
       power: false,
       volume: 10,
     }),
-    makeDevice('light_salon', 'light', 'salon', 'Salon Light', {
-      power: false,
-      brightness: 80,
-    }),
-    makeDevice('vacuum_salon', 'vacuum', 'salon', 'Salon Vacuum', {}),
+    makeDevice(
+      'light_living_room',
+      'light',
+      'living_room',
+      'Living Room Light',
+      {
+        power: false,
+        brightness: 80,
+      },
+    ),
+    makeDevice(
+      'vacuum_living_room',
+      'vacuum',
+      'living_room',
+      'Living Room Vacuum',
+      {},
+    ),
   ]
 }
 
@@ -301,7 +318,7 @@ describe('runMiddlewarePipeline', () => {
 
 describe('VM with middleware', () => {
   it('VM with noopMiddleware behaves identically to VM without middleware', async () => {
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
     const noMiddleware = await ctx()
     const withNoop = await ctx(undefined, [noopMiddleware])
 
@@ -320,7 +337,9 @@ describe('VM with middleware', () => {
     expect(resultWithNoop.executed[0]!.changes[0]!.property).toBe('power')
     expect(resultWithNoop.executed[0]!.changes[0]!.newValue).toBe(true)
     expect(resultWithNoop.executed[0]!.resolvedDevices).toHaveLength(1)
-    expect(resultWithNoop.executed[0]!.resolvedDevices[0]!.id).toBe('tv_salon')
+    expect(resultWithNoop.executed[0]!.resolvedDevices[0]!.id).toBe(
+      'tv_living_room',
+    )
 
     expect(resultWithNoop.status).toBe(resultNoMiddleware.status)
     expect(resultWithNoop.executed.length).toBe(
@@ -333,7 +352,7 @@ describe('VM with middleware', () => {
       throw new BlockSignal('safety check failed')
     }
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
     const result = await executeCommand(
       { kind: 'run_program', program: program },
       await ctx(undefined, [blocker]),
@@ -349,7 +368,7 @@ describe('VM with middleware', () => {
       throw new SkipSignal()
     }
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
     const result = await executeCommand(
       { kind: 'run_program', program: program },
       await ctx(undefined, [skipper]),
@@ -369,7 +388,7 @@ describe('VM with middleware', () => {
       })
     }
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
     const result = await executeCommand(
       { kind: 'run_program', program: program },
       await ctx(undefined, [pauser]),
@@ -387,7 +406,7 @@ describe('VM with middleware', () => {
     const inspectorMw: Middleware = spy
     Object.defineProperty(inspectorMw, 'name', { value: 'inspector' })
 
-    const program = parse('tv[salon].power = on')
+    const program = parse('tv[living_room].power = on')
     await executeCommand(
       { kind: 'run_program', program: program },
       await ctx(session, [inspectorMw]),
@@ -406,37 +425,37 @@ describe('VM with middleware', () => {
     const context = await ctx(undefined, [inspector])
 
     await executeCommand(
-      { kind: 'run_program', program: parse('tv[salon].power = on') },
+      { kind: 'run_program', program: parse('tv[living_room].power = on') },
       context,
     )
     expect(spy.mock.calls[0]![0]!.action.kind).toBe('set_property')
     spy.mockClear()
 
     await executeCommand(
-      { kind: 'run_program', program: parse('tv[salon].power?') },
+      { kind: 'run_program', program: parse('tv[living_room].power?') },
       context,
     )
     expect(spy.mock.calls[0]![0]!.action.kind).toBe('read_property')
     spy.mockClear()
 
     await executeCommand(
-      { kind: 'run_program', program: parse('tv[salon].volume += 10') },
+      { kind: 'run_program', program: parse('tv[living_room].volume += 10') },
       context,
     )
     expect(spy.mock.calls[0]![0]!.action.kind).toBe('increment_property')
     spy.mockClear()
 
     await executeCommand(
-      { kind: 'run_program', program: parse('vacuum[salon].start()') },
+      { kind: 'run_program', program: parse('vacuum[living_room].start()') },
       context,
     )
     expect(spy.mock.calls[0]![0]!.action.kind).toBe('invoke_action')
   })
 
   it('skip one device in a batch → other devices still execute', async () => {
-    const skipTvChambre: Middleware = async (ctx, next) => {
-      if (ctx.action.device.id === 'tv_chambre') {
-        throw new SkipSignal('skip chambre tv')
+    const skipTvBedroom: Middleware = async (ctx, next) => {
+      if (ctx.action.device.id === 'tv_bedroom') {
+        throw new SkipSignal('skip bedroom tv')
       }
       return next()
     }
@@ -444,21 +463,21 @@ describe('VM with middleware', () => {
     const program = parse('$tvs = @all(tv[*])\n$tvs.power = on')
     const result = await executeCommand(
       { kind: 'run_program', program: program },
-      await ctx(undefined, [skipTvChambre]),
+      await ctx(undefined, [skipTvBedroom]),
     )
 
     expect(result.status).toBe('success')
     expect(result.executed).toHaveLength(2)
     const exec = result.executed[1]!
     expect(exec.changes).toHaveLength(1)
-    expect(exec.changes[0]!.deviceId).toBe('tv_salon')
+    expect(exec.changes[0]!.deviceId).toBe('tv_living_room')
     expect(exec.resolvedDevices).toHaveLength(1)
-    expect(exec.resolvedDevices[0]!.id).toBe('tv_salon')
+    expect(exec.resolvedDevices[0]!.id).toBe('tv_living_room')
   })
 
   it('block one device in a batch → whole statement fails', async () => {
-    const blockTvChambre: Middleware = async (ctx, next) => {
-      if (ctx.action.device.id === 'tv_chambre') {
+    const blockTvBedroom: Middleware = async (ctx, next) => {
+      if (ctx.action.device.id === 'tv_bedroom') {
         throw new BlockSignal('not safe')
       }
       return next()
@@ -467,9 +486,108 @@ describe('VM with middleware', () => {
     const program = parse('$tvs = @all(tv[*])\n$tvs.power = on')
     const result = await executeCommand(
       { kind: 'run_program', program: program },
-      await ctx(undefined, [blockTvChambre]),
+      await ctx(undefined, [blockTvBedroom]),
     )
 
     expect(result.status).toBe('error')
+  })
+})
+
+// ──── Returned outcome helpers ────
+
+describe('returned outcome helpers', () => {
+  it('accepts a non-async middleware returning a plain outcome', async () => {
+    const guard: Middleware = () => block('x')
+    Object.defineProperty(guard, 'name', { value: 'guard' })
+
+    const result = await executeCommand(
+      { kind: 'run_program', program: parse('tv[living_room].power = on') },
+      await ctx(undefined, [guard]),
+    )
+
+    expect(result.status).toBe('error')
+    expect(result.errors[0]!.message).toBe('Blocked by middleware "guard": x')
+  })
+
+  it('returned block() produces the same VMResult error as a thrown BlockSignal', async () => {
+    const guard: Middleware = async () => block('nope')
+    Object.defineProperty(guard, 'name', { value: 'guard' })
+
+    const result = await executeCommand(
+      { kind: 'run_program', program: parse('tv[living_room].power = on') },
+      await ctx(undefined, [guard]),
+    )
+
+    expect(result.status).toBe('error')
+    expect(result.errors[0]!.message).toBe(
+      'Blocked by middleware "guard": nope',
+    )
+  })
+
+  it('returned skip() skips the action', async () => {
+    const skipper: Middleware = async () => skip('not now')
+    const context = await ctx(undefined, [skipper])
+
+    const result = await executeCommand(
+      { kind: 'run_program', program: parse('tv[living_room].power = on') },
+      context,
+    )
+
+    expect(result.status).toBe('success')
+    const tv = context.devices.find(d => d.id === 'tv_living_room')!
+    expect(await tv.driver.getProperty('tv_living_room', 'power')).toBe(false)
+  })
+
+  it('returned pause() suspends with the interaction', async () => {
+    const interaction = {
+      id: 'confirm-2',
+      type: 'confirmation' as const,
+      message: 'Proceed?',
+    }
+    const pauser: Middleware = async () => pause(interaction)
+
+    const result = await executeCommand(
+      { kind: 'run_program', program: parse('tv[living_room].power = on') },
+      await ctx(undefined, [pauser]),
+    )
+
+    expect(result.status).toBe('awaiting_interaction')
+    expect(result.interaction).toEqual(interaction)
+  })
+})
+
+describe('non-signal middleware errors', () => {
+  const err = new Error('kaboom')
+  const boom: Middleware = async () => {
+    throw err
+  }
+  Object.defineProperty(boom, 'name', { value: 'boom' })
+
+  it('runMiddlewarePipelineEffect fails with MiddlewareError carrying the thrown error', async () => {
+    const exit = await Effect.runPromiseExit(
+      runMiddlewarePipelineEffect(makeAction(), [boom], {
+        session: createSession(),
+        devices: [],
+      }),
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const failure = Cause.findErrorOption(exit.cause)
+      expect(Option.isSome(failure)).toBe(true)
+      if (Option.isSome(failure)) {
+        expect(failure.value._tag).toBe('MiddlewareError')
+        expect(failure.value.middlewareName).toBe('boom')
+        expect(failure.value.cause).toBe(err)
+      }
+    }
+  })
+
+  it('executeCommand rejects with the original middleware error instance', async () => {
+    await expect(
+      executeCommand(
+        { kind: 'run_program', program: parse('tv[living_room].power = on') },
+        await ctx(undefined, [boom]),
+      ),
+    ).rejects.toBe(err)
   })
 })

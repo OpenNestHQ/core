@@ -1,8 +1,10 @@
 import type { ActionOutcome, Statement } from '@opennest/lang-core'
 import type {
   Device,
+  OpenSuggestion,
   ResolutionFilter,
   StateChange,
+  SuggestionQuestion,
   UserInteraction,
   VMError,
   VMResult,
@@ -25,6 +27,15 @@ export interface ExecutedStatementSummary {
   changes: StateChange[]
   outcomes?: ActionOutcome[]
   filter?: ResolutionFilter
+  /** Set on follow-up entries: the suggestion whose answer produced them. */
+  origin?: { suggestionId: string }
+}
+
+/** An open follow-up question; `targets` are the devices it would act on. */
+export interface SuggestionSummary {
+  id: string
+  question: SuggestionQuestion
+  targets: DeviceSummary[]
 }
 
 /**
@@ -37,9 +48,11 @@ export interface RunResult {
   executed: ExecutedStatementSummary[]
   interaction: UserInteraction | null
   errors: VMError[]
+  /** The open follow-up suggestions, present only when there are some. */
+  suggestions?: SuggestionSummary[]
 }
 
-function summarizeDevice(device: Device): DeviceSummary {
+export function summarizeDevice(device: Device): DeviceSummary {
   return {
     id: device.id,
     type: device.type,
@@ -50,7 +63,24 @@ function summarizeDevice(device: Device): DeviceSummary {
   }
 }
 
-export function toRunResult(result: VMResult): RunResult {
+export function summarizeSuggestions(
+  suggestions: OpenSuggestion[],
+  devices: Device[],
+): SuggestionSummary[] {
+  return suggestions.map(suggestion => ({
+    id: suggestion.id,
+    question: suggestion.question,
+    targets: suggestion.targets.flatMap(id => {
+      const device = devices.find(d => d.id === id)
+      return device === undefined ? [] : [summarizeDevice(device)]
+    }),
+  }))
+}
+
+export function toRunResult(
+  result: VMResult,
+  devices: Device[] = [],
+): RunResult {
   return {
     status: result.status,
     executed: result.executed.map(executed => ({
@@ -61,8 +91,12 @@ export function toRunResult(result: VMResult): RunResult {
         ? { outcomes: executed.outcomes }
         : {}),
       ...(executed.filter !== undefined ? { filter: executed.filter } : {}),
+      ...(executed.origin !== undefined ? { origin: executed.origin } : {}),
     })),
     interaction: result.interaction,
     errors: result.errors,
+    ...(result.suggestions !== undefined && result.suggestions.length > 0
+      ? { suggestions: summarizeSuggestions(result.suggestions, devices) }
+      : {}),
   }
 }

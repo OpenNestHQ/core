@@ -1,11 +1,4 @@
-import { registerHandler } from './interactions/registry.js'
-import { deviceSelectionHandler } from './interactions/device-selection.js'
-import { confirmationHandler } from './interactions/confirmation.js'
-import { actionParameterHandler } from './interactions/action-parameter.js'
-
-registerHandler(deviceSelectionHandler)
-registerHandler(confirmationHandler)
-registerHandler(actionParameterHandler)
+import './interactions/register-defaults.js'
 
 export { executeCommand } from './commands/dispatch.js'
 export type {
@@ -15,6 +8,7 @@ export type {
   ExecuteStatementCommand,
   ResumeInteractionCommand,
   CancelExecutionCommand,
+  AnswerSuggestionCommand,
 } from './commands/types.js'
 
 export { validateProgram } from './validate.js'
@@ -70,9 +64,34 @@ export type {
 } from './interactions/types.js'
 
 export { InteractionError } from './interactions/errors.js'
+export { createAsk, isAskContext } from './interactions/ask.js'
+export type {
+  AskQuestion,
+  AskScope,
+  AskAnswer,
+  AskFn,
+  AskContext,
+  AskStore,
+} from './interactions/ask.js'
+export { defineSuggestion } from './suggestions/define.js'
+export type {
+  SuggestionQuestion,
+  SuggestionAnswer,
+  SuggestionApply,
+  SuggestionDefinition,
+  SuggestionCandidate,
+  OpenSuggestion,
+  JsonValue,
+  SuggestionResponse,
+  SuggestionErrorCode,
+  FollowUpStep,
+  PendingFollowUp,
+} from './suggestions/types.js'
+export { checkInputAnswer } from './interactions/input-answer.js'
 export type { InteractionErrorCode } from './interactions/errors.js'
 
 export { noopMiddleware } from './middleware/noop.js'
+export { block, skip, pause } from './middleware/outcomes.js'
 export { createConfirmationMiddleware } from './middleware/confirmation.js'
 export type { ConfirmationMiddlewareConfig } from './middleware/confirmation.js'
 export {

@@ -1,13 +1,13 @@
 # OpenNest Web Playground
 
-Web playground for the OpenNest VM — real-time visualization of HomeDSL execution, device interactions, policies, and VM events.
+Web playground for the OpenNest VM — real-time visualization of HomeDSL execution, device interactions, confirmation middleware (shown as "policies"), and VM events.
 
 ## Quick start
 
 ```bash
 # From repo root
 pnpm install
-pnpm run build          # Build all packages (devices, lang-core, vm, web-playground)
+pnpm run build          # Build all workspace packages
 pnpm --filter @opennest/web-playground run dev
 ```
 
@@ -49,11 +49,11 @@ User Input (HomeDSL)
     ▼
 VMAdapter.executeDSL()
     │
-    ├── parseHomeDSL()  → AST
-    ├── executeCommand() → VMResult
+    ├── OpenNestClient.analyze() → AST (parse errors short-circuit)
+    ├── OpenNestClient.execute() → RunResult
     │       │
     │       ├── VMEventBus → events → VMEventsPanel
-    │       ├── Policies   → PolicyInfo → PoliciesPanel
+    │       ├── Middleware → PolicyInfo → PoliciesPanel
     │       └── UserInteraction → InteractionPanel
     │
     ▼
@@ -77,9 +77,11 @@ To add a new interaction type:
 
 ## Adding a new policy
 
-1. Implement `ExecutionPolicy` in `packages/vm/src/policies/`
-2. Register it in `lib/vm/adapter.ts` → `createDemoPolicies()`
-3. The `PoliciesPanel` auto-discovers policies via `adapter.getPolicies()`
+A "policy" is a VM [middleware](../../packages/vm/README.md#middleware).
+
+1. Write a `Middleware` (or use `createConfirmationMiddleware`)
+2. Register it in `lib/vm/adapter.ts` → `createDemoMiddleware()`
+3. The `PoliciesPanel` lists the registered middleware via `adapter.getPolicies()`
 
 ## Adding a new panel
 
@@ -89,11 +91,11 @@ To add a new interaction type:
 
 ## Demo scenario
 
-Click **Demo** or type `light[salon].power = on`:
+Click **Demo** or type `light[living_room].power = on`:
 
-1. The VM resolves `light[salon]` → finds 2 lights → triggers `device_selection` interaction
+1. The VM resolves `light[living_room]` → finds 2 lights → triggers `device_selection` interaction
 2. User selects a device → VM resumes
-3. ConfirmationPolicy fires → `confirmation` interaction
+3. The confirmation middleware fires → `confirmation` interaction
 4. User confirms → action executes
 5. All events, timeline entries, and messages update in real-time
 
@@ -112,7 +114,7 @@ The architecture is designed for future additions without modifying existing cod
 
 - **New panels**: add component → drop in grid
 - **New interaction types**: add handler in VM → add UI branch
-- **New policies**: implement interface → register in adapter
+- **New policies**: write a middleware → register in adapter
 - **OpenTelemetry tracing**: subscribe to VMEventBus
 - **Step-by-step execution**: wrap `executeCommand` with breakpoints
 - **Execution plan visualization**: extend timeline with tree view

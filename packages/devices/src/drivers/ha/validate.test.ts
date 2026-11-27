@@ -15,13 +15,13 @@ describe('validateDeviceBindings — properties', () => {
       properties: {
         power: {
           type: 'boolean',
-          entity: 'switch.salon',
+          entity: 'switch.living_room',
           get: { kind: 'state' },
           set: { kind: 'inferred' },
         },
         volume: {
           type: 'number',
-          entity: 'media_player.salon',
+          entity: 'media_player.living_room',
           attribute: 'volume_level',
           set: {
             kind: 'service',
@@ -44,7 +44,7 @@ describe('validateDeviceBindings — properties', () => {
     expectInvalid(
       {
         properties: {
-          power: { entity: 'switch.salon', get: { kind: 'levitate' } },
+          power: { entity: 'switch.living_room', get: { kind: 'levitate' } },
         },
       },
       /device "d1", property "power": unknown get kind "levitate" \(expected: state, attribute, template, script, service_response\)/,
@@ -55,7 +55,7 @@ describe('validateDeviceBindings — properties', () => {
     expectInvalid(
       {
         properties: {
-          power: { entity: 'switch.salon', set: { kind: 'toggle' } },
+          power: { entity: 'switch.living_room', set: { kind: 'toggle' } },
         },
       },
       /device "d1", property "power": unknown set kind "toggle" \(expected: inferred, service, script\)/,
@@ -64,14 +64,14 @@ describe('validateDeviceBindings — properties', () => {
 
   it('should throw when get strategy is not an object', () => {
     expectInvalid(
-      { properties: { power: { entity: 'switch.salon', get: 'state' } } },
+      { properties: { power: { entity: 'switch.living_room', get: 'state' } } },
       /property "power": get strategy must be an object/,
     )
   })
 
   it('should throw when set strategy is not an object', () => {
     expectInvalid(
-      { properties: { power: { entity: 'switch.salon', set: null } } },
+      { properties: { power: { entity: 'switch.living_room', set: null } } },
       /property "power": set strategy must be an object/,
     )
   })
@@ -81,7 +81,7 @@ describe('validateDeviceBindings — properties', () => {
       {
         properties: {
           volume: {
-            entity: 'media_player.salon',
+            entity: 'media_player.living_room',
             get: { kind: 'attribute' },
           },
         },
@@ -94,7 +94,7 @@ describe('validateDeviceBindings — properties', () => {
     expectInvalid(
       {
         properties: {
-          status: { entity: 'sensor.salon', get: { kind: 'template' } },
+          status: { entity: 'sensor.living_room', get: { kind: 'template' } },
         },
       },
       /property "status": get strategy "template" requires a non-empty "template"/,
@@ -141,7 +141,7 @@ describe('validateDeviceBindings — properties', () => {
       {
         properties: {
           volume: {
-            entity: 'media_player.salon',
+            entity: 'media_player.living_room',
             set: { kind: 'service', service: 'volume_set' },
           },
         },
@@ -214,7 +214,7 @@ describe('validateDeviceBindings — properties', () => {
         properties: {
           volume: {
             type: 'number',
-            entity: 'media_player.salon',
+            entity: 'media_player.living_room',
             set: { kind: 'inferred' },
           },
         },
@@ -229,7 +229,7 @@ describe('validateDeviceBindings — properties', () => {
         properties: {
           source: {
             type: 'string',
-            entity: 'media_player.salon',
+            entity: 'media_player.living_room',
             set: { kind: 'inferred' },
           },
         },
@@ -244,7 +244,7 @@ describe('validateDeviceBindings — properties', () => {
         properties: {
           hvac_mode: {
             values: ['auto', 'heat'],
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             set: { kind: 'inferred' },
           },
         },
@@ -258,7 +258,7 @@ describe('validateDeviceBindings — properties', () => {
       properties: {
         power: {
           type: 'boolean',
-          entity: 'switch.salon',
+          entity: 'switch.living_room',
           set: { kind: 'inferred' },
         },
       },
@@ -268,7 +268,7 @@ describe('validateDeviceBindings — properties', () => {
   it('should accept inferred set without declared type or values', () => {
     expectValid({
       properties: {
-        power: { entity: 'switch.salon', set: { kind: 'inferred' } },
+        power: { entity: 'switch.living_room', set: { kind: 'inferred' } },
       },
     })
   })
@@ -281,7 +281,7 @@ describe('validateDeviceBindings — value maps', () => {
         hvac_mode: {
           type: 'string',
           values: ['auto', 'heat', 'cool', 'off'],
-          entity: 'climate.salon',
+          entity: 'climate.living_room',
           map: { cooling: 'cool', heating: 'heat' },
           get: { kind: 'attribute', attribute: 'hvac_action' },
           set: {
@@ -300,7 +300,7 @@ describe('validateDeviceBindings — value maps', () => {
         properties: {
           power: {
             type: 'bool',
-            entity: 'switch.salon',
+            entity: 'switch.living_room',
             get: { kind: 'state' },
           },
         },
@@ -316,7 +316,7 @@ describe('validateDeviceBindings — value maps', () => {
           level: {
             type: 'number',
             values: ['1', '2'],
-            entity: 'sensor.salon',
+            entity: 'sensor.living_room',
             get: { kind: 'state' },
             set: {
               kind: 'service',
@@ -335,7 +335,7 @@ describe('validateDeviceBindings — value maps', () => {
       {
         properties: {
           hvac_mode: {
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             map: 'cooling',
             get: { kind: 'state' },
           },
@@ -350,7 +350,7 @@ describe('validateDeviceBindings — value maps', () => {
       {
         properties: {
           hvac_mode: {
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             map_set: 42,
             get: { kind: 'state' },
           },
@@ -365,7 +365,7 @@ describe('validateDeviceBindings — value maps', () => {
       {
         properties: {
           hvac_mode: {
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             map: { cooling: { mode: 'cool' } },
             get: { kind: 'state' },
           },
@@ -381,7 +381,7 @@ describe('validateDeviceBindings — value maps', () => {
         properties: {
           level: {
             type: 'number',
-            entity: 'sensor.salon',
+            entity: 'sensor.living_room',
             map: { low: 'cold' },
             get: { kind: 'state' },
           },
@@ -398,7 +398,7 @@ describe('validateDeviceBindings — value maps', () => {
           hvac_mode: {
             type: 'string',
             values: ['heat', 'cool'],
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             map: { cooling: 'chilly' },
             get: { kind: 'state' },
           },
@@ -415,7 +415,7 @@ describe('validateDeviceBindings — value maps', () => {
           hvac_mode: {
             type: 'string',
             values: ['heat', 'cool'],
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             map: { cooling: 'cool' },
             map_set: { cool: 'cooling', turbo: 'boost' },
             get: { kind: 'state' },
@@ -431,7 +431,7 @@ describe('validateDeviceBindings — value maps', () => {
       {
         properties: {
           hvac_mode: {
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             map: { cooling: 'cool', freezing: 'cool' },
             get: { kind: 'state' },
             set: {
@@ -452,7 +452,7 @@ describe('validateDeviceBindings — value maps', () => {
         properties: {
           level: {
             type: 'number',
-            entity: 'sensor.salon',
+            entity: 'sensor.living_room',
             map: { on: '1', off: '01' },
             get: { kind: 'state' },
             set: {
@@ -472,7 +472,7 @@ describe('validateDeviceBindings — value maps', () => {
       {
         properties: {
           hvac_mode: {
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             map: { cooling: 'cool', freezing: 'cool' },
             get: { kind: 'state' },
             set: {
@@ -491,7 +491,7 @@ describe('validateDeviceBindings — value maps', () => {
     expectValid({
       properties: {
         hvac_mode: {
-          entity: 'climate.salon',
+          entity: 'climate.living_room',
           map: { cooling: 'cool', freezing: 'cool' },
           map_set: { cool: 'cooling' },
           get: { kind: 'state' },
@@ -509,7 +509,7 @@ describe('validateDeviceBindings — value maps', () => {
     expectValid({
       properties: {
         hvac_mode: {
-          entity: 'climate.salon',
+          entity: 'climate.living_room',
           map: { cooling: 'cool', freezing: 'cool' },
           get: { kind: 'state' },
           set: {
@@ -522,7 +522,7 @@ describe('validateDeviceBindings — value maps', () => {
     expectValid({
       properties: {
         hvac_mode: {
-          entity: 'climate.salon',
+          entity: 'climate.living_room',
           map: { cooling: 'cool', freezing: 'cool' },
           get: { kind: 'state' },
           set: {
@@ -541,7 +541,7 @@ describe('validateDeviceBindings — value maps', () => {
         properties: {
           hvac_mode: {
             type: 'string',
-            entity: 'climate.salon',
+            entity: 'climate.living_room',
             map: { cooling: 'cool' },
             get: { kind: 'state' },
             set: { kind: 'inferred' },
@@ -573,7 +573,7 @@ describe('validateDeviceBindings — actions', () => {
         play: {
           kind: 'service',
           service: 'media_player.media_play',
-          target: { entity_id: 'media_player.salon' },
+          target: { entity_id: 'media_player.living_room' },
         },
       },
     })
@@ -656,13 +656,16 @@ describe('validateDeviceBindings — old flat format untouched', () => {
   it('should not validate flat properties, even malformed ones', () => {
     expectValid({
       properties: {
-        power: { entity: 'switch.salon' },
+        power: { entity: 'switch.living_room' },
         volume: {
-          entity: 'media_player.salon',
+          entity: 'media_player.living_room',
           set_service: 'media_player.volume_set',
           set_value_key: 'volume_level',
         },
-        broken: { entity: 'switch.salon', set_service: 'bad_format_no_dot' },
+        broken: {
+          entity: 'switch.living_room',
+          set_service: 'bad_format_no_dot',
+        },
       },
     })
   })
@@ -673,7 +676,7 @@ describe('validateDeviceBindings — old flat format untouched', () => {
         play: { service: 'media_player.media_play' },
         volume: {
           service: 'media_player.volume_set',
-          target: { entity_id: 'media_player.salon' },
+          target: { entity_id: 'media_player.living_room' },
           data: { volume_level: 0.5 },
         },
       },
@@ -684,7 +687,7 @@ describe('validateDeviceBindings — old flat format untouched', () => {
     expectInvalid(
       {
         properties: {
-          power: { entity: 'switch.salon', get: { kind: 'wat' } },
+          power: { entity: 'switch.living_room', get: { kind: 'wat' } },
         },
       },
       /unknown get kind "wat"/,
@@ -699,7 +702,7 @@ describe('validateDeviceBindings — mixed flat set fields and strategy format',
         properties: {
           volume: {
             type: 'number',
-            entity: 'media_player.salon',
+            entity: 'media_player.living_room',
             get: { kind: 'attribute', attribute: 'volume_level' },
             set_service: 'media_player.volume_set',
             set_value_key: 'volume_level',
@@ -716,7 +719,7 @@ describe('validateDeviceBindings — mixed flat set fields and strategy format',
         properties: {
           power: {
             type: 'boolean',
-            entity: 'switch.salon',
+            entity: 'switch.living_room',
             set: { kind: 'inferred' },
             set_service: 'switch.turn_on',
           },
@@ -730,7 +733,7 @@ describe('validateDeviceBindings — mixed flat set fields and strategy format',
     expectValid({
       properties: {
         volume: {
-          entity: 'media_player.salon',
+          entity: 'media_player.living_room',
           attribute: 'volume_level',
           set: { kind: 'service', service: 'media_player.volume_set' },
         },
@@ -741,7 +744,7 @@ describe('validateDeviceBindings — mixed flat set fields and strategy format',
 
 describe('validateDeviceBindings — non-binding shapes', () => {
   it('should accept a config without properties or actions', () => {
-    expectValid({ entity: 'switch.salon' })
+    expectValid({ entity: 'switch.living_room' })
     expectValid({})
   })
 

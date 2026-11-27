@@ -208,7 +208,7 @@ describe('ExecutionEventNormalizer', () => {
       timestamp: 1020,
       name: 'confirmation',
       actionKind: 'turn_off',
-      deviceId: 'tv.salon',
+      deviceId: 'tv.living_room',
     })
     const mwEnd = norm.consume({
       kind: 'middleware:end',
@@ -254,7 +254,7 @@ describe('ExecutionEventNormalizer', () => {
       timestamp: 1020,
       name: 'confirmation',
       actionKind: 'turn_off',
-      deviceId: 'tv.salon',
+      deviceId: 'tv.living_room',
     })
     const mwEnd = norm.consume({
       kind: 'middleware:end',
@@ -338,7 +338,7 @@ describe('ExecutionEventNormalizer', () => {
       timestamp: 1020,
       name: 'noop',
       actionKind: 'read',
-      deviceId: 'switch.entree',
+      deviceId: 'switch.entrance',
     })
     const mwEnd = norm.consume({
       kind: 'middleware:end',
@@ -401,7 +401,7 @@ describe('ExecutionEventNormalizer', () => {
       kind: 'action:begin',
       timestamp: 1020,
       actionKind: 'invoke_action',
-      deviceId: 'vacuum.chambre',
+      deviceId: 'vacuum.bedroom',
       deviceName: 'Bedroom Vacuum',
       method: 'startCleaning',
     })
@@ -488,7 +488,7 @@ describe('ExecutionEventNormalizer', () => {
       timestamp: 1020,
       name: 'confirmation',
       actionKind: 'turn_off',
-      deviceId: 'tv.salon',
+      deviceId: 'tv.living_room',
     })
     norm.consume({
       kind: 'middleware:end',
@@ -501,8 +501,8 @@ describe('ExecutionEventNormalizer', () => {
       kind: 'action:begin',
       timestamp: 1040,
       actionKind: 'set_property',
-      deviceId: 'tv.salon',
-      deviceName: 'Salon TV',
+      deviceId: 'tv.living_room',
+      deviceName: 'Living Room TV',
       property: 'power',
       value: { kind: 'power', value: 'off' },
     })
@@ -545,7 +545,7 @@ describe('ExecutionEventNormalizer', () => {
       timestamp: 1020,
       name: 'confirmation',
       actionKind: 'turn_off',
-      deviceId: 'tv.salon',
+      deviceId: 'tv.living_room',
     })
     norm.consume({
       kind: 'middleware:end',
@@ -586,7 +586,7 @@ describe('ExecutionEventNormalizer', () => {
       timestamp: 1020,
       name: 'confirmation',
       actionKind: 'turn_off',
-      deviceId: 'tv.salon',
+      deviceId: 'tv.living_room',
     })
     const middlewareId = mwBegin.find(e => e.type === 'node.started')!.nodeId
 
@@ -600,8 +600,8 @@ describe('ExecutionEventNormalizer', () => {
       kind: 'action:begin',
       timestamp: 1040,
       actionKind: 'set_property',
-      deviceId: 'tv.salon',
-      deviceName: 'Salon TV',
+      deviceId: 'tv.living_room',
+      deviceName: 'Living Room TV',
     })
     norm.consume({
       kind: 'action:end',
@@ -624,8 +624,8 @@ describe('ExecutionEventNormalizer', () => {
       kind: 'action:begin',
       timestamp: 1080,
       actionKind: 'read_property',
-      deviceId: 'light.salon',
-      deviceName: 'Salon Light',
+      deviceId: 'light.living_room',
+      deviceName: 'Living Room Light',
     })
     norm.consume({
       kind: 'action:end',
@@ -646,5 +646,19 @@ describe('ExecutionEventNormalizer', () => {
     const action2Started = action2Begin.find(e => e.type === 'node.started')!
     expect(action2Started.parentNodeId).toBeDefined()
     expect(action2Started.parentNodeId).not.toBe(middlewareId)
+  })
+
+  it('maps interrupted program:end to an error span status', () => {
+    const norm = new ExecutionEventNormalizer()
+    norm.consume({ kind: 'program:begin', timestamp: 1000 })
+    const end = norm.consume({
+      kind: 'program:end',
+      timestamp: 1100,
+      status: 'interrupted',
+    })
+
+    const ended = end[0]! as NodeCompletedEvent
+    expect(ended.status).toBe('failed')
+    expect(ended.message).toBe('interrupted')
   })
 })

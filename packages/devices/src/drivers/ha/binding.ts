@@ -53,7 +53,7 @@ export interface HABinding {
 // Flat configs with `set_service` but no `set_value_key` map to `inferred`:
 // booleans are then resolved from the entity domain, so the former `{value}`
 // template behavior is only preserved when the template domain matches the
-// entity domain (e.g. `lock.{value}` on `lock.porte`). The diverging combos —
+// entity domain (e.g. `lock.{value}` on `lock.door`). The diverging combos —
 // `set_service` called as-is, non-boolean values silently dropped,
 // template-domain on/off fallback — are intentionally not reproduced here and
 // are tracked for stages 5-6.

@@ -8,6 +8,7 @@ import type {
   Session,
   UserInteraction,
   DeviceSelectionInteraction,
+  SuggestionSummary,
 } from '@opennest/sdk'
 
 const G = '\x1b[32m'
@@ -58,6 +59,9 @@ export function formatSuccess(result: RunResult, since: number = 0): string {
   )
 
   for (const exec of entries) {
+    if (exec.origin) {
+      lines.push(`  ${C}\u21b3 suggestion${N}`)
+    }
     if (exec.changes.length > 0) {
       for (const change of exec.changes) {
         lines.push(changeLine(change, exec.resolvedDevices))
@@ -70,6 +74,43 @@ export function formatSuccess(result: RunResult, since: number = 0): string {
       lines.push(filterLine(exec.filter))
     }
   }
+  return lines.join('\n')
+}
+
+/** `1` for one suggestion, `1-3` for three. */
+export function suggestionRange(count: number): string {
+  return count === 1 ? '1' : `1-${count}`
+}
+
+export function formatSuggestions(suggestions: SuggestionSummary[]): string {
+  const lines: string[] = []
+  lines.push(`\n${C}${B}\u{1f4a1} Suggestions:${N}`)
+  suggestions.forEach((s, i) => {
+    const targets = s.targets.map(t => t.name).join(', ')
+    lines.push(
+      `  ${G}[${i + 1}]${N} ${s.question.message} ${D}(${targets})${N}`,
+    )
+    const q = s.question
+    if (q.type === 'choice') {
+      for (const opt of q.options) {
+        lines.push(`      ${G}[${opt.value}]${N} ${opt.label}`)
+      }
+    } else if (q.type === 'number_input') {
+      const range =
+        q.min !== undefined || q.max !== undefined
+          ? ` (${q.min ?? '…'}–${q.max ?? '…'})`
+          : ''
+      lines.push(`      ${D}number${range}${N}`)
+    } else {
+      lines.push(`      ${D}text${N}`)
+    }
+  })
+  const first = suggestions[0]
+  const example =
+    suggestions.length === 1 && first?.question.type === 'choice'
+      ? `:a 1 ${first.question.options[0]?.value ?? '<answer>'}`
+      : `:a <n> <answer>, n = ${suggestionRange(suggestions.length)}`
+  lines.push(`  ${D}Answer with ${example}${N}`)
   return lines.join('\n')
 }
 
@@ -275,12 +316,14 @@ Commands:${N}
   ${C}:h${N}, ${C}:help${N}        Show this help
   ${C}:d${N}, ${C}:devices${N}     List all registered devices
   ${C}:s${N}, ${C}:session${N}     Show session state (variables, history, etc.)
+  ${C}:a${N} <n> <answer>   Answer open suggestion n (choice value or index, number, text)
   ${C}:r${N}, ${C}:reset${N}      Reset the session
   ${C}:q${N}, ${C}:quit${N}       Exit the playground
 
 ${B}NL Mode:${N}
   Type natural language commands in NL mode (${C}:nl${N}).
-  Requires ${G}OPENAI_API_KEY${N} in ${C}.env${N} file.
+  Requires ${G}OPENAI_API_KEY${N} and/or ${G}OPENAI_BASE_URL${N} (OpenAI-compatible
+  provider, key optional) in the environment or a ${C}.env${N} file.
   Set ${C}OPENNEST_MODEL${N} to override the default model (openai/gpt-4o-mini).
 
 ${B}Tips:${N}

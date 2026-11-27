@@ -85,8 +85,8 @@ describe('parseHomeDSL', () => {
     })
 
     it('should parse enum value with underscores', () => {
-      expect(parseHomeDSL('tv.source = salle_de_bain')).toEqual(
-        result([assignment([seg('tv'), seg('source')], 'salle_de_bain')]),
+      expect(parseHomeDSL('tv.source = living_room')).toEqual(
+        result([assignment([seg('tv'), seg('source')], 'living_room')]),
       )
     })
 
@@ -250,14 +250,14 @@ describe('parseHomeDSL', () => {
 
     it('should parse action with named args', () => {
       expect(
-        parseHomeDSL('speaker.announce(message="bonjour", volume=5)'),
+        parseHomeDSL('speaker.announce(message="hello", volume=5)'),
       ).toEqual(
         result([
           {
             kind: 'action',
             path: [seg('speaker'), seg('announce')],
             args: {
-              message: { kind: 'string', value: 'bonjour' },
+              message: { kind: 'string', value: 'hello' },
               volume: { kind: 'number', value: 5 },
             },
           },
@@ -297,26 +297,26 @@ describe('parseHomeDSL', () => {
 
   describe('arg bundles', () => {
     it('should parse field assignment', () => {
-      expect(parseHomeDSL('?args.message = "bonjour"')).toEqual(
+      expect(parseHomeDSL('?args.message = "hello"')).toEqual(
         result([
           {
             kind: 'arg_field_assignment',
             name: 'args',
             field: 'message',
-            value: { kind: 'string', value: 'bonjour' },
+            value: { kind: 'string', value: 'hello' },
           },
         ]),
       )
     })
 
     it('should parse object literal assignment', () => {
-      expect(parseHomeDSL('?args = { message="bonjour", volume=5 }')).toEqual(
+      expect(parseHomeDSL('?args = { message="hello", volume=5 }')).toEqual(
         result([
           {
             kind: 'arg_bundle_assignment',
             name: 'args',
             values: {
-              message: { kind: 'string', value: 'bonjour' },
+              message: { kind: 'string', value: 'hello' },
               volume: { kind: 'number', value: 5 },
             },
           },
@@ -331,7 +331,7 @@ describe('parseHomeDSL', () => {
     })
 
     it('should reject non-object bundle assignment', () => {
-      const r = parseHomeDSL('?args = "bonjour"')
+      const r = parseHomeDSL('?args = "hello"')
       expect(r.errors).toHaveLength(1)
     })
   })
@@ -580,9 +580,9 @@ describe('parseHomeDSL', () => {
       )
     })
 
-    it('should parse $salon_tv.power = off', () => {
-      expect(parseHomeDSL('$salon_tv.power = off')).toEqual(
-        result([assignment([vseg('salon_tv'), seg('power')], 'off')]),
+    it('should parse $living_room_tv.power = off', () => {
+      expect(parseHomeDSL('$living_room_tv.power = off')).toEqual(
+        result([assignment([vseg('living_room_tv'), seg('power')], 'off')]),
       )
     })
   })
@@ -793,7 +793,7 @@ describe('parseHomeDSL', () => {
     })
 
     it('should record error on unbalanced brackets', () => {
-      const r = parseHomeDSL('tv[salon.power = on')
+      const r = parseHomeDSL('tv[living_room.power = on')
       expect(r.errors).toHaveLength(1)
       expect(r.errors[0]!.message).toMatch(/Invalid path segment/)
     })
@@ -900,7 +900,7 @@ describe('parseHomeDSL', () => {
 
     it('should parse @if with variable in condition', () => {
       const r = parseHomeDSL(
-        `$light_salon = light[living_room]\n@if $light_salon.power? == on\nlight[kitchen].power = on\n@endif`,
+        `$light_living_room = light[living_room]\n@if $light_living_room.power? == on\nlight[kitchen].power = on\n@endif`,
       )
       expect(r.errors).toHaveLength(0)
       expect(r.program.statements).toHaveLength(2)
@@ -1061,7 +1061,7 @@ describe('parseHomeDSL', () => {
 
     it('should parse @if condition with variable path segments', () => {
       const r = parseHomeDSL(
-        `@if $light_salon.power? == on\nlight[kitchen].power = on\n@endif`,
+        `@if $light_living_room.power? == on\nlight[kitchen].power = on\n@endif`,
       )
       expect(r.errors).toHaveLength(0)
       const stmt = r.program.statements[0]!
@@ -1070,7 +1070,7 @@ describe('parseHomeDSL', () => {
           true,
         )
         expect((stmt.condition as SimpleCondition).path[0]!.identifier).toBe(
-          'light_salon',
+          'light_living_room',
         )
         expect((stmt.condition as SimpleCondition).path[1]!.identifier).toBe(
           'power',
@@ -1210,13 +1210,13 @@ describe('parseHomeDSL', () => {
     })
 
     it('should parse chained room + owner selector', () => {
-      const r = parseHomeDSL('light[salon][owner:Alice].power = on')
+      const r = parseHomeDSL('light[living_room][owner:Alice].power = on')
       expect(r.errors).toHaveLength(0)
       const stmt = r.program.statements[0]!
       expect(stmt.kind).toBe('assignment')
       if (stmt.kind === 'assignment') {
         expect(stmt.path[0]!.selectors).toEqual([
-          { kind: 'room', name: 'salon' },
+          { kind: 'room', name: 'living_room' },
           { kind: 'owner', name: 'Alice' },
         ])
       }

@@ -2,6 +2,9 @@ import type { VerificationStrategy } from '@opennest/lang-core'
 
 export interface DriverRuntimeContext {
   programId: string
+  // Aborts reads at any time. A write already sent is never aborted: the
+  // signal is only checked before sending.
+  signal?: AbortSignal
 }
 
 export interface DeviceDriver {

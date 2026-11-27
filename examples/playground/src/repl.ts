@@ -7,10 +7,14 @@ import type {
   DeviceSelectionInteraction,
   ResumeAnswer,
   RunResult,
+  SuggestionResponse,
+  SuggestionQuestion,
 } from '@opennest/sdk'
 import {
   formatSuccess,
   formatInteraction,
+  formatSuggestions,
+  suggestionRange,
   formatErrors,
   formatParseErrors,
   formatDevices,
@@ -24,7 +28,7 @@ import {
   N,
   Rcol,
 } from './format.js'
-import { translateNlToDsl } from './agent.js'
+import { getNlConfig, translateNlToDsl } from './agent.js'
 import type { AttemptCallback } from './agent.js'
 import type { TelemetryHandle } from './telemetry.js'
 
@@ -48,6 +52,63 @@ function createState(
   }
 }
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+  ? Omit<T, K>
+  : never
+
+type ParsedAnswer =
+  { ok: true; response: SuggestionResponse } | { ok: false; message: string }
+
+/** Plain decimal number: `12`, `-3`, `2.5`. Rejects `0x10`, `1e3`, `Infinity`. */
+const DECIMAL = /^-?\d+(\.\d+)?$/
+
+/**
+ * Parses a typed answer to a text, number or choice question. On failure,
+ * `message` states what is accepted.
+ */
+function parseInputAnswer(
+  question: DistributiveOmit<SuggestionQuestion, 'key'>,
+  trimmed: string,
+): ParsedAnswer {
+  if (question.type === 'text_input') {
+    if (trimmed === '') return { ok: false, message: 'Expected some text.' }
+    return { ok: true, response: { type: 'text_input', text: trimmed } }
+  }
+  if (question.type === 'number_input') {
+    const { min, max } = question
+    const range =
+      min !== undefined && max !== undefined
+        ? ` between ${min} and ${max}`
+        : min !== undefined
+          ? ` >= ${min}`
+          : max !== undefined
+            ? ` <= ${max}`
+            : ''
+    const value = Number(trimmed)
+    if (
+      !DECIMAL.test(trimmed) ||
+      (min !== undefined && value < min) ||
+      (max !== undefined && value > max)
+    ) {
+      return { ok: false, message: `Expected a number${range}.` }
+    }
+    return { ok: true, response: { type: 'number_input', value } }
+  }
+  const byValue = question.options.find(o => o.value === trimmed)
+  const byIndex = /^\d+$/.test(trimmed)
+    ? question.options[parseInt(trimmed, 10) - 1]
+    : undefined
+  const chosen = byValue ?? byIndex
+  if (!chosen) {
+    const values = question.options.map(o => o.value).join(', ')
+    return {
+      ok: false,
+      message: `Expected one of: ${values} (or 1-${question.options.length}).`,
+    }
+  }
+  return { ok: true, response: { type: 'choice', value: chosen.value } }
+}
+
 function presentResult(
   result: RunResult,
   prevHistoryLen: number,
@@ -56,6 +117,10 @@ function presentResult(
     process.stdout.write(formatSuccess(result, prevHistoryLen) + '\n')
   } else if (result.status === 'success') {
     process.stdout.write('  (no-ops)\n\n')
+  }
+
+  if (result.suggestions && result.suggestions.length > 0) {
+    process.stdout.write(formatSuggestions(result.suggestions) + '\n')
   }
 
   if (result.status === 'awaiting_interaction') {
@@ -93,6 +158,15 @@ async function executeProgram(
   return presentResult(result, prevHistoryLen)
 }
 
+/**
+ * Reports an invalid answer and keeps the interaction pending: the VM session
+ * still awaits it, so the next line is read as a new answer.
+ */
+function retry(interaction: UserInteraction, message: string): UserInteraction {
+  process.stdout.write(`  Invalid answer. ${message} Try again or :cancel.\n\n`)
+  return interaction
+}
+
 async function handleInteraction(
   state: State,
   interaction: UserInteraction,
@@ -115,8 +189,10 @@ async function handleInteraction(
   if (interaction.type === 'device_selection') {
     const idx = parseInt(trimmed, 10)
     if (isNaN(idx) || idx < 1 || idx > interaction.devices.length) {
-      process.stdout.write('  Invalid choice.\n\n')
-      return null
+      return retry(
+        interaction,
+        `Expected a number between 1 and ${interaction.devices.length}.`,
+      )
     }
     const chosen = interaction.devices[idx - 1]!
     response = {
@@ -127,8 +203,7 @@ async function handleInteraction(
     const lower = trimmed.toLowerCase()
     const confirmed = lower === 'y' || lower === 'yes'
     if (!confirmed && lower !== 'n' && lower !== 'no') {
-      process.stdout.write('  Invalid answer. Type y/n.\n\n')
-      return null
+      return retry(interaction, 'Type y/n.')
     }
     response = {
       type: 'confirmation',
@@ -146,10 +221,10 @@ async function handleInteraction(
         if (interaction.missing.length === 1 && only) {
           values[only.name] = part
         } else {
-          process.stdout.write(
-            `  Expected name=value for each missing parameter.\n\n`,
+          return retry(
+            interaction,
+            'Expected name=value for each missing parameter.',
           )
-          return null
         }
       } else {
         values[part.slice(0, eq).trim()] = part.slice(eq + 1).trim()
@@ -159,6 +234,16 @@ async function handleInteraction(
       type: 'action_parameter',
       values,
     }
+  } else if (
+    interaction.type === 'text_input' ||
+    interaction.type === 'number_input' ||
+    interaction.type === 'choice'
+  ) {
+    const parsed = parseInputAnswer(interaction, trimmed)
+    if (!parsed.ok) {
+      return retry(interaction, parsed.message)
+    }
+    response = parsed.response
   } else {
     process.stdout.write('  Unsupported interaction type.\n\n')
     return null
@@ -170,6 +255,37 @@ async function handleInteraction(
 
   const result = await state.client.resumePending(response)
 
+  state.telemetry?.endCycle(result.status === 'awaiting_interaction')
+  return presentResult(result, prevHistoryLen)
+}
+
+async function answerSuggestion(
+  state: State,
+  n: number,
+  answer: string,
+): Promise<UserInteraction | null> {
+  const open = state.client.getSuggestions()
+  const suggestion = open[n - 1]
+  if (!suggestion) {
+    process.stdout.write(
+      open.length === 0
+        ? '  No open suggestion.\n\n'
+        : `  No such suggestion. Open suggestions: ${suggestionRange(open.length)}.\n\n`,
+    )
+    return null
+  }
+  const parsed = parseInputAnswer(suggestion.question, answer.trim())
+  if (!parsed.ok) {
+    process.stdout.write(
+      `  Invalid answer. ${parsed.message} Usage: :a ${n} <answer>\n\n`,
+    )
+    return null
+  }
+  const response = parsed.response
+
+  const prevHistoryLen = state.client.getSession().history.length
+  state.telemetry?.beginCycle()
+  const result = await state.client.answerSuggestion(suggestion.id, response)
   state.telemetry?.endCycle(result.status === 'awaiting_interaction')
   return presentResult(result, prevHistoryLen)
 }
@@ -233,6 +349,7 @@ const COMMANDS = [
   ':{',
   ':}',
   ':cancel',
+  ':a',
   ':nl',
   ':dsl',
 ]
@@ -465,10 +582,30 @@ export async function startRepl(
       process.stdout.write('Session reset.\n\n')
       return
     }
+    const answerMatch = /^:a\s+(\d+)(?:\s+(.*))?$/.exec(trimmed)
+    if (answerMatch) {
+      pendingInteraction = await answerSuggestion(
+        state,
+        parseInt(answerMatch[1]!, 10),
+        answerMatch[2] ?? '',
+      )
+      return
+    }
+    if (trimmed === ':a' || trimmed.startsWith(':a ')) {
+      const count = state.client.getSuggestions().length
+      process.stdout.write(
+        count === 0
+          ? '  No open suggestion.\n\n'
+          : count === 1
+            ? '  Usage: :a 1 <answer>\n\n'
+            : `  Usage: :a <n> <answer>, n = ${suggestionRange(count)}\n\n`,
+      )
+      return
+    }
     if (trimmed === ':nl') {
-      if (!process.env['OPENAI_API_KEY']) {
+      if (!getNlConfig()) {
         process.stdout.write(
-          `  ${Rcol}Warning: OPENAI_API_KEY not set. NL mode requires an API key.${N}\n`,
+          `  ${Rcol}Warning: NL mode is not configured. Set OPENAI_API_KEY, or OPENAI_BASE_URL for an OpenAI-compatible provider.${N}\n`,
         )
       }
       state.nlMode = true

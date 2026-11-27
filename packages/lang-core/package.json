@@ -1,15 +1,45 @@
 {
   "name": "@opennest/lang-core",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "Framework-agnostic core for OpenNest Lang: parser, prompt generation, validation, and type definitions",
+  "keywords": [
+    "opennest",
+    "homedsl",
+    "smart-home",
+    "dsl",
+    "parser",
+    "llm"
+  ],
+  "homepage": "https://github.com/OpenNestHQ/core/tree/main/packages/lang-core#readme",
+  "bugs": {
+    "url": "https://github.com/OpenNestHQ/core/issues"
+  },
   "license": "ISC",
   "author": "Zepoze",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OpenNestHQ/core.git"
+    "url": "git+https://github.com/OpenNestHQ/core.git",
+    "directory": "packages/lang-core"
   },
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "test": "vitest run",
     "build": "tsc",

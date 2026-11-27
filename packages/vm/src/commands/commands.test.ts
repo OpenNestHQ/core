@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import { Effect } from 'effect'
 import {
   parseHomeDSL,
   buildAction,
@@ -16,6 +17,7 @@ import {
 } from '../index.js'
 import type { Device, Session, VMCommand } from '../index.js'
 import { resumeWithResponse } from '../state.js'
+import { runCommand } from '../effect/index.js'
 
 function makeDriver(): MockDriver {
   return new MockDriver()
@@ -44,29 +46,64 @@ async function makeDevice(
 async function devices(): Promise<Device[]> {
   const driver = makeDriver()
   return Promise.all([
-    makeDevice('tv_salon', 'tv', 'salon', 'Salon TV', driver, {
+    makeDevice(
+      'tv_living_room',
+      'tv',
+      'living_room',
+      'Living Room TV',
+      driver,
+      {
+        power: false,
+        volume: 10,
+      },
+    ),
+    makeDevice('tv_bedroom', 'tv', 'bedroom', 'Bedroom TV', driver, {
       power: false,
-      volume: 10,
     }),
-    makeDevice('tv_chambre', 'tv', 'chambre', 'Chambre TV', driver, {
-      power: false,
-    }),
-    makeDevice('light_salon', 'light', 'salon', 'Salon Light', driver, {
-      power: false,
-    }),
-    makeDevice('vacuum_salon', 'vacuum', 'salon', 'Salon Vacuum', driver, {}),
+    makeDevice(
+      'light_living_room',
+      'light',
+      'living_room',
+      'Living Room Light',
+      driver,
+      {
+        power: false,
+      },
+    ),
+    makeDevice(
+      'vacuum_living_room',
+      'vacuum',
+      'living_room',
+      'Living Room Vacuum',
+      driver,
+      {},
+    ),
   ])
 }
 
 async function devicesWithTwoLights(): Promise<Device[]> {
   const driver = makeDriver()
   return Promise.all([
-    makeDevice('light_salon_1', 'light', 'salon', 'Salon Light 1', driver, {
-      power: false,
-    }),
-    makeDevice('light_salon_2', 'light', 'salon', 'Salon Light 2', driver, {
-      power: false,
-    }),
+    makeDevice(
+      'light_living_room_1',
+      'light',
+      'living_room',
+      'Living Room Light 1',
+      driver,
+      {
+        power: false,
+      },
+    ),
+    makeDevice(
+      'light_living_room_2',
+      'light',
+      'living_room',
+      'Living Room Light 2',
+      driver,
+      {
+        power: false,
+      },
+    ),
   ])
 }
 
@@ -95,7 +132,7 @@ describe('executeCommand', () => {
       const result = await executeCommand(
         {
           kind: 'execute_action',
-          action: buildAction('vacuum', 'start', 'salon'),
+          action: buildAction('vacuum', 'start', 'living_room'),
         },
         ctx,
       )
@@ -105,8 +142,8 @@ describe('executeCommand', () => {
       const exec = result.executed[0]!
       expect(exec.statement.kind).toBe('action')
       expect(exec.resolvedDevices).toHaveLength(1)
-      expect(exec.resolvedDevices[0]!.id).toBe('vacuum_salon')
-      expect(result.session.it!.id).toBe('vacuum_salon')
+      expect(exec.resolvedDevices[0]!.id).toBe('vacuum_living_room')
+      expect(result.session.it!.id).toBe('vacuum_living_room')
     })
 
     it('should produce the same result as the equivalent DSL program', async () => {
@@ -115,13 +152,13 @@ describe('executeCommand', () => {
       const commandResult = await executeCommand(
         {
           kind: 'execute_action',
-          action: buildAction('vacuum', 'start', 'salon'),
+          action: buildAction('vacuum', 'start', 'living_room'),
         },
         { devices: devs },
       )
 
       const dslResult = await executeCommand(
-        { kind: 'run_program', program: parse('vacuum[salon].start()') },
+        { kind: 'run_program', program: parse('vacuum[living_room].start()') },
         { devices: devs },
       )
 
@@ -151,7 +188,7 @@ describe('executeCommand', () => {
       resumeWithResponse(first.session, {
         interactionId: first.interaction!.id,
         type: 'device_selection',
-        deviceId: 'tv_chambre',
+        deviceId: 'tv_bedroom',
       })
 
       const second = await executeCommand(command, {
@@ -162,7 +199,7 @@ describe('executeCommand', () => {
       expect(second.status).toBe('success')
       const exec = second.executed[second.executed.length - 1]!
       expect(exec.resolvedDevices).toHaveLength(1)
-      expect(exec.resolvedDevices[0]!.id).toBe('tv_chambre')
+      expect(exec.resolvedDevices[0]!.id).toBe('tv_bedroom')
     })
 
     it('should trigger device selection for wildcard rooms', async () => {
@@ -184,7 +221,7 @@ describe('executeCommand', () => {
       const ctx = { devices: await devices(), session, middleware: [mw] }
       const command: VMCommand = {
         kind: 'execute_action',
-        action: buildAction('vacuum', 'start', 'salon'),
+        action: buildAction('vacuum', 'start', 'living_room'),
       }
 
       const first = await executeCommand(command, ctx)
@@ -206,7 +243,7 @@ describe('executeCommand', () => {
 
       expect(second.status).toBe('success')
       const exec = second.executed[second.executed.length - 1]!
-      expect(exec.resolvedDevices[0]!.id).toBe('vacuum_salon')
+      expect(exec.resolvedDevices[0]!.id).toBe('vacuum_living_room')
     })
 
     it('should report an error when the confirmation is denied', async () => {
@@ -217,7 +254,7 @@ describe('executeCommand', () => {
       const ctx = { devices: await devices(), session, middleware: [mw] }
       const command: VMCommand = {
         kind: 'execute_action',
-        action: buildAction('vacuum', 'start', 'salon'),
+        action: buildAction('vacuum', 'start', 'living_room'),
       }
 
       const first = await executeCommand(command, ctx)
@@ -254,7 +291,7 @@ describe('executeCommand', () => {
   describe('run_program', () => {
     it('should behave exactly like interpret_home_dsl', async () => {
       const devs = await devices()
-      const program = parse('light[salon].power = on')
+      const program = parse('light[living_room].power = on')
 
       const commandResult = await executeCommand(
         { kind: 'run_program', program },
@@ -267,7 +304,9 @@ describe('executeCommand', () => {
 
     it('should accept programs built with buildProgram', async () => {
       const devs = await devices()
-      const program = buildProgram([buildAction('vacuum', 'start', 'salon')])
+      const program = buildProgram([
+        buildAction('vacuum', 'start', 'living_room'),
+      ])
 
       const result = await executeCommand(
         { kind: 'run_program', program },
@@ -285,13 +324,16 @@ describe('executeCommand', () => {
       const commandResult = await executeCommand(
         {
           kind: 'execute_statement',
-          statement: buildAssignment('light', 'power', on(), 'salon'),
+          statement: buildAssignment('light', 'power', on(), 'living_room'),
         },
         { devices: devs },
       )
 
       const dslResult = await executeCommand(
-        { kind: 'run_program', program: parse('light[salon].power = on') },
+        {
+          kind: 'run_program',
+          program: parse('light[living_room].power = on'),
+        },
         { devices: devs },
       )
 
@@ -300,7 +342,7 @@ describe('executeCommand', () => {
         dslResult.executed[0]!.statement,
       )
       expect(commandResult.executed[0]!.changes[0]!.newValue).toBe(true)
-      expect(commandResult.session.it!.id).toBe('light_salon')
+      expect(commandResult.session.it!.id).toBe('light_living_room')
     })
 
     it('should execute a query', async () => {
@@ -308,7 +350,7 @@ describe('executeCommand', () => {
       const result = await executeCommand(
         {
           kind: 'execute_statement',
-          statement: buildQuery('tv', 'volume', 'salon'),
+          statement: buildQuery('tv', 'volume', 'living_room'),
         },
         ctx,
       )
@@ -324,7 +366,7 @@ describe('executeCommand', () => {
       const result = await executeCommand(
         {
           kind: 'execute_statement',
-          statement: buildIncrement('tv', 'volume', num(5), 'salon'),
+          statement: buildIncrement('tv', 'volume', num(5), 'living_room'),
         },
         ctx,
       )
@@ -337,7 +379,7 @@ describe('executeCommand', () => {
 
     it('should be equivalent to execute_action when carrying an action statement', async () => {
       const devs = await devices()
-      const action = buildAction('vacuum', 'start', 'salon')
+      const action = buildAction('vacuum', 'start', 'living_room')
 
       const viaStatement = await executeCommand(
         { kind: 'execute_statement', statement: action },
@@ -372,7 +414,7 @@ describe('executeCommand', () => {
       resumeWithResponse(first.session, {
         interactionId: first.interaction!.id,
         type: 'device_selection',
-        deviceId: 'tv_chambre',
+        deviceId: 'tv_bedroom',
       })
 
       const second = await executeCommand(command, {
@@ -382,7 +424,7 @@ describe('executeCommand', () => {
 
       expect(second.status).toBe('success')
       const exec = second.executed[second.executed.length - 1]!
-      expect(exec.resolvedDevices[0]!.id).toBe('tv_chambre')
+      expect(exec.resolvedDevices[0]!.id).toBe('tv_bedroom')
     })
 
     it('should go through the middleware pipeline for set_property', async () => {
@@ -393,7 +435,7 @@ describe('executeCommand', () => {
       const ctx = { devices: await devices(), session, middleware: [mw] }
       const command: VMCommand = {
         kind: 'execute_statement',
-        statement: buildAssignment('light', 'power', on(), 'salon'),
+        statement: buildAssignment('light', 'power', on(), 'living_room'),
       }
 
       const first = await executeCommand(command, ctx)
@@ -425,8 +467,8 @@ describe('executeCommand', () => {
       const result = await executeCommand(
         {
           kind: 'execute_statement',
-          statement: buildAssignment('light', 'power', on(), 'salon'),
-          deviceId: 'light_salon_2',
+          statement: buildAssignment('light', 'power', on(), 'living_room'),
+          deviceId: 'light_living_room_2',
         },
         ctx,
       )
@@ -434,8 +476,8 @@ describe('executeCommand', () => {
       expect(result.status).toBe('success')
       const exec = result.executed[0]!
       expect(exec.resolvedDevices).toHaveLength(1)
-      expect(exec.resolvedDevices[0]!.id).toBe('light_salon_2')
-      expect(result.session.it!.id).toBe('light_salon_2')
+      expect(exec.resolvedDevices[0]!.id).toBe('light_living_room_2')
+      expect(result.session.it!.id).toBe('light_living_room_2')
     })
 
     it('should work with execute_action', async () => {
@@ -444,13 +486,13 @@ describe('executeCommand', () => {
         {
           kind: 'execute_action',
           action: buildAction('tv', 'turn_on'),
-          deviceId: 'tv_chambre',
+          deviceId: 'tv_bedroom',
         },
         ctx,
       )
 
       expect(result.status).toBe('success')
-      expect(result.executed[0]!.resolvedDevices[0]!.id).toBe('tv_chambre')
+      expect(result.executed[0]!.resolvedDevices[0]!.id).toBe('tv_bedroom')
     })
 
     it('should report an error for an unknown deviceId', async () => {
@@ -458,7 +500,7 @@ describe('executeCommand', () => {
       const result = await executeCommand(
         {
           kind: 'execute_statement',
-          statement: buildAssignment('light', 'power', on(), 'salon'),
+          statement: buildAssignment('light', 'power', on(), 'living_room'),
           deviceId: 'does_not_exist',
         },
         ctx,
@@ -474,7 +516,7 @@ describe('executeCommand', () => {
         {
           kind: 'execute_statement',
           statement: buildAssignment('light', 'power', on()),
-          deviceId: 'tv_salon',
+          deviceId: 'tv_living_room',
         },
         ctx,
       )
@@ -495,8 +537,8 @@ describe('executeCommand', () => {
       const result = await executeCommand(
         {
           kind: 'execute_statement',
-          statement: buildAssignment('light', 'power', on(), 'salon'),
-          deviceId: 'light_salon_1',
+          statement: buildAssignment('light', 'power', on(), 'living_room'),
+          deviceId: 'light_living_room_1',
         },
         ctx,
       )
@@ -518,7 +560,7 @@ describe('executeCommand', () => {
       const first = await executeCommand(
         {
           kind: 'execute_action',
-          action: buildAction('vacuum', 'start', 'salon'),
+          action: buildAction('vacuum', 'start', 'living_room'),
         },
         ctx,
       )
@@ -544,7 +586,7 @@ describe('executeCommand', () => {
 
       expect(second.status).toBe('success')
       const exec = second.executed[second.executed.length - 1]!
-      expect(exec.resolvedDevices[0]!.id).toBe('vacuum_salon')
+      expect(exec.resolvedDevices[0]!.id).toBe('vacuum_living_room')
     })
 
     it('should resume after device selection ambiguity', async () => {
@@ -565,7 +607,7 @@ describe('executeCommand', () => {
           response: {
             interactionId: first.interaction!.id,
             type: 'device_selection',
-            deviceId: 'tv_salon',
+            deviceId: 'tv_living_room',
           },
         },
         { devices: ctx.devices, session: first.session },
@@ -573,7 +615,7 @@ describe('executeCommand', () => {
 
       expect(second.status).toBe('success')
       const exec = second.executed[second.executed.length - 1]!
-      expect(exec.resolvedDevices[0]!.id).toBe('tv_salon')
+      expect(exec.resolvedDevices[0]!.id).toBe('tv_living_room')
     })
 
     it('should error when resuming without a pending program', async () => {
@@ -610,15 +652,15 @@ describe('executeCommand', () => {
           response: {
             interactionId: first.interaction!.id,
             type: 'device_selection',
-            deviceId: 'tv_inexistant',
+            deviceId: 'tv_nonexistent',
           },
         },
         { devices: ctx.devices, session },
       )
       expect(result.status).toBe('error')
       expect(result.errors[0]?.code).toBe('unknown_device_id')
-      expect(result.errors[0]?.message).toContain('tv_salon')
-      expect(result.errors[0]?.message).toContain('tv_chambre')
+      expect(result.errors[0]?.message).toContain('tv_living_room')
+      expect(result.errors[0]?.message).toContain('tv_bedroom')
     })
 
     it('rejects a response whose type does not match the pending interaction', async () => {
@@ -664,7 +706,7 @@ describe('executeCommand', () => {
           response: {
             interactionId: first.interaction!.id,
             type: 'device_selection',
-            deviceId: 'tv_inexistant',
+            deviceId: 'tv_nonexistent',
           },
         },
         { devices: ctx.devices, session },
@@ -681,14 +723,14 @@ describe('executeCommand', () => {
           response: {
             interactionId: first.interaction!.id,
             type: 'device_selection',
-            deviceId: 'tv_salon',
+            deviceId: 'tv_living_room',
           },
         },
         { devices: ctx.devices, session },
       )
       expect(second.status).toBe('success')
       const exec = second.executed[second.executed.length - 1]!
-      expect(exec.resolvedDevices[0]!.id).toBe('tv_salon')
+      expect(exec.resolvedDevices[0]!.id).toBe('tv_living_room')
     })
 
     it('rejects a stale interaction id after a new interaction superseded it', async () => {
@@ -712,7 +754,7 @@ describe('executeCommand', () => {
           response: {
             interactionId: staleId,
             type: 'device_selection',
-            deviceId: 'tv_salon',
+            deviceId: 'tv_living_room',
           },
         },
         { devices: ctx.devices, session, middleware: [mw] },
@@ -751,9 +793,9 @@ describe('executeCommand', () => {
       // MockDriver's executeAction is a no-op: the applied effect is recorded
       // as a change rather than as device state.
       const exec = third.executed[third.executed.length - 1]!
-      expect(exec.resolvedDevices[0]!.id).toBe('tv_salon')
+      expect(exec.resolvedDevices[0]!.id).toBe('tv_living_room')
       expect(exec.changes[0]).toMatchObject({
-        deviceId: 'tv_salon',
+        deviceId: 'tv_living_room',
         property: 'action:turn_on',
         newValue: 'called',
       })
@@ -776,7 +818,7 @@ describe('executeCommand', () => {
           response: {
             interactionId: first.interaction!.id,
             type: 'device_selection',
-            deviceId: 'tv_inconnu',
+            deviceId: 'tv_unknown',
           },
         },
         { devices: ctx.devices, session },
@@ -791,7 +833,7 @@ describe('executeCommand', () => {
           response: {
             interactionId: first.interaction!.id,
             type: 'device_selection',
-            deviceId: 'tv_salon',
+            deviceId: 'tv_living_room',
           },
         },
         { devices: ctx.devices, session },
@@ -802,7 +844,7 @@ describe('executeCommand', () => {
       // as a change rather than as device state.
       expect(second.executed).toHaveLength(1)
       expect(second.executed[0]!.changes[0]).toMatchObject({
-        deviceId: 'tv_salon',
+        deviceId: 'tv_living_room',
         property: 'action:turn_on',
         newValue: 'called',
       })
@@ -824,7 +866,10 @@ describe('executeCommand', () => {
       const pendingCursor = first.session.cursor
 
       const blocked = await executeCommand(
-        { kind: 'run_program', program: parse('light[salon].power = on') },
+        {
+          kind: 'run_program',
+          program: parse('light[living_room].power = on'),
+        },
         { devices: ctx.devices, session: first.session },
       )
       expect(blocked.status).toBe('error')
@@ -834,14 +879,14 @@ describe('executeCommand', () => {
       expect(blocked.session.pendingInteraction!.id).toBe(pendingId)
       expect(blocked.session.cursor).toBe(pendingCursor)
 
-      // resume the first interaction (deviceId 'tv_salon') → success
+      // resume the first interaction (deviceId 'tv_living_room') → success
       const resumed = await executeCommand(
         {
           kind: 'resume_interaction',
           response: {
             interactionId: pendingId,
             type: 'device_selection',
-            deviceId: 'tv_salon',
+            deviceId: 'tv_living_room',
           },
         },
         { devices: ctx.devices, session: blocked.session },
@@ -851,7 +896,7 @@ describe('executeCommand', () => {
       // as a change rather than as device state.
       expect(resumed.executed).toHaveLength(1)
       expect(resumed.executed[0]!.changes[0]).toMatchObject({
-        deviceId: 'tv_salon',
+        deviceId: 'tv_living_room',
         property: 'action:turn_on',
         newValue: 'called',
       })
@@ -869,7 +914,7 @@ describe('executeCommand', () => {
       const viaAction = await executeCommand(
         {
           kind: 'execute_action',
-          action: buildAction('vacuum', 'start', 'salon'),
+          action: buildAction('vacuum', 'start', 'living_room'),
         },
         { devices: ctx.devices, session: first.session },
       )
@@ -880,7 +925,7 @@ describe('executeCommand', () => {
       const viaStatement = await executeCommand(
         {
           kind: 'execute_statement',
-          statement: buildAssignment('light', 'power', on(), 'salon'),
+          statement: buildAssignment('light', 'power', on(), 'living_room'),
         },
         { devices: ctx.devices, session: first.session },
       )
@@ -904,7 +949,10 @@ describe('executeCommand', () => {
       expect(cancelled.status).toBe('success')
 
       const result = await executeCommand(
-        { kind: 'run_program', program: parse('light[salon].power = on') },
+        {
+          kind: 'run_program',
+          program: parse('light[living_room].power = on'),
+        },
         { devices: ctx.devices, session: cancelled.session },
       )
       expect(result.status).toBe('success')
@@ -951,25 +999,135 @@ describe('executeCommand', () => {
       const session: Session = createSession()
 
       const dslResult = await executeCommand(
-        { kind: 'run_program', program: parse('light[salon].power = on') },
+        {
+          kind: 'run_program',
+          program: parse('light[living_room].power = on'),
+        },
         {
           devices: devs,
           session,
         },
       )
-      expect(dslResult.session.it!.id).toBe('light_salon')
+      expect(dslResult.session.it!.id).toBe('light_living_room')
 
       const commandResult = await executeCommand(
         {
           kind: 'execute_action',
-          action: buildAction('vacuum', 'start', 'salon'),
+          action: buildAction('vacuum', 'start', 'living_room'),
         },
         { devices: devs, session: dslResult.session },
       )
 
       expect(commandResult.status).toBe('success')
-      expect(commandResult.session.it!.id).toBe('vacuum_salon')
+      expect(commandResult.session.it!.id).toBe('vacuum_living_room')
       expect(commandResult.session.history).toHaveLength(2)
     })
+  })
+})
+
+describe('programId per program run', () => {
+  const lightsOn = () => parseHomeDSL('light[living_room].power = on').program!
+  const ambiguous = () => parseHomeDSL('tv.power = on').program!
+
+  it('renews programId for each new program on the same session', async () => {
+    const devs = await devices()
+    const a = await executeCommand(
+      { kind: 'run_program', program: lightsOn() },
+      { devices: devs },
+    )
+    const idA = a.session.programId
+    const b = await executeCommand(
+      { kind: 'run_program', program: lightsOn() },
+      { devices: devs, session: a.session },
+    )
+    expect(b.session.programId).not.toBe(idA)
+  })
+
+  it('keeps programId across a pause at statement 0 and its resume', async () => {
+    const devs = await devices()
+    const spy = vi.spyOn(devs[0]!.driver, 'setProperty')
+    const paused = await executeCommand(
+      { kind: 'run_program', program: ambiguous() },
+      { devices: devs },
+    )
+    expect(paused.status).toBe('awaiting_interaction')
+    const idBefore = paused.session.programId
+    const done = await executeCommand(
+      {
+        kind: 'resume_interaction',
+        response: {
+          interactionId: paused.session.pendingInteraction!.id,
+          type: 'device_selection',
+          deviceId: 'tv_living_room',
+        },
+      },
+      { devices: devs, session: paused.session },
+    )
+    expect(done.status).toBe('success')
+    expect(done.session.programId).toBe(idBefore)
+    expect(spy.mock.calls[0]![4]).toMatchObject({ programId: idBefore })
+  })
+
+  it('does not change programId when rejected as interaction_pending', async () => {
+    const devs = await devices()
+    const paused = await executeCommand(
+      { kind: 'run_program', program: ambiguous() },
+      { devices: devs },
+    )
+    const idBefore = paused.session.programId
+    const rejected = await executeCommand(
+      { kind: 'run_program', program: lightsOn() },
+      { devices: devs, session: paused.session },
+    )
+    expect(rejected.errors[0]?.code).toBe('interaction_pending')
+    expect(rejected.session.programId).toBe(idBefore)
+  })
+
+  it('renews programId for execute_action and execute_statement', async () => {
+    const devs = await devices()
+    const first = await executeCommand(
+      { kind: 'run_program', program: lightsOn() },
+      { devices: devs },
+    )
+    const id0 = first.session.programId
+    const act = await executeCommand(
+      {
+        kind: 'execute_action',
+        action: buildAction('vacuum', 'start', 'living_room'),
+      },
+      { devices: devs, session: first.session },
+    )
+    const idAct = act.session.programId
+    expect(idAct).not.toBe(id0)
+    const stmt = lightsOn().statements[0]!
+    const r1 = await executeCommand(
+      { kind: 'execute_statement', statement: stmt },
+      { devices: devs, session: act.session },
+    )
+    expect(r1.session.programId).not.toBe(idAct)
+    const id1 = r1.session.programId
+    const r2 = await executeCommand(
+      { kind: 'execute_statement', statement: stmt },
+      { devices: devs, session: r1.session },
+    )
+    expect(r2.session.programId).not.toBe(id1)
+  })
+
+  it('renews programId through runCommand too', async () => {
+    const devs = await devices()
+    const a = await Effect.runPromise(
+      runCommand(
+        { kind: 'run_program', program: lightsOn() },
+        { devices: devs },
+      ),
+    )
+    const idA = a.session.programId
+    const b = await Effect.runPromise(
+      runCommand(
+        { kind: 'run_program', program: lightsOn() },
+        { devices: devs, session: a.session },
+      ),
+    )
+    expect(b.session.programId).not.toBe(idA)
   })
 })

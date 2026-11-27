@@ -1,22 +1,56 @@
 {
   "name": "@opennest/vm",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "OpenNest VM (interpreter) — device resolution, ambiguity handling, state management, and execution engine for HomeDSL",
+  "keywords": [
+    "opennest",
+    "homedsl",
+    "smart-home",
+    "interpreter",
+    "vm"
+  ],
+  "homepage": "https://github.com/OpenNestHQ/core/tree/main/packages/vm#readme",
+  "bugs": {
+    "url": "https://github.com/OpenNestHQ/core/issues"
+  },
   "license": "ISC",
   "author": "Zepoze",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OpenNestHQ/core.git"
+    "url": "git+https://github.com/OpenNestHQ/core.git",
+    "directory": "packages/vm"
   },
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./effect": {
+      "types": "./dist/effect/index.d.ts",
+      "default": "./dist/effect/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "test": "vitest run",
     "build": "tsc"
   },
   "dependencies": {
-    "@opennest/lang-core": "workspace:*",
-    "@opennest/devices": "workspace:*"
+    "@opennest/lang-core": "workspace:^",
+    "@opennest/devices": "workspace:^",
+    "effect": "~4.1.5"
   },
   "devDependencies": {
     "typescript": "^6.0.3",

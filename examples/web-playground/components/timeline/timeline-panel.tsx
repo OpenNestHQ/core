@@ -15,7 +15,7 @@ export function TimelinePanel() {
       <CardHeader className="flex flex-row items-center justify-between py-2 px-3">
         <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
           <ListChecks className="h-3.5 w-3.5" />
-          Actions exécutées
+          Executed actions
         </CardTitle>
         <Badge variant="default">{timeline.length}</Badge>
       </CardHeader>
@@ -23,7 +23,7 @@ export function TimelinePanel() {
         <ScrollArea className="h-full">
           {timeline.length === 0 ? (
             <div className="flex items-center justify-center h-full text-xs text-muted-foreground p-4">
-              Aucune action exécutée
+              No action executed yet
             </div>
           ) : (
             <div className="flex flex-col">

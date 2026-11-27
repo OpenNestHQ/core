@@ -5,6 +5,7 @@ export type InteractionErrorCode =
   | 'interaction_id_mismatch'
   | 'interaction_type_mismatch'
   | 'unknown_device_id'
+  | 'invalid_response'
 
 export class InteractionError extends Error {
   readonly code: InteractionErrorCode

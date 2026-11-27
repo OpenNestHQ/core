@@ -123,17 +123,16 @@ export function VMProvider({ children }: { children: ReactNode }) {
     })
     dispatch({
       type: 'SET_DSL',
-      source:
-        '# Tapez du HomeDSL ci-dessous\n# Exemple: light[salon].power = on',
+      source: '# Type HomeDSL below\n# Example: light[living_room].power = on',
     })
     dispatch({
       type: 'ADD_MESSAGE',
       message: buildChatMessage(
         'system',
-        '🏠 Bienvenue dans le Playground OpenNest !\n\n' +
-          'Tapez du **HomeDSL** dans le chat pour interpréter du code.\n' +
-          'Ou cliquez sur **Demo** pour lancer le scénario de démonstration.\n\n' +
-          '**Appareils disponibles :**\n' +
+        '🏠 Welcome to the OpenNest Playground!\n\n' +
+          'Type **HomeDSL** in the chat to run code.\n' +
+          'Or click **Demo** to run the demo scenario.\n\n' +
+          '**Available devices:**\n' +
           adapterRef.current
             .getDevices()
             .map(d => `• ${d.name} (${d.type}, ${d.room})`)
@@ -144,7 +143,7 @@ export function VMProvider({ children }: { children: ReactNode }) {
       type: 'ADD_MESSAGE',
       message: buildChatMessage(
         'system',
-        '**Middleware actifs :** ' +
+        '**Active middleware:** ' +
           adapterRef.current
             .getPolicies()
             .map(p => p.name)
@@ -316,12 +315,9 @@ export function VMProvider({ children }: { children: ReactNode }) {
   const runDemo = useCallback(async () => {
     dispatch({
       type: 'ADD_MESSAGE',
-      message: buildChatMessage(
-        'system',
-        '🚀 Lancement du scénario de démo...',
-      ),
+      message: buildChatMessage('system', '🚀 Starting the demo scenario...'),
     })
-    await executeDSL('light[salon].power = on')
+    await executeDSL('light[living_room].power = on')
   }, [executeDSL])
 
   return (

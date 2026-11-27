@@ -105,8 +105,8 @@ export function ChatPanel() {
             rows={2}
             placeholder={
               isAwaiting
-                ? "Répondez à l'interaction ci-dessous..."
-                : 'light[salon].power = on'
+                ? 'Answer the interaction below...'
+                : 'light[living_room].power = on'
             }
             className="flex-1 resize-none rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50 font-mono"
           />

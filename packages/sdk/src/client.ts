@@ -5,7 +5,12 @@ import type {
   PromptOptions,
 } from '@opennest/lang-core'
 import type { DeviceRegistry, PromptDefinitions } from '@opennest/devices'
-import { executeCommand, createSession, validateProgram } from '@opennest/vm'
+import {
+  executeCommand,
+  createSession,
+  validateProgram,
+  checkInputAnswer,
+} from '@opennest/vm'
 import type {
   Device,
   Middleware,
@@ -17,9 +22,10 @@ import type {
   UserInteraction,
   UserResponse,
   VMError,
+  SuggestionResponse,
 } from '@opennest/vm'
-import { toRunResult } from './result.js'
-import type { RunResult } from './result.js'
+import { toRunResult, summarizeSuggestions } from './result.js'
+import type { RunResult, SuggestionSummary } from './result.js'
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
   ? Omit<T, K>
@@ -132,7 +138,7 @@ export class OpenNestClient {
   }
 
   async execute(program: Program): Promise<RunResult> {
-    return toRunResult(await this.run({ kind: 'run_program', program }))
+    return this.toResult(await this.run({ kind: 'run_program', program }))
   }
 
   async runDsl(dsl: string): Promise<RunResult> {
@@ -140,7 +146,9 @@ export class OpenNestClient {
   }
 
   async resume(response: UserResponse): Promise<RunResult> {
-    return toRunResult(await this.run({ kind: 'resume_interaction', response }))
+    return this.toResult(
+      await this.run({ kind: 'resume_interaction', response }),
+    )
   }
 
   async resumePending(response: ResumeAnswer): Promise<RunResult> {
@@ -169,11 +177,78 @@ export class OpenNestClient {
         )
       }
     }
+    if (
+      (pending.type === 'text_input' ||
+        pending.type === 'number_input' ||
+        pending.type === 'choice') &&
+      (response.type === 'text_input' ||
+        response.type === 'number_input' ||
+        response.type === 'choice')
+    ) {
+      const check = checkInputAnswer(pending, {
+        ...response,
+        interactionId: pending.id,
+      })
+      if (!check.ok) {
+        return failedRunResult('invalid_response', check.message)
+      }
+    }
     return this.resume({ ...response, interactionId: pending.id })
   }
 
   async cancel(): Promise<RunResult> {
-    return toRunResult(await this.run({ kind: 'cancel_execution' }))
+    return this.toResult(await this.run({ kind: 'cancel_execution' }))
+  }
+
+  async answerSuggestion(
+    id: string,
+    answer: SuggestionResponse,
+  ): Promise<RunResult> {
+    // A pending interaction is rejected by the VM (`interaction_pending`).
+    if (this.lastInteraction === null) {
+      const suggestion = this.session.suggestions?.find(s => s.id === id)
+      if (suggestion === undefined) {
+        return failedRunResult(
+          'suggestion_not_found',
+          `No open suggestion ${id}: it was answered, or dropped by a newer command.`,
+        )
+      }
+      const { question } = suggestion
+      if (answer.type !== question.type) {
+        return failedRunResult(
+          'interaction_type_mismatch',
+          `Suggestion expects ${question.type}, got ${answer.type}.`,
+        )
+      }
+      const check = checkInputAnswer(question, {
+        ...answer,
+        interactionId: suggestion.id,
+      })
+      if (!check.ok) {
+        return failedRunResult('invalid_response', check.message)
+      }
+    }
+    return this.toResult(
+      await this.run({
+        kind: 'answer_suggestion',
+        suggestionId: id,
+        response: answer,
+      }),
+    )
+  }
+
+  getSuggestions(): SuggestionSummary[] {
+    return summarizeSuggestions(this.session.suggestions ?? [], this.devices)
+  }
+
+  /** Drops one open suggestion; returns whether it existed. */
+  dismissSuggestion(id: string): boolean {
+    const open = this.session.suggestions
+    if (open === undefined || !open.some(s => s.id === id)) return false
+    const rest = open.filter(s => s.id !== id)
+    if (rest.length > 0) this.session.suggestions = rest
+    else delete this.session.suggestions
+    return true
   }
 
   getSession(): Session {
@@ -190,6 +265,10 @@ export class OpenNestClient {
 
   async close(): Promise<void> {
     await this.registry?.close()
+  }
+
+  private toResult(result: VMResult): RunResult {
+    return toRunResult(result, this.devices)
   }
 
   private async run(command: VMCommand): Promise<VMResult> {

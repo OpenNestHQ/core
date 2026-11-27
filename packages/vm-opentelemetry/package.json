@@ -1,21 +1,53 @@
 {
   "name": "@opennest/vm-opentelemetry",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "OpenTelemetry trace sink for OpenNest VM — exports execution traces as OTel spans",
+  "keywords": [
+    "opennest",
+    "homedsl",
+    "smart-home",
+    "opentelemetry",
+    "tracing"
+  ],
+  "homepage": "https://github.com/OpenNestHQ/core/tree/main/packages/vm-opentelemetry#readme",
+  "bugs": {
+    "url": "https://github.com/OpenNestHQ/core/issues"
+  },
   "license": "ISC",
   "author": "Zepoze",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OpenNestHQ/core.git"
+    "url": "git+https://github.com/OpenNestHQ/core.git",
+    "directory": "packages/vm-opentelemetry"
   },
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "test": "vitest run",
     "build": "tsc"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0"
+  },
+  "peerDependencies": {
+    "@opennest/vm": "workspace:^"
   },
   "devDependencies": {
     "@opennest/vm": "workspace:*",

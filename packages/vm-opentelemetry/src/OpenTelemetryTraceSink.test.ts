@@ -147,6 +147,29 @@ describe('OpenTelemetryTraceSink', () => {
     expect(spans[0]!.end).toHaveBeenCalledWith(1100)
   })
 
+  it('passes the message of a failed node.completed to the span status', () => {
+    sink.consume({
+      type: 'node.started',
+      nodeId: '1',
+      kind: 'Program',
+      name: 'program',
+      timestamp: 1000,
+    })
+
+    sink.consume({
+      type: 'node.completed',
+      nodeId: '1',
+      timestamp: 1100,
+      status: 'failed',
+      message: 'interrupted',
+    })
+
+    expect(spans[0]!.setStatus).toHaveBeenCalledWith({
+      code: SpanStatusCode.ERROR,
+      message: 'interrupted',
+    })
+  })
+
   it('sets attributes on node.attribute', () => {
     sink.consume({
       type: 'node.started',
