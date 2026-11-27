@@ -10,6 +10,13 @@ export const PUBLISHED_PACKAGES = [
 
 const REQUIRED_FILES = ['dist', 'README.md']
 const REQUIRED_NODE_RANGE = '>=24'
+const INTERNAL_SCOPE = '@opennest/'
+/**
+ * Range required for internal runtime dependencies. Packages are versioned
+ * independently: `workspace:^` publishes as a caret range (`^0.1.0`), so a
+ * compatible release of a dependency does not force its dependents to bump.
+ */
+const INTERNAL_RANGE = 'workspace:^'
 
 /**
  * Checks that a `package.json` is ready to be published. The version is not
@@ -59,6 +66,16 @@ export function checkManifest(manifest, dir) {
     manifest.publishConfig?.provenance === true,
     'publishConfig.provenance must be true',
   )
+
+  for (const field of ['dependencies', 'peerDependencies']) {
+    for (const [name, range] of Object.entries(manifest[field] ?? {})) {
+      if (!name.startsWith(INTERNAL_SCOPE)) continue
+      check(
+        range === INTERNAL_RANGE,
+        `${field}.${name} must be "${INTERNAL_RANGE}"`,
+      )
+    }
+  }
 
   return errors
 }

@@ -43,9 +43,9 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@opennest/lang-core": "workspace:*",
-    "@opennest/devices": "workspace:*",
-    "@opennest/vm": "workspace:*"
+    "@opennest/lang-core": "workspace:^",
+    "@opennest/devices": "workspace:^",
+    "@opennest/vm": "workspace:^"
   },
   "devDependencies": {
     "typescript": "^6.0.3",
