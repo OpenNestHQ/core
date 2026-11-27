@@ -57,10 +57,10 @@ export function MobileStatus() {
         </Dialog.Trigger>
       </div>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50" />
+        <Dialog.Overlay className="sheet-overlay fixed inset-0 z-40 bg-black/50" />
         <Dialog.Content
           aria-describedby={undefined}
-          className="fixed inset-x-0 bottom-0 z-50 flex max-h-[70dvh] flex-col rounded-t-2xl border-t border-border bg-card"
+          className="sheet fixed inset-x-0 bottom-0 z-50 flex max-h-[80dvh] min-h-[55dvh] flex-col rounded-t-2xl border-t border-border bg-card"
         >
           <div {...swipe} className="touch-none px-4 pb-1 pt-2">
             <Dialog.Close

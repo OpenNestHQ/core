@@ -5,6 +5,8 @@ import { useState } from 'react'
 // `renderCustomMessages` with its own renderer, which would hide our
 // suggestion cards. Use the v2 provider directly.
 import { CopilotKitProvider } from '@copilotkit/react-core/v2'
+import { useIsMobile } from '@/lib/client/use-is-mobile'
+import { useVisibleViewport } from '@/lib/client/use-visible-viewport'
 import { ModeProvider } from './mode/mode-context'
 import { ThreadProvider } from './thread/thread-context'
 import { Header } from './layout/header'
@@ -21,6 +23,7 @@ const activityRenderers = [answerTraceRenderer]
 
 export function DemoApp({ llmConfigured }: { llmConfigured: boolean }) {
   const [devicesOpen, setDevicesOpen] = useState(false)
+  const visible = useVisibleViewport(useIsMobile())
   return (
     <CopilotKitProvider
       runtimeUrl="/api/copilotkit"
@@ -32,7 +35,7 @@ export function DemoApp({ llmConfigured }: { llmConfigured: boolean }) {
       <ModeProvider>
         <ThreadProvider>
           {/* dvh: a phone browser toolbar must not hide the input. */}
-          <div className="flex h-dvh">
+          <div className="flex h-dvh" style={visible}>
             <Sidebar onOpenDevices={() => setDevicesOpen(true)} />
             <div className="flex min-w-0 flex-1 flex-col">
               <Header onOpenDevices={() => setDevicesOpen(true)} />
