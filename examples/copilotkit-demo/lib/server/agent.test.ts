@@ -7,6 +7,8 @@ import { EventType } from '@ag-ui/client'
 import type { BaseEvent, Message, RunAgentInput } from '@ag-ui/client'
 import type { DemoState } from '../shared/state'
 import type { InterruptMetadata } from '../shared/interrupts'
+import { ANSWER_ACTIVITY } from '../shared/answer-trace'
+import type { AnswerTrace } from '../shared/answer-trace'
 import { OpenNestAgent } from './agent'
 import { HouseStore, createHouse } from './house'
 import type { LlmChunk, LlmMessage, LlmPort } from './llm'
@@ -342,6 +344,127 @@ describe('OpenNestAgent', () => {
     const interrupt = (last(paused) as Finished).outcome!.interrupts![0]!
     expect(interrupt.reason).toBe('confirmation')
     expect(interrupt.metadata?.interaction.message).not.toMatch(/_/)
+  })
+
+  type Activity = BaseEvent & {
+    messageId: string
+    activityType: string
+    content: AnswerTrace
+  }
+  const traces = (events: BaseEvent[]) =>
+    ofType<Activity>(events, EventType.ACTIVITY_SNAPSHOT).filter(
+      e => e.activityType === ANSWER_ACTIVITY,
+    )
+
+  /** Runs `dsl` directly and returns the interrupt id it paused on. */
+  async function pauseOn(
+    agent: OpenNestAgent,
+    thread: string,
+    dsl: string,
+  ): Promise<string> {
+    const paused = await collect(
+      agent,
+      input(thread, { forwardedProps: { dsl } }),
+    )
+    return (last(paused) as Finished).outcome!.interrupts![0]!.id
+  }
+
+  it('leaves a trace of an answered question before the reply', async () => {
+    const agent = new OpenNestAgent({ houses: testStore(), llm: fakeLlm([]) })
+    const id = await pauseOn(agent, 'trace-q', 'tv[living_room].power = on')
+    const events = await collect(
+      agent,
+      input('trace-q', {
+        resume: [
+          {
+            interruptId: id,
+            status: 'resolved',
+            payload: { deviceId: 'tv_living_room' },
+          },
+        ],
+      }),
+    )
+    const [trace] = traces(events)
+    expect(trace?.content).toMatchObject({
+      kind: 'question',
+      type: 'device_selection',
+      answer: 'Living Room TV',
+      detail: 'tv_living_room',
+      status: 'answered',
+    })
+    const types = events.map(e => e.type)
+    expect(types.indexOf(EventType.ACTIVITY_SNAPSHOT)).toBeLessThan(
+      types.indexOf(EventType.TEXT_MESSAGE_START),
+    )
+  })
+
+  it('leaves a trace of a cancelled question', async () => {
+    const agent = new OpenNestAgent({ houses: testStore(), llm: fakeLlm([]) })
+    const id = await pauseOn(agent, 'trace-c', 'tv[living_room].power = on')
+    const events = await collect(
+      agent,
+      input('trace-c', { resume: [{ interruptId: id, status: 'cancelled' }] }),
+    )
+    expect(traces(events).map(t => t.content.status)).toEqual(['cancelled'])
+  })
+
+  it('leaves no trace for an invalid answer', async () => {
+    const agent = new OpenNestAgent({ houses: testStore(), llm: fakeLlm([]) })
+    const id = await pauseOn(agent, 'trace-i', 'door[entrance].unlock()')
+    const events = await collect(
+      agent,
+      input('trace-i', {
+        resume: [
+          { interruptId: id, status: 'resolved', payload: { value: 42 } },
+        ],
+      }),
+    )
+    expect(traces(events)).toEqual([])
+  })
+
+  it('never puts the PIN in the stream', async () => {
+    const agent = new OpenNestAgent({ houses: testStore(), llm: fakeLlm([]) })
+    const id = await pauseOn(agent, 'trace-pin', 'door[entrance].unlock()')
+    const events = await collect(
+      agent,
+      input('trace-pin', {
+        resume: [
+          { interruptId: id, status: 'resolved', payload: { value: '1234' } },
+        ],
+      }),
+    )
+    expect(traces(events).map(t => t.content.answer)).toEqual(['••••'])
+    expect(JSON.stringify(events)).not.toContain('1234')
+  })
+
+  it('leaves a trace of an answered and a dismissed suggestion', async () => {
+    const agent = new OpenNestAgent({ houses: testStore(), llm: null })
+    const answered = await answerAmbiance(agent, 'trace-s')
+    expect(traces(answered).map(t => t.content)).toEqual([
+      {
+        kind: 'suggestion',
+        type: 'choice',
+        question: 'Which ambiance for these lights?',
+        answer: 'Cinema (dim, warm white)',
+        detail: 'cinema',
+        status: 'answered',
+      },
+    ])
+
+    const first = await collect(
+      agent,
+      input('trace-d', {
+        forwardedProps: { dsl: 'light[bedroom].power = on' },
+      }),
+    )
+    const suggestion = replayState(first).suggestions[0]!
+    const dismissed = await collect(
+      agent,
+      input('trace-d', {
+        forwardedProps: { dismissSuggestion: { suggestionId: suggestion.id } },
+      }),
+    )
+    expect(traces(dismissed).map(t => t.content.status)).toEqual(['dismissed'])
   })
 
   it('retries after a parse error and stops after 5 attempts', async () => {

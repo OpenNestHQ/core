@@ -7,11 +7,19 @@ import type {
   Program,
   RunResult,
   SuggestionResponse,
-  SuggestionSummary,
   UserInteraction,
 } from '@opennest/sdk'
 import { DefaultExecutionTracer } from '@opennest/vm'
 import type { DemoState, ProgramOrigin } from '../shared/state'
+import { ANSWER_ACTIVITY } from '../shared/answer-trace'
+import type { AnswerTrace } from '../shared/answer-trace'
+import {
+  cancelledTrace,
+  dismissedTrace,
+  questionTrace,
+  suggestionAnswerLabel,
+  suggestionTrace,
+} from './answer-trace'
 import type { House, HouseStore, SuggestionReport } from './house'
 import { toInterrupt, toResumeAnswer } from './interrupt-mapping'
 import { toLlmMessages } from './llm'
@@ -155,7 +163,15 @@ export class OpenNestAgent extends AbstractAgent {
       const { suggestionId } = props[
         'dismissSuggestion'
       ] as DemoForwardedProps & { suggestionId: string }
-      house.client.dismissSuggestion(suggestionId)
+      const dismissed = house.client
+        .getSuggestions()
+        .find(s => s.id === suggestionId)
+      if (
+        house.client.dismissSuggestion(suggestionId) &&
+        dismissed !== undefined
+      ) {
+        this.emitTrace(ctx, dismissedTrace(dismissed))
+      }
       this.setPanel(ctx, {
         ...house.panel,
         suggestions: house.client.getSuggestions(),
@@ -176,15 +192,24 @@ export class OpenNestAgent extends AbstractAgent {
         pending: null,
         suggestions: [],
       })
-      const report = describeAnswer(
-        house.client.getSuggestions().find(s => s.id === suggestionId),
-        response,
-      )
+      const suggestion = house.client
+        .getSuggestions()
+        .find(s => s.id === suggestionId)
+      const report =
+        suggestion === undefined
+          ? undefined
+          : {
+              question: suggestion.question.message,
+              answer: suggestionAnswerLabel(suggestion, response),
+            }
       house.tracer = new DefaultExecutionTracer()
       house.historyStart = house.client.getSession().history.length
       const executed = await this.execute(ctx, () =>
         house.client.answerSuggestion(suggestionId, response),
       )
+      if (suggestion !== undefined && !rejected(executed)) {
+        this.emitTrace(ctx, suggestionTrace(suggestion, response))
+      }
       return this.afterDeterministic(ctx, executed, 'suggestion', report)
     }
     if (props != null && typeof props['dsl'] === 'string') {
@@ -233,6 +258,7 @@ export class OpenNestAgent extends AbstractAgent {
     if (entry.status === 'cancelled') {
       house.openInterrupt = null
       await this.execute(ctx, () => house.client.cancel())
+      this.emitTrace(ctx, cancelledTrace(interaction))
       this.setPanel(ctx, cancelProgram(house.panel!))
       this.flushDelta(ctx)
       if (open.origin !== 'chat' || open.toolCall === undefined) {
@@ -273,6 +299,7 @@ export class OpenNestAgent extends AbstractAgent {
           executed.result.errors[0].message,
         )
       }
+      this.emitTrace(ctx, questionTrace(interaction, mapped.answer))
     }
 
     if (open.origin !== 'chat' || open.toolCall === undefined) {
@@ -612,6 +639,17 @@ export class OpenNestAgent extends AbstractAgent {
     })
   }
 
+  /** Leaves an answered question/suggestion in the chat (never sent to the model). */
+  private emitTrace(ctx: RunContext, trace: AnswerTrace): void {
+    ctx.emit({
+      type: EventType.ACTIVITY_SNAPSHOT,
+      messageId: randomUUID(),
+      activityType: ANSWER_ACTIVITY,
+      content: trace,
+      replace: true,
+    })
+  }
+
   private say(ctx: RunContext, text: string): void {
     const messageId = randomUUID()
     ctx.emit({
@@ -687,24 +725,13 @@ export class OpenNestAgent extends AbstractAgent {
   }
 }
 
-/** The suggestion's question and the label of the picked answer. */
-function describeAnswer(
-  suggestion: SuggestionSummary | undefined,
-  response: SuggestionResponse,
-): SuggestionReport | undefined {
-  if (suggestion === undefined) return undefined
-  const { question } = suggestion
-  let answer: string
-  if (response.type === 'choice') {
-    answer =
-      question.type === 'choice'
-        ? (question.options.find(o => o.value === response.value)?.label ??
-          response.value)
-        : response.value
-  } else if (response.type === 'text_input') {
-    answer = response.text
-  } else {
-    answer = String(response.value)
-  }
-  return { question: question.message, answer }
+/** The answer never ran: the SDK refused it before the VM. */
+function rejected(executed: Executed): boolean {
+  if (executed.kind === 'paused') return false
+  const code = executed.result.errors[0]?.code
+  return (
+    code === 'suggestion_not_found' ||
+    code === 'invalid_response' ||
+    code === 'interaction_type_mismatch'
+  )
 }

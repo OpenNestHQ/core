@@ -14,8 +14,10 @@ import { LlmBanner } from './chat/llm-banner'
 import { ActionsPanel } from './panel/actions-panel'
 import { DevicesDialog } from './panel/devices-dialog'
 import { suggestionRenderer } from './suggestions/suggestion-card'
+import { answerTraceRenderer } from './chat/answer-trace'
 
 const customRenderers = [suggestionRenderer]
+const activityRenderers = [answerTraceRenderer]
 
 export function DemoApp({ llmConfigured }: { llmConfigured: boolean }) {
   const [devicesOpen, setDevicesOpen] = useState(false)
@@ -25,6 +27,7 @@ export function DemoApp({ llmConfigured }: { llmConfigured: boolean }) {
       // The dev inspector button covers the Basic | Advanced switch.
       enableInspector={false}
       renderCustomMessages={customRenderers}
+      renderActivityMessages={activityRenderers}
     >
       <ModeProvider>
         <ThreadProvider>

@@ -12,6 +12,9 @@ live**:
 - follow-up **suggestions** after a successful run are buttons under the
   agent's reply; the answer runs on the VM directly, then the agent says in a
   sentence what was done;
+- every answered question or suggestion leaves a **trace line** in the chat
+  (`✓ Which TV? → Living Room TV`), as an AG-UI activity message that never
+  goes back to the model; PINs are masked;
 - a **Basic | Advanced** switch: plain sentences for an audience, or the
   runtime details (HomeDSL, resolution, middleware, verification, trace).
 
